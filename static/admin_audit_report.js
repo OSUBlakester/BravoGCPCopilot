@@ -110,10 +110,129 @@ async function initializePage() {
         }
 
 
+    // Tap interface report wiring
+    const tapBoardReportBtn = document.getElementById('fetchTapBoardReportButton');
+    const tapBoardChartToggle = document.getElementById('toggleTapBoardChartTypeButton');
+    const tapButtonReportBtn = document.getElementById('fetchTapButtonReportButton');
+    const tapSpecialReportBtn = document.getElementById('fetchTapSpecialReportButton');
+
+    if (tapBoardReportBtn) tapBoardReportBtn.addEventListener('click', fetchAndRenderTapBoardActivity);
+    if (tapBoardChartToggle) tapBoardChartToggle.addEventListener('click', () => {
+        tapBoardChartType = tapBoardChartType === 'bar' ? 'pie' : 'bar';
+        tapBoardChartToggle.textContent = tapBoardChartType === 'bar' ? 'Show Pie Chart' : 'Show Bar Chart';
+        if (lastTapBoardData.length) renderTapBoardChart(lastTapBoardData, tapBoardChartType);
+    });
+    if (tapButtonReportBtn) tapButtonReportBtn.addEventListener('click', fetchAndRenderTapButtonActivity);
+    if (tapSpecialReportBtn) tapSpecialReportBtn.addEventListener('click', fetchAndRenderTapSpecialActivity);
+
     // Initial Data Load
     populatePageSelector(); // Populate dropdown on load
-
+    checkAuditConsent();   // Show banner and disable buttons if consent is missing
+    detectInterfaceModeAndConfigureReports();
 }
+}
+
+// --- Consent gate for audit reporting ---
+async function checkAuditConsent() {
+    const banner = document.getElementById('audit-consent-banner');
+    const emailInput = document.getElementById('audit-consent-email');
+    const sendBtn = document.getElementById('audit-send-consent-btn');
+    const checkBtn = document.getElementById('audit-check-consent-btn');
+    const statusEl = document.getElementById('audit-consent-status');
+
+    if (!banner) return;
+
+    let consentData = {};
+    try {
+        const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+        if (r.ok) consentData = await r.json();
+    } catch (_) {}
+
+    const isMinor = consentData.is_minor_under_13 !== false; // fail-closed: unset → minor
+    const consentVerified = !!consentData.consent_given_at;
+
+    if (isMinor && !consentVerified) {
+        // Show banner and disable report buttons
+        banner.classList.remove('hidden');
+        [
+            fetchReportButton, fetchGlobalActivityReportButton, fetchPageButtonReportButton,
+            document.getElementById('fetchTapBoardReportButton'),
+            document.getElementById('fetchTapButtonReportButton'),
+            document.getElementById('fetchTapSpecialReportButton'),
+        ].forEach(btn => {
+            if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+        });
+
+        // Pre-fill email if already known from a prior wizard run
+        if (consentData.parent_email && emailInput) emailInput.value = consentData.parent_email;
+
+        // Wire Send Email button
+        if (sendBtn) {
+            sendBtn.addEventListener('click', async () => {
+                const email = emailInput ? emailInput.value.trim() : '';
+                if (!email || !email.includes('@')) {
+                    if (statusEl) { statusEl.textContent = 'Please enter a valid email address.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    return;
+                }
+                sendBtn.disabled = true;
+                sendBtn.textContent = 'Sending…';
+                try {
+                    const r = await window.authenticatedFetch('/api/consent/initiate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ parent_email: email }),
+                    });
+                    if (r.ok) {
+                        sendBtn.textContent = 'Sent ✓';
+                        sendBtn.style.background = '#166534';
+                        if (statusEl) { statusEl.textContent = `Consent email sent to ${email}. Ask the parent to check their inbox, then click Check for Consent.`; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                    } else {
+                        const e = await r.json().catch(() => ({}));
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Retry';
+                        if (statusEl) { statusEl.textContent = e.detail || 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    }
+                } catch (_) {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Retry';
+                    if (statusEl) { statusEl.textContent = 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                }
+            });
+        }
+
+        // Wire Check for Consent button
+        if (checkBtn) {
+            checkBtn.addEventListener('click', async () => {
+                checkBtn.disabled = true;
+                checkBtn.textContent = 'Checking…';
+                try {
+                    const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+                    const d = r.ok ? await r.json() : {};
+                    if (d.consent_given_at) {
+                        // Consent confirmed — hide banner, re-enable buttons, refresh
+                        banner.classList.add('hidden');
+                        [
+                            fetchReportButton, fetchGlobalActivityReportButton, fetchPageButtonReportButton,
+                            document.getElementById('fetchTapBoardReportButton'),
+                            document.getElementById('fetchTapButtonReportButton'),
+                            document.getElementById('fetchTapSpecialReportButton'),
+                        ].forEach(btn => {
+                            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+                        });
+                        if (statusEl) { statusEl.textContent = 'Consent confirmed — activity reporting is now active.'; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                    } else {
+                        checkBtn.disabled = false;
+                        checkBtn.textContent = 'Check for Consent';
+                        if (statusEl) { statusEl.textContent = 'Consent not yet received — ask the parent to check their email and click the link.'; statusEl.className = 'text-xs text-amber-700'; statusEl.classList.remove('hidden'); }
+                    }
+                } catch (_) {
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = 'Check for Consent';
+                    if (statusEl) { statusEl.textContent = 'Check failed — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                }
+            });
+        }
+    }
 }
 
 
@@ -227,10 +346,11 @@ function renderReport(data, columnToSort = null, direction = 'asc') {
             cell.textContent = entry[key] || '';
         });
 
+        row.insertCell().textContent = entry.button_type || '';
         row.insertCell().textContent = entry.is_llm_generated ? 'Yes' : 'No';
         row.insertCell().textContent = entry.originating_button_text || '';
-        row.insertCell().textContent = entry.page_context_prompt || '';
-        
+        row.insertCell().textContent = entry.interface_source || '';
+
         Array.from(row.cells).forEach(cell => cell.classList.add('table-cell'));
     });
 
@@ -253,10 +373,9 @@ document.querySelectorAll('#rawDataTableContainer th').forEach((headerCell, inde
 });
 
 function getColumnKeyByIndex(index) {
-    // This needs to match your table structure
     const columnKeys = [
         'timestamp', 'page_name', 'button_text', 'button_summary',
-        'is_llm_generated', 'originating_button_text', 'page_context_prompt'
+        'button_type', 'is_llm_generated', 'originating_button_text', 'interface_source'
     ];
     return columnKeys[index] || null;
 }
@@ -646,4 +765,164 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminToolbarButtons(); // Add toolbar button functionality
 });
 
+// ── Tap Interface Report Functions ─────────────────────────────────────────
+
+let tapBoardChartType = 'bar';
+let lastTapBoardData = [];
+let tapBoardChartInstance = null;
+let tapButtonChartInstance = null;
+let _cachedRawTapData = null; // raw activity log cached after fetch-report runs
+
+async function detectInterfaceModeAndConfigureReports() {
+    try {
+        const r = await window.authenticatedFetch('/api/settings', { method: 'GET' });
+        if (!r.ok) return;
+        const settings = await r.json();
+        const isTap = !!settings.useTapInterface;
+        const tapSection = document.getElementById('tap-reports-section');
+        if (tapSection) tapSection.classList.toggle('hidden', !isTap);
+        const scanGlobal = document.getElementById('scan-global-activity-section');
+        if (scanGlobal) scanGlobal.classList.toggle('hidden', isTap);
+        const scanPageButton = document.getElementById('scan-page-button-section');
+        if (scanPageButton) scanPageButton.classList.toggle('hidden', isTap);
+        if (isTap) populateTapBoardSelector();
+    } catch (_) {}
+}
+
+async function populateTapBoardSelector() {
+    const sel = document.getElementById('tapBoardSelectorDropdown');
+    if (!sel) return;
+    try {
+        const r = await window.authenticatedFetch('/api/audit/reports/tap-board-names', { method: 'GET' });
+        if (!r.ok) return;
+        const names = await r.json();
+        sel.innerHTML = '<option value="">Select a board…</option>' +
+            names.map(n => `<option value="${n}">${n}</option>`).join('');
+    } catch (_) {
+        sel.innerHTML = '<option value="">Could not load boards</option>';
+    }
+}
+
+async function fetchAndRenderTapBoardActivity() {
+    const statusEl = document.getElementById('tapBoardReportStatus');
+    const list = document.getElementById('tapBoardActivityList');
+    if (statusEl) statusEl.textContent = 'Loading…';
+    if (list) list.innerHTML = '<li>Loading…</li>';
+    try {
+        const r = await window.authenticatedFetch('/api/audit/reports/tap-board-activity', { method: 'GET' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        lastTapBoardData = data;
+        const active = data.filter(d => d.clicks > 0);
+        renderTapBoardChart(active, tapBoardChartType);
+        if (list) {
+            list.innerHTML = active.length
+                ? active.map(d => `<li><strong>${d.page_name}</strong>: ${d.clicks} click${d.clicks !== 1 ? 's' : ''}</li>`).join('')
+                : '<li class="text-gray-500">No activity recorded yet.</li>';
+        }
+        if (statusEl) statusEl.textContent = `${active.length} board(s) with activity (${data.length} total).`;
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = `Error: ${e.message}`; statusEl.className = 'mb-4 text-sm text-red-600'; }
+    }
+}
+
+function renderTapBoardChart(data, type) {
+    const canvas = document.getElementById('tapBoardActivityChart');
+    if (!canvas) return;
+    if (tapBoardChartInstance) { tapBoardChartInstance.destroy(); tapBoardChartInstance = null; }
+    const labels = data.map(d => d.page_name);
+    const values = data.map(d => d.clicks);
+    const colors = labels.map((_, i) => `hsl(${(i * 47) % 360}, 65%, 55%)`);
+    tapBoardChartInstance = new Chart(canvas.getContext('2d'), {
+        type,
+        data: { labels, datasets: [{ label: 'Clicks', data: values, backgroundColor: colors, borderColor: colors.map(c => c.replace('55%', '40%')), borderWidth: 1 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: type === 'pie' } } },
+    });
+}
+
+async function fetchAndRenderTapButtonActivity() {
+    const sel = document.getElementById('tapBoardSelectorDropdown');
+    const statusEl = document.getElementById('tapButtonReportStatus');
+    const list = document.getElementById('tapButtonActivityList');
+    const boardName = sel ? sel.value : '';
+    if (!boardName) { if (statusEl) { statusEl.textContent = 'Please select a board first.'; statusEl.className = 'mb-4 text-sm text-amber-600'; } return; }
+    if (statusEl) { statusEl.textContent = 'Loading…'; statusEl.className = 'mb-4 text-sm'; }
+    if (list) list.innerHTML = '<li>Loading…</li>';
+    try {
+        const r = await window.authenticatedFetch(`/api/audit/reports/page-button-activity/${encodeURIComponent(boardName)}`, { method: 'GET' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        if (tapButtonChartInstance) { tapButtonChartInstance.destroy(); tapButtonChartInstance = null; }
+        const canvas = document.getElementById('tapButtonActivityChart');
+        if (canvas && data.length) {
+            const labels = data.map(d => d.button_text);
+            const values = data.map(d => d.clicks);
+            const colors = labels.map((_, i) => `hsl(${(i * 53 + 200) % 360}, 60%, 55%)`);
+            tapButtonChartInstance = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: { labels, datasets: [{ label: 'Clicks', data: values, backgroundColor: colors }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 45 } } } },
+            });
+        }
+        // Filter to tap-sourced entries only so scan clicks on same-named pages don't appear
+        const tapData = data.filter(d => !d.source_type || d.source_type !== 'Defined Static' || d.clicks > 0);
+        if (list) {
+            list.innerHTML = data.length
+                ? data.map(d => `<li><strong>${d.button_text}</strong>: ${d.clicks} — <span class="text-gray-500 text-xs">${d.source_type}</span></li>`).join('')
+                : '<li class="text-gray-500">No button activity on this board yet.</li>';
+        }
+        if (statusEl) { statusEl.textContent = `${data.length} button(s) on "${boardName}".`; statusEl.className = 'mb-4 text-sm text-green-600'; }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = `Error: ${e.message}`; statusEl.className = 'mb-4 text-sm text-red-600'; }
+    }
+}
+
+async function fetchAndRenderTapSpecialActivity() {
+    const statusEl = document.getElementById('tapSpecialReportStatus');
+    const dynamicList = document.getElementById('tapDynamicList');
+    const somethingElseList = document.getElementById('tapSomethingElseList');
+    if (statusEl) { statusEl.textContent = 'Fetching raw data…'; statusEl.className = 'mb-4 text-sm'; }
+
+    // Fetch 30-day window if we don't already have raw data from the date-range fetch
+    const end = new Date();
+    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    try {
+        const r = await window.authenticatedFetch(
+            `/api/audit/activity-report?start_date=${encodeURIComponent(start.toISOString())}&end_date=${encodeURIComponent(end.toISOString())}`,
+            { method: 'GET' }
+        );
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const entries = await r.json();
+
+        // Dynamic / phrase clicks grouped by board
+        const dynamicByBoard = {};
+        const somethingElseByBoard = {};
+        for (const e of entries) {
+            const board = e.page_name || 'unknown';
+            if (e.button_type === 'something_else') {
+                somethingElseByBoard[board] = (somethingElseByBoard[board] || 0) + 1;
+            } else if (e.is_llm_generated || e.button_type === 'dynamic' || e.button_type === 'phrase') {
+                dynamicByBoard[board] = (dynamicByBoard[board] || 0) + 1;
+            }
+        }
+
+        const toSortedList = (map) => Object.entries(map).sort((a, b) => b[1] - a[1]);
+
+        if (dynamicList) {
+            const rows = toSortedList(dynamicByBoard);
+            dynamicList.innerHTML = rows.length
+                ? rows.map(([b, c]) => `<li><strong>${b}</strong>: ${c}</li>`).join('')
+                : '<li class="text-gray-500">No dynamic/phrase clicks in last 30 days.</li>';
+        }
+        if (somethingElseList) {
+            const rows = toSortedList(somethingElseByBoard);
+            somethingElseList.innerHTML = rows.length
+                ? rows.map(([b, c]) => `<li><strong>${b}</strong>: ${c}</li>`).join('')
+                : '<li class="text-gray-500">No "Something Else" clicks in last 30 days.</li>';
+        }
+        if (statusEl) { statusEl.textContent = `Analyzed ${entries.length} entries from the last 30 days.`; statusEl.className = 'mb-4 text-sm text-green-600'; }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = `Error: ${e.message}`; statusEl.className = 'mb-4 text-sm text-red-600'; }
+    }
+}
 

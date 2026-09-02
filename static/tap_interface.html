@@ -1617,6 +1617,38 @@
         const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
         const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
 
+        // Activity logging helper — fire-and-forget, never blocks UX.
+        // Uses raw fetch with sessionStorage tokens so it cannot trigger the
+        // 403-logout handler that lives in some authenticatedFetch wrappers.
+        function _logTapClick(buttonText, buttonType, isLlmGenerated) {
+            try {
+                const token = sessionStorage.getItem('firebaseIdToken');
+                const userId = sessionStorage.getItem('currentAacUserId');
+                if (!token || !userId) return;
+                const boardName = currentCategory?.label || 'unknown';
+                const payload = {
+                    timestamp: new Date().toISOString(),
+                    page_name: boardName,
+                    button_text: String(buttonText || '').trim(),
+                    button_type: buttonType,
+                    is_llm_generated: !!isLlmGenerated,
+                    interface_source: 'tap',
+                };
+                const adminTarget = sessionStorage.getItem('adminTargetAccountId');
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'X-User-ID': userId,
+                };
+                if (adminTarget) headers['X-Admin-Target-Account'] = adminTarget;
+                fetch('/api/audit/log-button-click', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(payload),
+                }).catch(() => {}); // fire and forget
+            } catch (_) {}
+        }
+
         // Global state
         let tapConfig = null;
         let speechQueue = [];
@@ -15758,6 +15790,7 @@ ${getTapLanguageDirective()}
                                 updateStatusMessage(getReadyMessage());
                             }
                             
+                            _logTapClick(speechText, 'phrase', true);
                             addToSpeech(speechText);
                             if (!previewDecision.alreadyAnnounced) {
                                 await announce(speechText, "system", true);
@@ -17090,6 +17123,8 @@ ${getTapLanguageDirective()}
                         updateStatusMessage(getReadyMessage());
                     }
 
+                    _logTapClick(text, isDynamic ? 'dynamic' : 'static', isDynamic);
+
                     if (phraseToAdd) {
                         addToSpeech(phraseToAdd);
                     }
@@ -17481,6 +17516,7 @@ ${getTapLanguageDirective()}
                             btn.addEventListener('click', async () => {
                                 await runTapActionOnce(btn, async () => {
                                     console.log('🔄 Something Else clicked — cycling static + dynamic options');
+                                    _logTapClick('Something Else', 'something_else', false);
                                     btn.classList.add('loading');
                                     try {
                                         await cycleToNextPage();
@@ -19305,10 +19341,14 @@ ${getTapLanguageDirective()}
                     supportSuccess.classList.add('hidden');
                     supportError.classList.add('hidden');
                     try {
-                        const response = await fetch(contactForm.action, {
+                        const response = await fetch('/api/support/contact', {
                             method: 'POST',
-                            body: new FormData(contactForm),
-                            headers: { 'Accept': 'application/json' }
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: document.getElementById('support-name').value.trim(),
+                                email: document.getElementById('support-email').value.trim(),
+                                message: document.getElementById('support-message').value.trim(),
+                            })
                         });
                         if (response.ok) {
                             supportSuccess.classList.remove('hidden');
@@ -19431,7 +19471,7 @@ ${getTapLanguageDirective()}
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
-            <form id="contact-support-form" class="space-y-2" method="POST" action="https://formspree.io/f/myzpzero">
+            <form id="contact-support-form" class="space-y-2">
                 <input type="text" id="support-name" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <input type="email" id="support-email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <textarea id="support-message" name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>

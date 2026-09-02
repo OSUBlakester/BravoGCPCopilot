@@ -519,6 +519,12 @@ async function speakDisplayFromFreestyle() {
             await announce(textToSpeak, 'system', false, true);
         }
         recordToSpeechHistory(textToSpeak);
+        console.log('🎯 Freestyle Speak Display — recording for learning:', textToSpeak);
+        authenticatedFetch('/record_chat_history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: '', response: textToSpeak }),
+        }).then(r => r.json()).then(d => console.log('🎯 record_chat_history response:', d)).catch(e => console.error('Failed to record for learning:', e));
     } catch (error) {
         console.error('Failed to speak freestyle display:', error);
         if (typeof announcePartnerFacingOutput === 'function') {

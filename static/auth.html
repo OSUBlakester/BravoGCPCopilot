@@ -112,6 +112,7 @@
 
         .dropdown-controls {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 10px;
             margin: 10px 0;
@@ -161,6 +162,15 @@
 
         .copy-btn:hover:not(:disabled) {
             background-color: #218838;
+        }
+
+        .download-btn {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .download-btn:hover:not(:disabled) {
+            background-color: #545b62;
         }
 
         .control-btn:disabled {
@@ -671,7 +681,7 @@
 </head>
 <body>
     <div class="auth-container">
-        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6" id="auth-title">Login</h2>
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6" id="auth-title">Bravo Login</h2>
 
         <div id="login-section" class="auth-section active">
             <form id="login-form" class="space-y-4">
@@ -747,7 +757,7 @@
                 </div>
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access" checked>
+                        <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access">
                         <label for="register-allow-admin-access">Allow Bravo Admin access to this account (for support purposes, data is kept confidential and NEVER shared)</label>
                     </div>
                 </div>
@@ -772,7 +782,21 @@
                     <label for="newUserDisplayName" class="sr-only">New User Display Name</label>
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
                 </div>
-                <button id="add-user-button" class="w-full mt-2 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
+                <div class="mt-3">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Is this user under 13 years old?</p>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="newUserAgeGroup" value="minor" class="accent-indigo-500">
+                            <span class="text-sm text-gray-700">Yes, under 13</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="newUserAgeGroup" value="adult" class="accent-indigo-500">
+                            <span class="text-sm text-gray-700">No, 13 or older</span>
+                        </label>
+                    </div>
+                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select whether the user is under 13.</p>
+                </div>
+                <button id="add-user-button" class="w-full mt-3 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
                 <p id="add-user-status" class="text-sm text-center mt-2 h-4"></p>
             </div>
 
@@ -2176,9 +2200,10 @@
             html += `
                         </select>
                         <button id="editUserBtn" class="control-btn edit-btn">Edit</button>
-                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                         <button id="copyUserBtn" class="control-btn copy-btn">Copy</button>
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
+                        <button id="downloadMyDataBtn" class="control-btn download-btn" title="Download a full copy of this user's data">Download Data</button>
+                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                     </div>
                     <div style="display:flex;gap:8px;margin-top:15px;">
                         <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected User</button>
@@ -2195,6 +2220,7 @@
             const dropdown = document.getElementById('userDropdown');
             const editBtn = document.getElementById('editUserBtn');
             const deleteBtn = document.getElementById('deleteUserBtn');
+            const downloadDataBtn = document.getElementById('downloadMyDataBtn');
             const copyBtn = document.getElementById('copyUserBtn');
             const setDefaultBtn = document.getElementById('setDefaultBtn');
             const selectBtn = document.getElementById('selectUserBtn');
@@ -2203,9 +2229,10 @@
             dropdown.addEventListener('change', function() {
                 const selected = this.value;
                 const hasSelection = selected !== '';
-                
+
                 editBtn.disabled = !hasSelection;
                 deleteBtn.disabled = !hasSelection;
+                if (downloadDataBtn) downloadDataBtn.disabled = !hasSelection;
                 copyBtn.disabled = !hasSelection;
                 setDefaultBtn.disabled = !hasSelection;
                 selectBtn.disabled = !hasSelection;
@@ -2213,6 +2240,7 @@
 
             editBtn.addEventListener('click', handleEditUser);
             deleteBtn.addEventListener('click', handleDeleteUser);
+            if (downloadDataBtn) downloadDataBtn.addEventListener('click', handleDownloadMyData);
             copyBtn.addEventListener('click', handleCopyUser);
             setDefaultBtn.addEventListener('click', handleSetDefaultUser);
             selectBtn.addEventListener('click', handleUserSelection);
@@ -2396,6 +2424,35 @@
             }
         }
 
+        async function handleDownloadMyData() {
+            const dropdown = document.getElementById('userDropdown');
+            const selectedOption = dropdown.options[dropdown.selectedIndex];
+            if (!selectedOption || !selectedOption.value) return;
+
+            const userId = selectedOption.value;
+            const displayName = selectedOption.dataset.displayName;
+
+            try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = { 'Authorization': `Bearer ${window.currentIdToken}`, 'X-User-ID': userId };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+
+                const res = await fetch('/api/my-data/export', { headers });
+                if (!res.ok) throw new Error(await res.text());
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                a.download = `bravo_my_data_${(displayName || userId).replace(/\s+/g, '_')}_${today}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Download failed: ' + e.message);
+            }
+        }
+
         async function handleDeleteUser() {
             const dropdown = document.getElementById('userDropdown');
             const selectedOption = dropdown.options[dropdown.selectedIndex];
@@ -2572,6 +2629,15 @@
                     return;
                 }
 
+                const ageRadio = document.querySelector('input[name="newUserAgeGroup"]:checked');
+                const ageError = document.getElementById('newUserAgeError');
+                if (!ageRadio) {
+                    if (ageError) ageError.classList.remove('hidden');
+                    return;
+                }
+                if (ageError) ageError.classList.add('hidden');
+                const isMinorUnder13 = ageRadio.value === 'minor';
+
                 addUserStatus.textContent = 'Adding user...';
                 addUserStatus.className = 'text-sm text-center mt-2 h-4 text-blue-500';
                 addUserButton.disabled = true;
@@ -2580,17 +2646,17 @@
                 try {
                     // Check if admin has selected a target account
                     const adminSelectedAccountId = sessionStorage.getItem('adminSelectedAccountId');
-                    
+
                     const headers = {
                         'Authorization': `Bearer ${idToken}`,
                         'Content-Type': 'application/json'
                     };
-                    
+
                     // Add admin target account header if applicable
                     if (adminSelectedAccountId) {
                         headers['X-Admin-Target-Account'] = adminSelectedAccountId;
                     }
-                    
+
                     const response = await fetch('/api/account/add-aac-user', {
                         method: 'POST',
                         headers: headers,
@@ -2603,8 +2669,19 @@
                     }
 
                     const newProfile = await response.json();
-                    
+
+                    // Persist is_minor_under_13 immediately so the COPPA gate
+                    // uses the correct value from the first request onward.
+                    try {
+                        await fetch('/api/consent/control', {
+                            method: 'POST',
+                            headers: { ...headers, 'X-User-ID': newProfile.aac_user_id },
+                            body: JSON.stringify({ is_minor_under_13: isMinorUnder13 })
+                        });
+                    } catch (_) { /* non-fatal: age flag will be captured in the setup wizard */ }
+
                     newUserNameInput.value = '';
+                    document.querySelectorAll('input[name="newUserAgeGroup"]').forEach(r => r.checked = false);
                     addUserStatus.textContent = `User "${newName}" added successfully!`;
                     addUserStatus.className = 'text-sm text-center mt-2 h-4 text-green-600';
 
@@ -2702,13 +2779,16 @@
 
             editAccountButton.addEventListener('click', async () => {
                 try {
-                    // Fetch current account data
+                    // Fetch current account data (admin fetches target account's data)
+                    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                    const detailsHeaders = {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    };
+                    if (adminTargetAccountId) detailsHeaders['X-Admin-Target-Account'] = adminTargetAccountId;
                     const response = await fetch('/api/account/details', {
                         method: 'GET',
-                        headers: {
-                            'Authorization': `Bearer ${idToken}`,
-                            'Content-Type': 'application/json'
-                        }
+                        headers: detailsHeaders
                     });
 
                     if (response.ok) {
@@ -2852,7 +2932,7 @@
             form['edit-phone'].value = accountData.phone || '';
             form['edit-therapist-email'].value = accountData.therapist_email || '';
             form['edit-is-therapist'].checked = accountData.is_therapist || false;
-            form['edit-allow-admin-access'].checked = accountData.allow_admin_access !== false; // Default to true
+            form['edit-allow-admin-access'].checked = accountData.allow_admin_access === true; // Default to false
             
             // Reset password change fields
             changePasswordCheckbox.checked = false;
@@ -3496,7 +3576,12 @@ registerForm.addEventListener('submit', async (e) => {
             // menuItemVisibility: { sourceButtonId: true/false } — true = visible
             menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
             menuItemsLoaded: [],        // ordered list {id, label} for the step UI
-            runInterviewAfter: false
+            runInterviewAfter: false,
+            isMinorUnder13: null,   // null = not yet answered; true/false after age step
+            consentEnabled: false,
+            parentEmail: '',
+            autoApproveLearned: false,
+            _consentEmailSent: false
         };
 
         // Menu items the admin can show/hide (system items like Spell/Games are always visible)
@@ -3517,9 +3602,20 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // tap: 8 steps (Button Action step removed; do_nothing is hardcoded)
-            // scan: 9 steps
-            return wizardState.interfaceMode === 'tap' ? 8 : 9;
+            // Returns the actual last internal step number — used for navigation.
+            // tap: 10 steps (age, learning, interview at end; Button Action hardcoded/skipped)
+            // scan: 11 steps
+            // NOTE: do NOT subtract 1 when the age step is skipped. The internal step numbers
+            // stay fixed; only the display label shifts. Subtracting here causes the consent
+            // step to satisfy currentStep >= total and fires executeWizard() prematurely.
+            return wizardState.interfaceMode === 'tap' ? 10 : 11;
+        }
+
+        function wizardDisplayTotal() {
+            // The number shown to the user in "Step X of Y".
+            // One fewer than the internal total when the age step is skipped.
+            const base = wizardTotalSteps();
+            return wizardState.isMinorUnder13 !== null ? base - 1 : base;
         }
 
         // For tap mode, display step 5+ maps to content step 6+ (skipping Button Action).
@@ -3539,6 +3635,7 @@ registerForm.addEventListener('submit', async (e) => {
             wizardState.userId = dropdown.value;
             wizardState.displayName = selectedOption.dataset.displayName || selectedOption.text || '';
             wizardState.currentStep = 1;
+            wizardState._consentEmailSent = false;
 
             const modal = document.getElementById('setupWizardModal');
             modal.classList.add('active');
@@ -3550,10 +3647,11 @@ registerForm.addEventListener('submit', async (e) => {
                 const headers = { 'Authorization': `Bearer ${window.currentIdToken}`, 'X-User-ID': wizardState.userId };
                 if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
 
-                const [settingsRes, voicesRes, tapConfigRes] = await Promise.all([
+                const [settingsRes, voicesRes, tapConfigRes, consentRes] = await Promise.all([
                     fetch('/api/settings', { headers }),
                     fetch('/api/tts-voices'),
-                    fetch('/api/tap-interface/config', { headers })
+                    fetch('/api/tap-interface/config', { headers }),
+                    fetch('/api/consent', { headers })
                 ]);
 
                 if (settingsRes.ok) {
@@ -3619,6 +3717,19 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 }
 
+                // Load consent state — if is_minor_under_13 is already set the age step
+                // is skipped in the wizard; the value was captured at Add New Profile time.
+                if (consentRes && consentRes.ok) {
+                    try {
+                        const cd = await consentRes.json();
+                        if (cd.is_minor_under_13 !== null && cd.is_minor_under_13 !== undefined) {
+                            wizardState.isMinorUnder13 = cd.is_minor_under_13;
+                        }
+                        wizardState.consentEnabled = cd.learn_from_history || false;
+                        wizardState.autoApproveLearned = cd.auto_approve_learned || false;
+                    } catch (_) {}
+                }
+
                 setWizardStatus('', false);
                 showWizardStep(1);
 
@@ -3659,9 +3770,14 @@ registerForm.addEventListener('submit', async (e) => {
         function showWizardStep(step) {
             wizardState.currentStep = step;
             const total = wizardTotalSteps();
+            const displayTotal = wizardDisplayTotal();
 
-            document.getElementById('wizardStepIndicator').textContent = `Step ${step} of ${total}`;
-            document.getElementById('wizardProgressBar').style.width = `${(step / total) * 100}%`;
+            // When the age step is skipped, display sequential numbers to the user (no gap).
+            const _ageStepNum = wizardState.interfaceMode === 'tap' ? 8 : 9;
+            const displayStep = (wizardState.isMinorUnder13 !== null && step > _ageStepNum)
+                ? step - 1 : step;
+            document.getElementById('wizardStepIndicator').textContent = `Step ${displayStep} of ${displayTotal}`;
+            document.getElementById('wizardProgressBar').style.width = `${(displayStep / displayTotal) * 100}%`;
 
             const backBtn = document.getElementById('wizardBackBtn');
             const nextBtn = document.getElementById('wizardNextBtn');
@@ -3680,50 +3796,539 @@ registerForm.addEventListener('submit', async (e) => {
             const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
                     : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
                     : step;
-            // Last step: scan display 9, tap display 8
-            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
+            // tap: age=8, learning=9, interview=10
+            // scan: age=9, learning=10, interview=11
+            const isTap = wizardState.interfaceMode === 'tap';
+            const isScan = wizardState.interfaceMode === 'scan';
+            const isAgeStep = (isTap && step === 8) || (isScan && step === 9);
+            const isConsentStep = (isTap && step === 9) || (isScan && step === 10);
+            const isLastStep = (isTap && step === 10) || (isScan && step === 11);
 
-            if (isLastStep) {
-                // Last step for both tap and scan — optional User Profile Interview
-                titleEl.textContent = 'User Profile Interview';
+            if (isAgeStep) {
+                titleEl.textContent = 'Age & Parental Consent';
+                const isMinor = wizardState.isMinorUnder13;
+                const emailVal = wizardState.parentEmail || '';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
-                        The User Profile Interview asks a caregiver or family member 15 short questions
-                        about the user's personality, interests, and communication style. The answers
-                        help the AI generate more personal and relevant communication options.
+                        Is the user under 13 years old? This determines whether parental consent is required
+                        before enabling personalised learning.
                     </p>
-                    <p style="color:#6b7280;margin-bottom:16px;font-size:0.85rem;">
-                        The interview takes about 5–10 minutes and can be run at any time from the
-                        User Information page. You can skip it now and run it later.
-                    </p>
-                    <div style="display:flex;flex-direction:column;gap:10px;">
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid ${wizardState.runInterviewAfter ? '#6366f1' : '#c7d2fe'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === true ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === true ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="minor" ${isMinor === true ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
                             <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">After saving the profile, go directly to the interview</div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Yes, under 13</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">A parent or guardian email is required before enabling personalised learning</div>
                             </div>
                         </label>
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardInterviewChoice" value="skip" ${!wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === false ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === false ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="adult" ${isMinor === false ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
                             <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go to the app — the interview can be run later from User Information</div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">No, 13 or older</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">No parental consent required</div>
                             </div>
                         </label>
+                    </div>
+                    <div id="wizardAgeEmailRow" style="display:${isMinor === true ? 'block' : 'none'};margin-top:4px;">
+                        <label style="display:block;font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:6px;">Parent / guardian email address</label>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <input id="wizardParentEmail" type="email" value="${emailVal}"
+                                placeholder="parent@example.com"
+                                style="flex:1;min-width:180px;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;outline:none;">
+                            <button type="button" id="wizardSendConsentEmailBtn"
+                                    style="background:#9a3412;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:0.875rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                Send Email
+                            </button>
+                        </div>
+                        <div id="wizardSendConsentStatus" style="display:none;font-size:0.78rem;margin-top:6px;"></div>
                     </div>`;
-                contentEl.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                contentEl.querySelectorAll('input[name="wizardAgeGroup"]').forEach(radio => {
                     radio.addEventListener('change', () => {
-                        wizardState.runInterviewAfter = radio.value === 'run';
-                        contentEl.querySelectorAll('label').forEach(lbl => {
-                            const input = lbl.querySelector('input[type=radio]');
-                            lbl.style.borderColor = input && input.checked ? '#6366f1' : '#e5e7eb';
-                            if (input && input.value === 'run') {
-                                lbl.style.background = input.checked ? '#eef2ff' : '#f9fafb';
-                            }
+                        wizardState.isMinorUnder13 = radio.value === 'minor';
+                        const emailRow = document.getElementById('wizardAgeEmailRow');
+                        if (emailRow) emailRow.style.display = wizardState.isMinorUnder13 ? 'block' : 'none';
+                        contentEl.querySelectorAll('[name="wizardAgeGroup"]').forEach(r => {
+                            const lbl = r.closest('label');
+                            if (!lbl) return;
+                            lbl.style.borderColor = r.checked ? '#6366f1' : '#e5e7eb';
+                            lbl.style.background = r.checked ? '#eef2ff' : '#f9fafb';
                         });
                     });
                 });
+                // Wire the Send Consent Email button (under-13 age step)
+                const _ageEmailBtn = document.getElementById('wizardSendConsentEmailBtn');
+                if (_ageEmailBtn) {
+                    _ageEmailBtn.addEventListener('click', async () => {
+                        const _emailInput = document.getElementById('wizardParentEmail');
+                        const _emailVal = (_emailInput ? _emailInput.value.trim() : wizardState.parentEmail) || '';
+                        const _statusEl = document.getElementById('wizardSendConsentStatus');
+                        if (!_emailVal || !_emailVal.includes('@')) {
+                            if (_statusEl) {
+                                _statusEl.textContent = 'Please enter a valid email address first.';
+                                _statusEl.style.color = '#dc2626';
+                                _statusEl.style.display = 'block';
+                            }
+                            return;
+                        }
+                        wizardState.parentEmail = _emailVal;
+                        _ageEmailBtn.disabled = true;
+                        _ageEmailBtn.textContent = 'Sending…';
+                        if (_statusEl) { _statusEl.style.display = 'none'; }
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _h,
+                                body: JSON.stringify({ parent_email: _emailVal })
+                            });
+                            if (_r.ok) {
+                                wizardState._consentEmailSent = true;
+                                _ageEmailBtn.textContent = 'Sent ✓';
+                                _ageEmailBtn.style.background = '#166534';
+                                if (_statusEl) {
+                                    _statusEl.textContent = `Consent email sent to ${_emailVal}. Ask the parent to check their inbox.`;
+                                    _statusEl.style.color = '#15803d';
+                                    _statusEl.style.display = 'block';
+                                }
+                            } else {
+                                const _e = await _r.json().catch(() => ({}));
+                                _ageEmailBtn.disabled = false;
+                                _ageEmailBtn.textContent = 'Retry';
+                                if (_statusEl) {
+                                    _statusEl.textContent = _e.detail || 'Email could not be sent — please try again.';
+                                    _statusEl.style.color = '#dc2626';
+                                    _statusEl.style.display = 'block';
+                                }
+                            }
+                        } catch (_) {
+                            _ageEmailBtn.disabled = false;
+                            _ageEmailBtn.textContent = 'Retry';
+                            if (_statusEl) {
+                                _statusEl.textContent = 'Email could not be sent — please try again.';
+                                _statusEl.style.color = '#dc2626';
+                                _statusEl.style.display = 'block';
+                            }
+                        }
+                    });
+                }
+
+            } else if (isConsentStep) {
+                titleEl.textContent = 'Personalized Learning';
+                if (wizardState.isMinorUnder13 === true) {
+                    // Under-13: toggle is irrelevant — learning is enabled automatically on consent.
+                    // Just collect the auto-approve preference for when that happens.
+                    wizardState.consentEnabled = false; // handled by COPPA consent flow, not the toggle
+                    const _pEmail = wizardState.parentEmail
+                        ? `<strong>${wizardState.parentEmail.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>`
+                        : 'the parent or guardian';
+                    // Age badge — shown when we jumped here from a prior Add New Profile (age step skipped)
+                    const _ageBadge = wizardState.isMinorUnder13 !== null
+                        ? `<div style="display:inline-flex;align-items:center;gap:6px;background:#fef3c7;border:1px solid #fcd34d;border-radius:20px;padding:4px 12px;font-size:0.78rem;color:#92400e;font-weight:600;margin-bottom:12px;">
+                               <span>Under 13</span>
+                               <span style="font-weight:400;color:#b45309;">· If incorrect, update in User Info Admin</span>
+                           </div>`
+                        : '';
+                    contentEl.innerHTML = `
+                        ${_ageBadge}
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:14px;" id="wizardConsentStepPendingBox">
+                            <div style="font-weight:600;color:#9a3412;margin-bottom:6px;">Waiting for parental consent</div>
+                            <p style="color:#7c3d12;font-size:0.875rem;line-height:1.5;margin:0 0 10px 0">
+                                ${wizardState._consentEmailSent
+                                    ? `A consent email was sent to ${_pEmail}. Once the parent clicks the link, tap <strong>Check for Consent</strong> below.`
+                                    : `Enter the parent or guardian email below and send the consent link. Then tap <strong>Check for Consent</strong> once they approve.`
+                                }
+                            </p>
+                            ${!wizardState._consentEmailSent ? `
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                                <input id="wizardConsentStepEmail" type="email"
+                                    value="${wizardState.parentEmail || ''}"
+                                    placeholder="parent@example.com"
+                                    style="flex:1;min-width:180px;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;outline:none;">
+                                <button type="button" id="wizardConsentStepSendBtn"
+                                        style="background:#9a3412;color:#fff;border:none;padding:9px 16px;border-radius:8px;font-size:0.85rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                    Send Email
+                                </button>
+                            </div>
+                            <div id="wizardConsentStepSendStatus" style="display:none;font-size:0.78rem;margin-bottom:10px;"></div>
+                            ` : ''}
+                            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                <button type="button" id="wizardConsentStepCheckBtn"
+                                        style="background:#92400e;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:0.85rem;cursor:pointer;font-weight:600;">
+                                    Check for Consent
+                                </button>
+                                <span id="wizardConsentStepCheckStatus" style="font-size:0.8rem;color:#374151;display:none;"></span>
+                            </div>
+                        </div>
+                        <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:14px;display:none;" id="wizardConsentStepGrantedBox">
+                            <div style="font-weight:600;color:#166534;margin-bottom:4px;">✓ Consent confirmed</div>
+                            <p style="color:#15803d;font-size:0.875rem;margin:0">
+                                Parental consent has been verified. Configure learning options below.
+                            </p>
+                        </div>
+                        <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                            Bravo can learn everyday preferences from conversations — things like favourite foods,
+                            activities, and topics — and use them to suggest more relevant options.
+                        </p>
+                        <div id="wizardConsentStepAutoApproveRow" style="display:none;">
+                            <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">
+                                How should learned facts be added to the profile?
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:8px;">
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Auto-approve</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Learned facts are added to the profile automatically</div>
+                                    </div>
+                                </label>
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${!wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${!wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="manual" ${!wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Require approval</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>`;
+                } else {
+                    // 13 or older — show the enable toggle + auto-approve options
+                    const learningOn = wizardState.consentEnabled;
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:20px;font-size:0.9rem;">
+                            Bravo can learn everyday preferences from conversations — things like favourite foods,
+                            activities, and topics — and use them to suggest more relevant options.
+                            No health, personal, or sensitive information is ever stored or learned.
+                        </p>
+                        <div style="display:flex;align-items:center;justify-content:space-between;background:${learningOn ? '#eef2ff' : '#f9fafb'};border:2px solid ${learningOn ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:background 0.15s,border-color 0.15s;" id="wizardLearningToggleCard">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalized learning</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Bravo will learn preferences from conversations and suggest more relevant options.</div>
+                            </div>
+                            <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;margin-left:16px;">
+                                <input type="checkbox" id="wizardLearningToggle" ${learningOn ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0;">
+                                <div id="wizardLearningTrack" style="width:44px;height:24px;background:${learningOn ? '#6366f1' : '#d1d5db'};border-radius:12px;transition:background 0.2s;position:relative;">
+                                    <div id="wizardLearningThumb" style="position:absolute;top:2px;left:${learningOn ? '22px' : '2px'};width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></div>
+                                </div>
+                            </label>
+                        </div>
+                        <div id="wizardAutoApproveRow" style="display:${learningOn ? 'block' : 'none'};margin-top:16px;border-top:1px solid #e5e7eb;padding-top:14px;">
+                            <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">When facts are learned, how should they be added to the profile?</div>
+                            <div style="display:flex;flex-direction:column;gap:8px;">
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Auto-approve</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Learned facts are added to the profile automatically</div>
+                                    </div>
+                                </label>
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${!wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${!wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="manual" ${!wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Require approval</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>`;
+                    const toggle = document.getElementById('wizardLearningToggle');
+                    if (toggle) {
+                        toggle.addEventListener('change', () => {
+                            wizardState.consentEnabled = toggle.checked;
+                            const card = document.getElementById('wizardLearningToggleCard');
+                            const track = document.getElementById('wizardLearningTrack');
+                            const thumb = document.getElementById('wizardLearningThumb');
+                            const approveRow = document.getElementById('wizardAutoApproveRow');
+                            if (card) { card.style.background = toggle.checked ? '#eef2ff' : '#f9fafb'; card.style.borderColor = toggle.checked ? '#6366f1' : '#e5e7eb'; }
+                            if (track) track.style.background = toggle.checked ? '#6366f1' : '#d1d5db';
+                            if (thumb) thumb.style.left = toggle.checked ? '22px' : '2px';
+                            if (approveRow) approveRow.style.display = toggle.checked ? 'block' : 'none';
+                        });
+                    }
+                }
+                contentEl.querySelectorAll('input[name="wizardAutoApprove"]').forEach(radio => {
+                    radio.addEventListener('change', () => {
+                        wizardState.autoApproveLearned = radio.value === 'auto';
+                        contentEl.querySelectorAll('[name="wizardAutoApprove"]').forEach(r => {
+                            const lbl = r.closest('label');
+                            if (!lbl) return;
+                            lbl.style.borderColor = r.checked ? '#6366f1' : '#e5e7eb';
+                            lbl.style.background = r.checked ? '#eef2ff' : '#f9fafb';
+                        });
+                    });
+                });
+
+                // Wire Send Email button on consent step (shown when age step was skipped)
+                const _csSendBtn = document.getElementById('wizardConsentStepSendBtn');
+                if (_csSendBtn) {
+                    _csSendBtn.addEventListener('click', async () => {
+                        const _csEmailInput = document.getElementById('wizardConsentStepEmail');
+                        const _emailVal = (_csEmailInput ? _csEmailInput.value.trim() : '') || wizardState.parentEmail || '';
+                        const _csSendStatus = document.getElementById('wizardConsentStepSendStatus');
+                        if (!_emailVal || !_emailVal.includes('@')) {
+                            if (_csSendStatus) {
+                                _csSendStatus.textContent = 'Please enter a valid email address.';
+                                _csSendStatus.style.color = '#dc2626';
+                                _csSendStatus.style.display = 'block';
+                            }
+                            return;
+                        }
+                        wizardState.parentEmail = _emailVal;
+                        _csSendBtn.disabled = true;
+                        _csSendBtn.textContent = 'Sending…';
+                        const _adminAcc2 = sessionStorage.getItem('adminTargetAccountId') ||
+                                           sessionStorage.getItem('adminSelectedAccountId');
+                        const _hcs = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc2) _hcs['X-Admin-Target-Account'] = _adminAcc2;
+                        try {
+                            const _rcs = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _hcs,
+                                body: JSON.stringify({ parent_email: _emailVal })
+                            });
+                            if (_rcs.ok) {
+                                wizardState._consentEmailSent = true;
+                                _csSendBtn.textContent = 'Sent ✓';
+                                _csSendBtn.style.background = '#166534';
+                                if (_csSendStatus) {
+                                    _csSendStatus.textContent = `Consent email sent to ${_emailVal}. Ask the parent to check their inbox.`;
+                                    _csSendStatus.style.color = '#15803d';
+                                    _csSendStatus.style.display = 'block';
+                                }
+                            } else {
+                                const _ecs = await _rcs.json().catch(() => ({}));
+                                _csSendBtn.disabled = false;
+                                _csSendBtn.textContent = 'Retry';
+                                if (_csSendStatus) {
+                                    _csSendStatus.textContent = _ecs.detail || 'Email could not be sent — please try again.';
+                                    _csSendStatus.style.color = '#dc2626';
+                                    _csSendStatus.style.display = 'block';
+                                }
+                            }
+                        } catch (_) {
+                            _csSendBtn.disabled = false;
+                            _csSendBtn.textContent = 'Retry';
+                            if (_csSendStatus) {
+                                _csSendStatus.textContent = 'Email could not be sent — please try again.';
+                                _csSendStatus.style.color = '#dc2626';
+                                _csSendStatus.style.display = 'block';
+                            }
+                        }
+                    });
+                }
+
+                // Wire Check for Consent button (under-13, consent step only)
+                const _csCheckBtn = document.getElementById('wizardConsentStepCheckBtn');
+                if (_csCheckBtn) {
+                    _csCheckBtn.addEventListener('click', async () => {
+                        const _csStatus = document.getElementById('wizardConsentStepCheckStatus');
+                        _csCheckBtn.disabled = true;
+                        _csCheckBtn.textContent = 'Checking…';
+                        if (_csStatus) { _csStatus.style.display = 'none'; }
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h2 = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId
+                        };
+                        if (_adminAcc) _h2['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r2 = await fetch('/api/consent', { headers: _h2 });
+                            const _d = _r2.ok ? await _r2.json() : {};
+                            if (_d.consent_given_at) {
+                                // Consent confirmed — swap panels and reveal auto-approve options
+                                wizardState.isMinorUnder13 = false; // allow learning to be enabled
+                                const _pendingBox = document.getElementById('wizardConsentStepPendingBox');
+                                const _grantedBox = document.getElementById('wizardConsentStepGrantedBox');
+                                const _approveRow = document.getElementById('wizardConsentStepAutoApproveRow');
+                                if (_pendingBox) _pendingBox.style.display = 'none';
+                                if (_grantedBox) _grantedBox.style.display = 'block';
+                                if (_approveRow) _approveRow.style.display = 'block';
+                            } else {
+                                _csCheckBtn.disabled = false;
+                                _csCheckBtn.textContent = 'Check for Consent';
+                                if (_csStatus) {
+                                    _csStatus.textContent = 'Consent not yet received — ask the parent to check their email.';
+                                    _csStatus.style.display = 'inline';
+                                }
+                            }
+                        } catch (_) {
+                            _csCheckBtn.disabled = false;
+                            _csCheckBtn.textContent = 'Check for Consent';
+                            if (_csStatus) {
+                                _csStatus.textContent = 'Check failed — please try again.';
+                                _csStatus.style.display = 'inline';
+                            }
+                        }
+                    });
+                }
+
+            } else if (isLastStep) {
+                // Last step for both tap and scan — optional User Profile Interview
+                titleEl.textContent = 'User Profile Interview';
+                if (wizardState.isMinorUnder13 === true) {
+                    // Under-13: interview is blocked until parental consent is verified
+                    wizardState.runInterviewAfter = false;
+                    const emailDisplay = wizardState.parentEmail
+                        ? `<strong>${wizardState.parentEmail}</strong>`
+                        : 'the parent or guardian';
+                    contentEl.innerHTML = `
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:16px;margin-bottom:14px;" id="wizardConsentPendingBox">
+                            <div style="font-weight:600;color:#9a3412;margin-bottom:8px;">Waiting for parental consent</div>
+                            <p style="color:#7c3d12;font-size:0.9rem;line-height:1.5;margin:0 0 12px 0">
+                                A consent email has been sent to ${emailDisplay}.
+                                Ask the parent to click the link in that email, then tap the button below.
+                            </p>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                                <button id="wizardCheckConsentBtn" style="padding:8px 16px;background:#9a3412;color:#fff;border:none;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                    Check for Consent
+                                </button>
+                                <button id="wizardResendConsentBtn" style="padding:8px 16px;background:transparent;color:#9a3412;border:1.5px solid #9a3412;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                    Resend Email
+                                </button>
+                            </div>
+                            <span id="wizardConsentCheckStatus" style="display:block;margin-top:6px;font-size:0.8rem;color:#9a3412;"></span>
+                        </div>
+                        <div id="wizardConsentGrantedBox" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:16px;margin-bottom:14px;">
+                            <div style="font-weight:600;color:#166534;margin-bottom:6px;">Consent confirmed!</div>
+                            <p style="color:#166534;font-size:0.9rem;margin:0">You can now run the setup interview.</p>
+                        </div>
+                        <div id="wizardPostConsentInterviewChoice" style="display:none;flex-direction:column;gap:10px;margin-top:4px;">
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid #c7d2fe;border-radius:10px;padding:14px 16px;">
+                                <input type="radio" name="wizardInterviewChoice" value="run" style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go directly to the interview</div>
+                                </div>
+                            </label>
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid #6366f1;border-radius:10px;padding:14px 16px;">
+                                <input type="radio" name="wizardInterviewChoice" value="skip" checked style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Run it later from User Information</div>
+                                </div>
+                            </label>
+                        </div>`;
+                    // Wire the Resend Email button
+                    const resendBtn = document.getElementById('wizardResendConsentBtn');
+                    if (resendBtn) {
+                        resendBtn.addEventListener('click', async () => {
+                            const statusEl = document.getElementById('wizardConsentCheckStatus');
+                            resendBtn.disabled = true;
+                            resendBtn.textContent = 'Sending…';
+                            try {
+                                const token = sessionStorage.getItem('firebaseIdToken') || wizardState._idToken;
+                                const userId = wizardState.userId;
+                                const r = await fetch('/api/consent/resend', {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}`, 'X-User-ID': userId, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                                });
+                                if (statusEl) statusEl.textContent = r.ok ? 'Email resent successfully.' : 'Resend failed — please try again.';
+                            } catch (e) {
+                                if (statusEl) statusEl.textContent = 'Resend failed — please try again.';
+                            } finally {
+                                resendBtn.disabled = false;
+                                resendBtn.textContent = 'Resend Email';
+                            }
+                        });
+                    }
+
+                    // Wire the Check for Consent button
+                    const checkBtn = document.getElementById('wizardCheckConsentBtn');
+                    if (checkBtn) {
+                        checkBtn.addEventListener('click', async () => {
+                            const statusEl = document.getElementById('wizardConsentCheckStatus');
+                            checkBtn.disabled = true;
+                            checkBtn.textContent = 'Checking…';
+                            if (statusEl) statusEl.textContent = '';
+                            try {
+                                const token = sessionStorage.getItem('firebaseIdToken') || wizardState._idToken;
+                                const userId = wizardState.userId;
+                                const r = await fetch('/api/consent', {
+                                    headers: { 'Authorization': `Bearer ${token}`, 'X-User-ID': userId }
+                                });
+                                const data = r.ok ? await r.json() : {};
+                                if (data.consent_given_at) {
+                                    // Consent is confirmed — swap UI
+                                    document.getElementById('wizardConsentPendingBox').style.display = 'none';
+                                    document.getElementById('wizardConsentGrantedBox').style.display = 'block';
+                                    const choiceDiv = document.getElementById('wizardPostConsentInterviewChoice');
+                                    choiceDiv.style.display = 'flex';
+                                    // Wire the radio buttons
+                                    choiceDiv.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                                        radio.addEventListener('change', () => {
+                                            wizardState.runInterviewAfter = radio.value === 'run';
+                                            choiceDiv.querySelectorAll('label').forEach(lbl => {
+                                                const inp = lbl.querySelector('input[type=radio]');
+                                                lbl.style.borderColor = inp && inp.checked ? '#6366f1' : '#e5e7eb';
+                                                if (inp && inp.value === 'run') lbl.style.background = inp.checked ? '#eef2ff' : '#f9fafb';
+                                            });
+                                        });
+                                    });
+                                    // Also lift the safety guard — consent is now verified
+                                    wizardState.isMinorUnder13 = false;
+                                } else {
+                                    checkBtn.disabled = false;
+                                    checkBtn.textContent = 'Check for Consent';
+                                    if (statusEl) statusEl.textContent = 'Not confirmed yet — try again after the parent clicks the link.';
+                                }
+                            } catch (e) {
+                                checkBtn.disabled = false;
+                                checkBtn.textContent = 'Check for Consent';
+                                if (statusEl) statusEl.textContent = 'Check failed — please try again.';
+                            }
+                        });
+                    }
+                } else {
+                    // 13 or older — offer the interview immediately
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                            The User Profile Interview asks a caregiver or family member 15 short questions
+                            about the user's personality, interests, and communication style. The answers
+                            help the AI generate more personal and relevant communication options.
+                        </p>
+                        <p style="color:#6b7280;margin-bottom:16px;font-size:0.85rem;">
+                            The interview takes about 5–10 minutes and can be run at any time from the
+                            User Information page. You can skip it now and run it later.
+                        </p>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid ${wizardState.runInterviewAfter ? '#6366f1' : '#c7d2fe'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                                <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Bravo will use what you share to make suggestions fit ${wizardState.displayName || 'this user'} — after saving the profile, go directly to the interview</div>
+                                </div>
+                            </label>
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                                <input type="radio" name="wizardInterviewChoice" value="skip" ${!wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go to the app — the interview can be run later from User Information</div>
+                                </div>
+                            </label>
+                        </div>`;
+                    contentEl.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                        radio.addEventListener('change', () => {
+                            wizardState.runInterviewAfter = radio.value === 'run';
+                            contentEl.querySelectorAll('label').forEach(lbl => {
+                                const input = lbl.querySelector('input[type=radio]');
+                                lbl.style.borderColor = input && input.checked ? '#6366f1' : '#e5e7eb';
+                                if (input && input.value === 'run') {
+                                    lbl.style.background = input.checked ? '#eef2ff' : '#f9fafb';
+                                }
+                            });
+                        });
+                    });
+                }
 
             } else if (s === 1) {
                 titleEl.textContent = 'Interface Mode';
@@ -4362,8 +4967,30 @@ registerForm.addEventListener('submit', async (e) => {
             const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
                     : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
                     : step;
-            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
-            if (isLastStep) {
+            const _isTap = wizardState.interfaceMode === 'tap';
+            const _isScan = wizardState.interfaceMode === 'scan';
+            const isAgeStep = (_isTap && step === 8) || (_isScan && step === 9);
+            const isConsentStep = (_isTap && step === 9) || (_isScan && step === 10);
+            const isLastStep = (_isTap && step === 10) || (_isScan && step === 11);
+            if (isAgeStep) {
+                const ageEl = document.querySelector('input[name="wizardAgeGroup"]:checked');
+                if (ageEl) wizardState.isMinorUnder13 = ageEl.value === 'minor';
+                const emailEl = document.getElementById('wizardParentEmail');
+                if (emailEl) wizardState.parentEmail = emailEl.value.trim();
+            } else if (isConsentStep) {
+                if (wizardState.isMinorUnder13 === true) {
+                    // No toggle for under-13 — consent flow controls learning, not the wizard toggle
+                    wizardState.consentEnabled = false;
+                    // Capture email if entered on the consent step (age step was skipped)
+                    const csEmailEl = document.getElementById('wizardConsentStepEmail');
+                    if (csEmailEl && csEmailEl.value.trim()) wizardState.parentEmail = csEmailEl.value.trim();
+                } else {
+                    const toggleEl = document.getElementById('wizardLearningToggle');
+                    if (toggleEl) wizardState.consentEnabled = toggleEl.checked;
+                }
+                const approveEl = document.querySelector('input[name="wizardAutoApprove"]:checked');
+                if (approveEl) wizardState.autoApproveLearned = approveEl.value === 'auto';
+            } else if (isLastStep) {
                 // Last step (both modes) — optional interview
                 const runEl = document.querySelector('input[name="wizardInterviewChoice"]:checked');
                 if (runEl) wizardState.runInterviewAfter = runEl.value === 'run';
@@ -4450,15 +5077,74 @@ registerForm.addEventListener('submit', async (e) => {
             cancelBtn.onclick = closeSetupWizard;
             backBtn.onclick = () => {
                 wizardCollectCurrentStep();
-                if (wizardState.currentStep > 1) showWizardStep(wizardState.currentStep - 1);
+                if (wizardState.currentStep > 1) {
+                    let prevStep = wizardState.currentStep - 1;
+                    // Skip age step when is_minor_under_13 is already known
+                    const _ageNum = wizardState.interfaceMode === 'tap' ? 8 : 9;
+                    if (wizardState.isMinorUnder13 !== null && prevStep === _ageNum) prevStep--;
+                    showWizardStep(prevStep);
+                }
             };
-            nextBtn.onclick = () => {
+            nextBtn.onclick = async () => {
                 wizardCollectCurrentStep();
+                // Age step validation: require email when user is under 13
+                const _step = wizardState.currentStep;
+                const _tap = wizardState.interfaceMode === 'tap';
+                const _scan = wizardState.interfaceMode === 'scan';
+                const _onAgeStep = (_tap && _step === 8) || (_scan && _step === 9);
+                if (_onAgeStep && wizardState.isMinorUnder13 === null) {
+                    setWizardStatus('Please select whether the user is under 13.', true);
+                    return;
+                }
+                if (_onAgeStep && wizardState.isMinorUnder13 === true && !wizardState.parentEmail.includes('@')) {
+                    setWizardStatus('Please enter a valid parent or guardian email address.', true);
+                    return;
+                }
+                setWizardStatus('', false);
                 const total = wizardTotalSteps();
                 if (wizardState.currentStep >= total) {
                     executeWizard();
                 } else {
-                    showWizardStep(wizardState.currentStep + 1);
+                    // COPPA: if the user didn't use the Send button on the consent step,
+                    // auto-send the email now as a fallback when advancing to the last step.
+                    const _isConsentStepNow = (_tap && _step === 9) || (_scan && _step === 10);
+                    if (_isConsentStepNow && !wizardState._consentEmailSent &&
+                            wizardState.isMinorUnder13 === true &&
+                            wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
+                        nextBtn.disabled = true;
+                        setWizardStatus('Sending consent email…', false);
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _h,
+                                body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                            });
+                            if (!_r.ok) {
+                                const _e = await _r.json().catch(() => ({}));
+                                setWizardStatus(
+                                    (_e.detail || 'Email could not be sent') + ' — use Resend on the next screen.',
+                                    true
+                                );
+                            } else {
+                                setWizardStatus('', false);
+                            }
+                        } catch (_) {
+                            setWizardStatus('Email could not be sent — use Resend on the next screen.', true);
+                        }
+                        nextBtn.disabled = false;
+                    }
+                    let nextStep = wizardState.currentStep + 1;
+                    // Skip age step when is_minor_under_13 is already known
+                    const _ageNumFwd = wizardState.interfaceMode === 'tap' ? 8 : 9;
+                    if (wizardState.isMinorUnder13 !== null && nextStep === _ageNumFwd) nextStep++;
+                    showWizardStep(nextStep);
                 }
             };
         }
@@ -4574,6 +5260,49 @@ registerForm.addEventListener('submit', async (e) => {
                 // Image assignment is handled by the background task in regenerate_boards.
                 // No need to call assign-all-images here — it runs automatically and quickly.
 
+                // COPPA: consent email was already sent when user advanced from consent step.
+                // Just set the auto-approve preference for when consent lands.
+                if (wizardState.isMinorUnder13 === true && wizardState.autoApproveLearned) {
+                    try {
+                        await fetch('/api/consent/auto-approve', {
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: true })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+
+                // Learning feature flags (13+ only) — non-blocking, wizard completes regardless.
+                if (wizardState.consentEnabled && !wizardState.isMinorUnder13) {
+                    try {
+                        if (wizardState.autoApproveLearned) {
+                            await fetch('/api/consent/auto-approve', {
+                                method: 'POST',
+                                headers: { ...headers, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ enabled: true })
+                            });
+                        }
+                        await fetch('/api/consent/control', {
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: true, is_minor_under_13: false })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+
+                // Choosing to run the interview means choosing to have Bravo use what's shared —
+                // enable personalization now. is_personalization_enabled() on the server gates on
+                // _consent_ok(), so the flag records intent and takes effect the moment consent lands.
+                if (wizardState.runInterviewAfter) {
+                    try {
+                        await fetch('/api/consent/personalization', {
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: true })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+
                 closeSetupWizard();
 
                 sessionStorage.setItem('firebaseIdToken', window.currentIdToken);
@@ -4588,6 +5317,8 @@ registerForm.addEventListener('submit', async (e) => {
 
                 setTimeout(async () => {
                     await checkScheduledFavoritesOnAuth();
+                    // Under-13 profiles must wait for parental consent before interview
+                    if (wizardState.isMinorUnder13 === true) wizardState.runInterviewAfter = false;
                     if (wizardState.runInterviewAfter) {
                         closeSetupWizard();
                         sessionStorage.setItem('wizardInterviewMode', '1');

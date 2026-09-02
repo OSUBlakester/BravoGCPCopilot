@@ -38,6 +38,7 @@ RUN mkdir -p /keys
 # Cloud Run expects the application to listen on the port specified by the PORT environment variable
 ENV PORT=8080
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Environment will be set by Cloud Run deployment
 

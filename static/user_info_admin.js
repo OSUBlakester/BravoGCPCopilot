@@ -229,6 +229,12 @@ async function initializePage() {
         if (refreshChatNarrativeBtn) {
             refreshChatNarrativeBtn.addEventListener('click', loadChatDerivedNarrative);
         }
+
+        // Pending proposals refresh button
+        const refreshPendingBtn = document.getElementById('refreshPendingBtn');
+        if (refreshPendingBtn) {
+            refreshPendingBtn.addEventListener('click', loadPendingProposals);
+        }
         
         // Interview button event listeners
         if (startInterviewButton) {
@@ -313,23 +319,335 @@ async function initializePage() {
     }
 }
 
+// --- Feature Flags ---
+let _consentFlags = { use_entered_details: false, learn_from_history: false, auto_approve_learned: false };
+
+function _updateNarrativePersonalizationPrompt() {
+    const banner = document.getElementById('narrative-personalization-prompt');
+    if (!banner) return;
+    const hasNarrative = !!(currentUserInfo && currentUserInfo.trim());
+    const personalizationOff = !_consentFlags.use_entered_details;
+    banner.classList.toggle('hidden', !(hasNarrative && personalizationOff));
+
+    const enableBtn = document.getElementById('narrative-personalization-enable-btn');
+    if (enableBtn && !enableBtn._wired) {
+        enableBtn._wired = true;
+        enableBtn.addEventListener('click', async () => {
+            enableBtn.disabled = true;
+            enableBtn.textContent = 'Enabling…';
+            try {
+                await window.authenticatedFetch('/api/consent/personalization', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: true }),
+                });
+                _applyConsentFlags({ ..._consentFlags, use_entered_details: true });
+            } catch (_) {
+                enableBtn.disabled = false;
+                enableBtn.textContent = 'Enable';
+            }
+        });
+    }
+}
+
+function _applyConsentFlags(flags) {
+    _consentFlags = flags;
+    const useEntered = !!flags.use_entered_details;
+    const learn = !!flags.learn_from_history;
+    const autoApprove = !!flags.auto_approve_learned;
+    const isMinor = flags.is_minor_under_13 !== false;  // fail-closed: unset → minor, matching server
+    const consentVerified = !!flags.consent_given_at;
+    const profileLocked = isMinor && !consentVerified;
+
+    const useEnteredContent = document.getElementById('use-entered-content');
+    const learnHistoryContent = document.getElementById('learn-history-content');
+    const friendsFamilyPanel = document.getElementById('friends-family-panel');
+    const autoApproveRow = document.getElementById('flag-auto-approve-row');
+
+    if (useEnteredContent) useEnteredContent.classList.toggle('hidden', !useEntered);
+    if (learnHistoryContent) learnHistoryContent.classList.toggle('hidden', !learn);
+    if (friendsFamilyPanel) friendsFamilyPanel.classList.toggle('hidden', !useEntered);
+    if (autoApproveRow) autoApproveRow.classList.toggle('hidden', !learn);
+
+    const cbEntered = document.getElementById('flag-use-entered-details');
+    const cbLearn = document.getElementById('flag-learn-from-history');
+    const cbAuto = document.getElementById('flag-auto-approve');
+    if (cbEntered) cbEntered.checked = useEntered;
+    if (cbLearn) cbLearn.checked = learn;
+    if (cbAuto) cbAuto.checked = autoApprove;
+
+    const ageSelect = document.getElementById('flag-age-group');
+    if (ageSelect) {
+        if (flags.is_minor_under_13 === true) ageSelect.value = 'minor';
+        else if (flags.is_minor_under_13 === false) ageSelect.value = 'adult';
+        else ageSelect.value = 'null';
+    }
+
+    // Disable the interview button until parental consent is verified for under-13 profiles
+    if (startInterviewButton) {
+        startInterviewButton.disabled = profileLocked;
+        startInterviewButton.title = profileLocked
+            ? 'Parental consent must be verified before running the interview'
+            : '';
+    }
+
+    _updateNarrativePersonalizationPrompt();
+
+    // Show/hide the old inline check button (kept for fallback; banner is primary)
+    const checkConsentBtn = document.getElementById('checkConsentButton');
+    if (checkConsentBtn) checkConsentBtn.classList.toggle('hidden', !profileLocked);
+
+    // COPPA consent banner with email send + check flow
+    const banner = document.getElementById('coppa-consent-banner');
+    if (banner) {
+        banner.classList.toggle('hidden', !profileLocked);
+        if (profileLocked && !banner._wired) {
+            banner._wired = true;
+            const emailInput = document.getElementById('coppa-consent-email');
+            const sendBtn = document.getElementById('coppa-send-consent-btn');
+            const checkBtn = document.getElementById('coppa-check-consent-btn');
+            const statusEl = document.getElementById('coppa-consent-status');
+
+            // Pre-fill email if already stored from a prior send
+            if (flags.parent_email && emailInput) emailInput.value = flags.parent_email;
+
+            if (sendBtn) {
+                sendBtn.addEventListener('click', async () => {
+                    const email = emailInput ? emailInput.value.trim() : '';
+                    if (!email || !email.includes('@')) {
+                        if (statusEl) { statusEl.textContent = 'Please enter a valid email address.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                        return;
+                    }
+                    sendBtn.disabled = true;
+                    sendBtn.textContent = 'Sending…';
+                    try {
+                        const r = await window.authenticatedFetch('/api/consent/initiate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ parent_email: email }),
+                        });
+                        if (r.ok) {
+                            sendBtn.textContent = 'Sent ✓';
+                            sendBtn.style.background = '#166534';
+                            if (statusEl) { statusEl.textContent = `Consent email sent to ${email}. Ask the parent to check their inbox, then click Check for Consent.`; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                        } else {
+                            const err = await r.json().catch(() => ({}));
+                            sendBtn.disabled = false;
+                            sendBtn.textContent = 'Retry';
+                            if (statusEl) { statusEl.textContent = err.detail || 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                        }
+                    } catch (_) {
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Retry';
+                        if (statusEl) { statusEl.textContent = 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    }
+                });
+            }
+
+            if (checkBtn) {
+                checkBtn.addEventListener('click', async () => {
+                    checkBtn.disabled = true;
+                    checkBtn.textContent = 'Checking…';
+                    try {
+                        const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+                        const data = r.ok ? await r.json() : {};
+                        if (data.consent_given_at) {
+                            _applyConsentFlags(data);
+                            if (statusEl) { statusEl.textContent = 'Consent confirmed — learning features are now available.'; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                        } else {
+                            checkBtn.disabled = false;
+                            checkBtn.textContent = 'Check for Consent';
+                            if (statusEl) { statusEl.textContent = 'Not confirmed yet — ask the parent to click the link in the email.'; statusEl.className = 'text-xs text-amber-700'; statusEl.classList.remove('hidden'); }
+                        }
+                    } catch (_) {
+                        checkBtn.disabled = false;
+                        checkBtn.textContent = 'Check for Consent';
+                        if (statusEl) { statusEl.textContent = 'Check failed — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    }
+                });
+            }
+        }
+    }
+}
+
+async function loadConsentFlags() {
+    const flagsLoading = document.getElementById('flags-loading');
+    const flagsContent = document.getElementById('flags-content');
+    try {
+        const resp = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+        if (!resp.ok) throw new Error(`${resp.status}`);
+        const data = await resp.json();
+        _applyConsentFlags(data);
+        if (flagsLoading) flagsLoading.classList.add('hidden');
+        if (flagsContent) flagsContent.classList.remove('hidden');
+        _wireConsentToggles();
+    } catch (err) {
+        console.error('Failed to load consent flags:', err);
+        if (flagsLoading) flagsLoading.textContent = 'Could not load settings.';
+    }
+}
+
+function _wireConsentToggles() {
+    const cbEntered = document.getElementById('flag-use-entered-details');
+    const cbLearn = document.getElementById('flag-learn-from-history');
+    const cbAuto = document.getElementById('flag-auto-approve');
+    const status = document.getElementById('flags-save-status');
+
+    async function _postFlag(url, enabled, extra = {}) {
+        if (status) { status.textContent = 'Saving…'; status.className = 'text-sm h-4 text-gray-500'; }
+        try {
+            const r = await window.authenticatedFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled, ...extra }),
+            });
+            if (!r.ok) {
+                let msg = 'Save failed';
+                if (r.status === 403) {
+                    const ageKnown = _consentFlags.is_minor_under_13 !== null &&
+                                     _consentFlags.is_minor_under_13 !== undefined;
+                    msg = ageKnown
+                        ? 'Parental consent required — use Check for Consent above'
+                        : 'Age group is not set — select Under 13 or 13 or older above first';
+                }
+                if (status) { status.textContent = msg; status.className = 'text-sm h-4 text-red-600'; }
+                // Revert UI to the actual server state
+                await loadConsentFlags();
+                return;
+            }
+            if (status) { status.textContent = 'Saved'; status.className = 'text-sm h-4 text-green-600'; setTimeout(() => { status.textContent = ''; }, 2000); }
+        } catch (e) {
+            if (status) { status.textContent = 'Save failed'; status.className = 'text-sm h-4 text-red-600'; }
+            console.error('Flag save failed:', e);
+        }
+    }
+
+    if (cbEntered && !cbEntered._wired) {
+        cbEntered._wired = true;
+        cbEntered.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, use_entered_details: cbEntered.checked });
+            _postFlag('/api/consent/personalization', cbEntered.checked);
+        });
+    }
+    if (cbLearn && !cbLearn._wired) {
+        cbLearn._wired = true;
+        cbLearn.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, learn_from_history: cbLearn.checked });
+            _postFlag('/api/consent/control', cbLearn.checked);
+            if (cbLearn.checked) loadPendingProposals();
+        });
+    }
+    if (cbAuto && !cbAuto._wired) {
+        cbAuto._wired = true;
+        cbAuto.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, auto_approve_learned: cbAuto.checked });
+            _postFlag('/api/consent/auto-approve', cbAuto.checked);
+        });
+    }
+    const ageSelect = document.getElementById('flag-age-group');
+    if (ageSelect && !ageSelect._wired) {
+        ageSelect._wired = true;
+        ageSelect.addEventListener('change', () => {
+            const val = ageSelect.value;
+            const isMinor = val === 'minor' ? true : val === 'adult' ? false : null;
+            _applyConsentFlags({ ..._consentFlags, is_minor_under_13: isMinor });
+            // POST to /api/consent/control — pass is_minor_under_13 alongside the current
+            // learn_from_history value so it's preserved.
+            const currentLearn = _consentFlags.learn_from_history || false;
+            _postFlag('/api/consent/control', currentLearn, { is_minor_under_13: isMinor });
+        });
+    }
+
+    const saveBtn = document.getElementById('flags-save-btn');
+    if (saveBtn && !saveBtn._wired) {
+        saveBtn._wired = true;
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            // Read current UI state
+            const learnChecked = cbLearn ? cbLearn.checked : (_consentFlags.learn_from_history || false);
+            const enteredChecked = cbEntered ? cbEntered.checked : (_consentFlags.use_entered_details || false);
+            const autoChecked = cbAuto ? cbAuto.checked : (_consentFlags.auto_approve_learned || false);
+            const ageVal = ageSelect ? ageSelect.value : 'null';
+            const isMinor = ageVal === 'minor' ? true : ageVal === 'adult' ? false : null;
+
+            // Fire all three endpoints; show combined status
+            if (status) { status.textContent = 'Saving…'; status.className = 'text-sm h-4 text-gray-500'; }
+            try {
+                await Promise.all([
+                    window.authenticatedFetch('/api/consent/control', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: learnChecked, is_minor_under_13: isMinor }),
+                    }),
+                    window.authenticatedFetch('/api/consent/personalization', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: enteredChecked }),
+                    }),
+                    window.authenticatedFetch('/api/consent/auto-approve', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: autoChecked }),
+                    }),
+                ]);
+                if (status) { status.textContent = 'Saved'; status.className = 'text-sm h-4 text-green-600'; setTimeout(() => { status.textContent = ''; }, 2000); }
+                if (learnChecked) loadPendingProposals();
+            } catch (e) {
+                if (status) { status.textContent = 'Save failed'; status.className = 'text-sm h-4 text-red-600'; }
+                console.error('Flags save failed:', e);
+            }
+            saveBtn.disabled = false;
+        });
+    }
+
+    const downloadDataBtn = document.getElementById('download-my-data-btn');
+    if (downloadDataBtn && !downloadDataBtn._wired) {
+        downloadDataBtn._wired = true;
+        downloadDataBtn.addEventListener('click', async () => {
+            downloadDataBtn.disabled = true;
+            const origHTML = downloadDataBtn.innerHTML;
+            downloadDataBtn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs mr-1"></i>Downloading…';
+            try {
+                const res = await window.authenticatedFetch('/api/my-data/export', { method: 'GET' });
+                if (!res.ok) throw new Error(await res.text());
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const name = (document.getElementById('userName')?.value || 'user').replace(/\s+/g, '_');
+                a.download = `bravo_my_data_${name}_${today}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Download failed: ' + e.message);
+            } finally {
+                downloadDataBtn.disabled = false;
+                downloadDataBtn.innerHTML = origHTML;
+            }
+        });
+    }
+}
+
 // --- Initial Data Loading ---
 async function loadInitialData() {
     if (initialDataLoaded) {
         console.log("Initial data already loaded, skipping...");
         return;
     }
-    
+
     console.log("Loading initial data...");
     initialDataLoaded = true;
-    
+
     try {
+        await loadConsentFlags();
         await loadUserInfo();
         await loadFriendsFamily();
         await loadMoodOptions();
         await loadCurrentMood();
         await loadCustomImages();
         await loadChatDerivedNarrative();
+        if (_consentFlags.learn_from_history) await loadPendingProposals();
         console.log("All initial data loaded successfully");
     } catch (error) {
         console.error("Error loading initial data:", error);
@@ -522,6 +840,7 @@ async function loadUserInfo() {
             userName.value = currentUserName;
         }
         renderAiOverridesToForm();
+        _updateNarrativePersonalizationPrompt();
 
         // Load birthdate
         const birthdayResponse = await window.authenticatedFetch('/api/birthdays', {
@@ -607,20 +926,35 @@ async function loadChatDerivedNarrative() {
         if (data.extracted_facts && data.extracted_facts.length > 0) {
             document.getElementById('chat-facts-section').classList.remove('hidden');
             document.getElementById('facts-count').textContent = data.extracted_facts.length;
-            
+
             const factsList = document.getElementById('chat-facts-list');
-            factsList.innerHTML = data.extracted_facts.map(fact => `
-                <div class="bg-white border border-gray-200 rounded px-3 py-2">
-                    <div class="text-sm text-gray-800">${fact.fact}</div>
-                    <div class="text-xs text-gray-500 mt-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-${fact.category === 'preference' ? 'purple' : 'blue'}-100 text-${fact.category === 'preference' ? 'purple' : 'blue'}-800">
-                            ${fact.category}
-                        </span>
-                        <span class="ml-2">Confidence: ${fact.confidence}</span>
-                        ${fact.mention_count > 1 ? `<span class="ml-2">(mentioned ${fact.mention_count}x)</span>` : ''}
+            factsList.innerHTML = data.extracted_facts.map((fact, idx) => {
+                const escapedFact = fact.fact.replace(/"/g, '&quot;');
+                const escapedCat = (fact.category || '').replace(/"/g, '&quot;');
+                const colorCls = fact.category === 'preference' ? 'purple' : 'blue';
+                return `
+                <div class="bg-white border border-gray-200 rounded px-3 py-2" id="approved-fact-${idx}">
+                    <div class="flex items-start gap-2">
+                        <div class="flex-1">
+                            <div class="text-sm text-gray-800 fact-display-text">${fact.fact}</div>
+                            <input type="text" class="fact-edit-input hidden text-sm border rounded px-1 py-0.5 w-full" value="${escapedFact}">
+                            <div class="text-xs text-gray-500 mt-1">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-${colorCls}-100 text-${colorCls}-800">${fact.category}</span>
+                                <span class="ml-2">Confidence: ${fact.confidence}</span>
+                                ${fact.mention_count > 1 ? `<span class="ml-2">(mentioned ${fact.mention_count}x)</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-1 flex-shrink-0">
+                            <button onclick="editApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded fact-edit-btn">Edit</button>
+                            <button onclick="saveApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded fact-save-btn hidden">Save</button>
+                            <button onclick="deleteApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded">Delete</button>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
         }
         
         // Display answered questions
@@ -1589,6 +1923,178 @@ async function removeProfileImage() {
     } catch (error) {
         console.error("Error removing profile image:", error);
         showStatus(profileImageStatus, `Remove failed: ${error.message}`, true, 5000);
+    }
+}
+
+// --- Approved Fact Edit / Delete ---
+function editApprovedFact(idx, category, oldValue) {
+    const row = document.getElementById(`approved-fact-${idx}`);
+    if (!row) return;
+    row.querySelector('.fact-display-text').classList.add('hidden');
+    row.querySelector('.fact-edit-input').classList.remove('hidden');
+    row.querySelector('.fact-edit-btn').classList.add('hidden');
+    row.querySelector('.fact-save-btn').classList.remove('hidden');
+}
+
+async function saveApprovedFact(idx, category, oldValue) {
+    const row = document.getElementById(`approved-fact-${idx}`);
+    if (!row) return;
+    const newValue = row.querySelector('.fact-edit-input').value.trim();
+    if (!newValue) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approved', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_category: category, old_fact: oldValue, new_category: category, new_fact: newValue }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadChatDerivedNarrative();
+    } catch (e) {
+        console.error('Save approved fact failed:', e);
+        alert('Save failed: ' + e.message);
+    }
+}
+
+async function deleteApprovedFact(idx, category, value) {
+    if (!confirm('Delete this fact permanently?')) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approved', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, fact: value }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadChatDerivedNarrative();
+    } catch (e) {
+        console.error('Delete approved fact failed:', e);
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+// --- Pending Proposals ---
+async function loadPendingProposals() {
+    const listEl = document.getElementById('pending-proposals-list');
+    const loadingEl = document.getElementById('pending-loading');
+    const emptyEl = document.getElementById('pending-empty');
+    const badge = document.getElementById('pending-count-badge');
+    if (!listEl) return;
+
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+    listEl.innerHTML = '';
+
+    try {
+        const r = await window.authenticatedFetch('/api/learned/pending', { method: 'GET' });
+        if (!r.ok) throw new Error(`${r.status}`);
+        const data = await r.json();
+        const proposals = Array.isArray(data) ? data : (data.proposals || []);
+        if (loadingEl) loadingEl.classList.add('hidden');
+
+        if (!proposals || proposals.length === 0) {
+            if (emptyEl) emptyEl.classList.remove('hidden');
+            if (badge) badge.classList.add('hidden');
+            return;
+        }
+
+        if (badge) { badge.textContent = proposals.length; badge.classList.remove('hidden'); }
+
+        listEl.innerHTML = proposals.map((p, idx) => {
+            const escapedVal = (p.value || '').replace(/"/g, '&quot;');
+            const escapedCat = (p.category || '').replace(/"/g, '&quot;');
+            const sentiment = (p.sentiment || 'likes');
+            const sentimentLabel = sentiment === 'dislikes'
+                ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 ml-1">dislikes</span>'
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 text-green-700 ml-1">likes</span>';
+            return `
+            <div class="bg-white border border-yellow-200 rounded px-3 py-2" id="pending-proposal-${idx}">
+                <div class="flex items-start gap-2">
+                    <div class="flex-1">
+                        <div class="text-sm text-gray-800 pending-display-text">${p.value}</div>
+                        <input type="text" class="pending-edit-input hidden text-sm border rounded px-1 py-0.5 w-full" value="${escapedVal}">
+                        <div class="text-xs text-gray-500 mt-1">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800">${p.category}</span>
+                            ${sentimentLabel}
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-1 flex-shrink-0">
+                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
+                            class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded">Approve</button>
+                        <button onclick="editPendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
+                            class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded pending-edit-btn">Edit</button>
+                        <button onclick="savePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
+                            class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded pending-save-btn hidden">Save</button>
+                        <button onclick="discardPendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                            class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded">Discard</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        console.error('Load pending proposals failed:', e);
+        if (loadingEl) { loadingEl.textContent = 'Error loading proposals'; loadingEl.classList.remove('hidden'); }
+    }
+}
+
+async function approvePendingProposal(idx, category, value, sentiment) {
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, value, sentiment: sentiment || 'likes' }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await Promise.all([loadPendingProposals(), loadChatDerivedNarrative()]);
+    } catch (e) {
+        console.error('Approve proposal failed:', e);
+        alert('Approve failed: ' + e.message);
+    }
+}
+
+function editPendingProposal(idx, category, oldValue, sentiment) {
+    const row = document.getElementById(`pending-proposal-${idx}`);
+    if (!row) return;
+    row.querySelector('.pending-display-text').classList.add('hidden');
+    row.querySelector('.pending-edit-input').classList.remove('hidden');
+    row.querySelector('.pending-edit-btn').classList.add('hidden');
+    row.querySelector('.pending-save-btn').classList.remove('hidden');
+}
+
+async function savePendingProposal(idx, category, oldValue, sentiment) {
+    const row = document.getElementById(`pending-proposal-${idx}`);
+    if (!row) return;
+    const newValue = row.querySelector('.pending-edit-input').value.trim();
+    if (!newValue) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/pending', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                old_category: category, old_value: oldValue,
+                new_category: category, new_value: newValue,
+                new_sentiment: sentiment || 'likes',
+            }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadPendingProposals();
+    } catch (e) {
+        console.error('Save pending proposal failed:', e);
+        alert('Save failed: ' + e.message);
+    }
+}
+
+async function discardPendingProposal(idx, category, value) {
+    if (!confirm('Discard this learned fact?')) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/discard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, value }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadPendingProposals();
+    } catch (e) {
+        console.error('Discard proposal failed:', e);
+        alert('Discard failed: ' + e.message);
     }
 }
 

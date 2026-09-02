@@ -151,7 +151,6 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from firebase_admin._auth_utils import EmailAlreadyExistsError
 from google.oauth2 import service_account # Import service_account
-import openai # Add OpenAI import
 # SERVICE_ACCOUNT_KEY_PATH is now imported from config.py
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
@@ -228,7 +227,6 @@ async def health_check():
             "sentence_transformer": sentence_transformer_model is not None,
             "primary_llm": _gemini_client is not None and bool(_primary_model_name),
             "fallback_llm": _gemini_client is not None and bool(_fallback_model_name),
-            "openai": openai_client is not None,
             "tts": tts_client is not None
         }
     })
@@ -317,7 +315,7 @@ template_user_data_paths = {
         "wakeWordInterjection": "hey",
         "wakeWordName": "bravo",
         "CountryCode": "US",
-        "llm_provider": "gemini",  # New field: "gemini" or "chatgpt"
+        "llm_provider": "gemini",
         "speech_rate": 180,
         "LLMOptions": 10,
         "FreestyleOptions": 20,
@@ -517,7 +515,7 @@ async def get_current_account_and_user_ids(
             
             # Check permissions
             has_access = False
-            if is_admin and target_account_data.get("allow_admin_access", True):
+            if is_admin and target_account_data.get("allow_admin_access", False):
                 has_access = True
             elif is_therapist:
                 # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -658,7 +656,7 @@ async def get_target_account_id(
             target_account_data = target_account_doc.to_dict()
 
             # Check access permissions
-            if is_admin and target_account_data.get("allow_admin_access", True):
+            if is_admin and target_account_data.get("allow_admin_access", False):
                 pass  # Admin access allowed
             elif is_therapist:
                 # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -783,10 +781,6 @@ async def avatar_prototype():
     """Serve the custom avatar prototype page"""
     return FileResponse(os.path.join(static_file_path, "custom-avatar-prototype.html"))
 
-@app.get("/symbol-admin")
-async def symbol_admin():
-    """Serve the symbol administration page"""
-    return FileResponse(os.path.join(static_file_path, "symbol_admin.html"))
 
 # @app.get("/tap-interface-admin")
 # async def tap_interface_admin():
@@ -1491,9 +1485,10 @@ Write it as a cohesive portrait, not a list of facts. Use natural transitions be
 
 RESPONSE FORMAT: Return only the narrative text — no JSON, no lists, no additional formatting."""
 
-        # Generate the narrative using the same infrastructure as the /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(current_ids["account_id"], current_ids["aac_user_id"], narrative_prompt)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
+        # Call Gemini directly — do NOT use build_full_prompt_for_non_cached_llm here
+        # because that function prepends the AAC system prompt which forces {option,summary}
+        # JSON output format, corrupting the narrative.
+        response_text = await _generate_gemini_content_with_fallback(narrative_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
         
         if response_text:
             narrative = response_text.strip()
@@ -1727,11 +1722,6 @@ if not GEMINI_FALLBACK_MODEL:
 # Defaults to the configured primary model if not explicitly provided.
 GEMINI_FAST_WORDS_MODEL = (os.environ.get("GEMINI_FAST_WORDS_MODEL") or GEMINI_PRIMARY_MODEL).strip()
 
-# ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
-# GPT-4o/4o-mini use: max_tokens, adjustable temperature
-CHATGPT_PRIMARY_MODEL = os.environ.get("CHATGPT_PRIMARY_MODEL", "gpt-4o-mini")
-CHATGPT_FALLBACK_MODEL = os.environ.get("CHATGPT_FALLBACK_MODEL", "gpt-4o")
-
 # Keep legacy defaults for backward compatibility
 DEFAULT_PRIMARY_LLM_MODEL_NAME = GEMINI_PRIMARY_MODEL
 DEFAULT_FALLBACK_LLM_MODEL_NAME = GEMINI_FALLBACK_MODEL
@@ -1825,7 +1815,7 @@ DEFAULT_SETTINGS = {
     "wakeWordInterjection": DEFAULT_WAKE_WORD_INTERJECTION, # Default interjection
     "wakeWordName": DEFAULT_WAKE_WORD_NAME,      # Default name
     "CountryCode": DEFAULT_COUNTRY_CODE,          # Default Country US
-    "llm_provider": "gemini", # New setting: "gemini" or "chatgpt"
+    "llm_provider": "gemini",
     "speech_rate": DEFAULT_SPEECH_RATE,            # Default speech rate in WPM
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "FreestyleOptions": 20,  # Default Freestyle Options
@@ -2346,13 +2336,35 @@ def _build_option_search_text(item: Any) -> str:
 
 def _derive_llm_option_summary(option_text: str, summary: Optional[str] = None) -> str:
     summary_text = re.sub(r"\s+", " ", str(summary or "").strip())
+    lm_provided = bool(summary_text)
     if not summary_text:
         summary_text = re.sub(r"[.!?]+$", "", option_text.strip())
 
     words = [word for word in summary_text.split() if word]
     if len(words) <= 5:
         return " ".join(words)
-    return " ".join(words[:5])
+
+    # LLM gave a summary longer than 5 words — just truncate it.
+    if lm_provided:
+        return " ".join(words[:5])
+
+    # Server-generated fallback: skip leading filler words so the label
+    # reflects the topic rather than the grammatical opening of the sentence.
+    _FILLER = {
+        "i", "a", "an", "the", "my", "we", "you", "do", "did",
+        "am", "is", "are", "was", "were", "have", "has", "had",
+        "will", "would", "can", "could", "it", "this", "that",
+        "love", "like", "enjoy", "want", "need", "use",
+    }
+    content_words: List[str] = []
+    for word in words:
+        clean = re.sub(r"[^a-z0-9']", "", word.lower())
+        if clean not in _FILLER or content_words:
+            content_words.append(word)
+        if len(content_words) >= 5:
+            break
+
+    return " ".join(content_words) if content_words else " ".join(words[:5])
 
 
 def _derive_llm_option_keywords(
@@ -2929,12 +2941,13 @@ class GeminiCacheManager:
         created_at: float,
         message_count: int = 0,
         chat_history_cached: bool = True,
+        consent_fingerprint: str = "",
     ):
         """Save cache info to Firestore with enough metadata to decide if drift checks apply."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
-            
+
             await asyncio.to_thread(
                 doc_ref.set,
                 {
@@ -2945,6 +2958,7 @@ class GeminiCacheManager:
                     "ttl_seconds": self.ttl_seconds,
                     "message_count": message_count,
                     "chat_history_cached": bool(chat_history_cached),
+                    "consent_fingerprint": consent_fingerprint,
                 }
             )
             logging.info(
@@ -3065,9 +3079,14 @@ class GeminiCacheManager:
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
             "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
+            "consent": load_consent(account_id, aac_user_id),
         }
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
+
+        _consent = context_data.get("consent") or {}
+        _use_entered = is_personalization_enabled(_consent)
+        _use_learned = is_learning_enabled(_consent)
 
         # System prompt providing instructions to the LLM
         system_prompt = """You are Bravo, an AI communication assistant for AAC users. Your role is to generate relevant response options based on the user's context.
@@ -3082,19 +3101,19 @@ Analyze the provided context to create helpful, personalized suggestions."""
         # Assemble the BASE context string
         context_parts = [f"--- SYSTEM PROMPT ---\n{system_prompt}\n"]
 
-        # PRIORITIZE USER PROFILE - This should be the PRIMARY focus for all responses
-        if context_data["user_info"]:
+        # PRIORITIZE USER PROFILE - gated on use_entered_details
+        if _use_entered and context_data["user_info"]:
             user_narrative = context_data['user_info'].get('narrative', 'Not available')
             context_parts.append(f"=== PRIMARY USER PROFILE (MOST IMPORTANT) ===\n{user_narrative}\n\n⚠️  REMEMBER: This user profile should be the foundation for ALL responses. Personal details, family, interests, and characteristics mentioned here are the most important context.\n")
             overrides = normalize_ai_option_overrides(context_data["user_info"].get("aiOptionOverrides", {}))
             context_parts.append(build_ai_option_overrides_prompt_block(overrides) + "\n")
-        
-        # Additional supporting context (stable data only)
-        if context_data["friends_family"]:
+
+        # Additional supporting context (stable data only) — also gated on use_entered_details
+        if _use_entered and context_data["friends_family"]:
             context_parts.append(f"--- Friends & Family (Supporting Context) ---\n{json.dumps(context_data['friends_family'], indent=2)}\n")
         if context_data["settings"]:
             context_parts.append(f"--- User Settings (Supporting Context) ---\n{json.dumps(context_data['settings'], indent=2)}\n")
-        if context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
+        if _use_entered and context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
             context_parts.append(f"--- Birthdays (Supporting Context) ---\n{json.dumps(context_data['birthdays'], indent=2)}\n")
         
         # Vocabulary level instruction (replaces sending full pages/vocabulary lists)
@@ -3106,23 +3125,25 @@ Analyze the provided context to create helpful, personalized suggestions."""
             logging.info(f"📚 Using vocabulary level: {vocabulary_level} (instruction-based, not full pages)")
         
         # AI-extracted chat narrative (replaces old chat history to save tokens)
-        if context_data["chat_narrative"]:
+        if _use_learned and context_data["chat_narrative"]:
             chat_narrative = context_data["chat_narrative"]
-            if chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts"):
+            if (chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts")
+                    or chat_narrative.get("recent_greetings") or chat_narrative.get("answered_questions")):
                 chat_context_parts = ["--- User Communication Patterns (from Chat History) ---"]
                 
                 # Add narrative summary
                 if chat_narrative.get("narrative_text"):
                     chat_context_parts.append(f"Summary: {chat_narrative['narrative_text']}")
                 
-                # Add extracted facts
-                if chat_narrative.get("extracted_facts"):
+                # Extracted facts — gated on learn_from_history
+                if _use_learned and chat_narrative.get("extracted_facts"):
                     facts_text = []
                     for fact in chat_narrative["extracted_facts"]:
-                        confidence = fact.get("confidence", "medium")
                         fact_text = fact.get("fact", "")
                         mention_count = fact.get("mention_count", 1)
-                        facts_text.append(f"  • {fact_text} [{confidence} confidence, mentioned {mention_count}x]")
+                        sentiment = fact.get("sentiment", "likes")
+                        direction = "Likes" if sentiment == "likes" else "Does NOT like"
+                        facts_text.append(f"  • {direction}: {fact_text} (mentioned {mention_count}x)")
                     chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
                 
                 # Add common greetings (to help avoid repetition)
@@ -3196,6 +3217,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
         tasks = {
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
+            "consent": load_consent(account_id, aac_user_id),
         }
         if include_rich_context:
             tasks["birthdays"] = load_birthdays_from_file(account_id, aac_user_id)
@@ -3208,11 +3230,14 @@ Analyze the provided context to create helpful, personalized suggestions."""
         context_data.setdefault("birthdays", {})
         context_data.setdefault("friends_family", {})
         context_data.setdefault("diary", [])
-        
+
+        _consent = context_data.get("consent") or {}
+        _use_entered = is_personalization_enabled(_consent)
+
         delta_parts = ["=== DYNAMIC CONTEXT (Current Session Data) ==="]
         
         # CURRENT MOOD - High Priority, changes frequently
-        if context_data["user_info"]:
+        if _use_entered and context_data["user_info"]:
             current_mood = context_data['user_info'].get('currentMood', 'Not set')
             logging.info(f"🎭 MOOD DEBUG: Retrieved mood value = '{current_mood}' from user_info for {account_id}/{aac_user_id}")
             
@@ -3264,7 +3289,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
         
         # Current situation - location, people, activity
         if context_data["user_current"]:
-            if not compose_mode:
+            if not compose_mode and _use_entered:
                 current_parts = []
                 current_parts.extend([
                     f"Location: {context_data['user_current'].get('location', 'Unknown')}",
@@ -3311,8 +3336,8 @@ Analyze the provided context to create helpful, personalized suggestions."""
         today_date = dt.now().date()
         current_date_str = today_date.strftime('%Y-%m-%d')
         celebrations_context = _build_upcoming_celebrations_context(
-            birthday_data=context_data.get("birthdays") or {},
-            friends_family_data=context_data.get("friends_family") or {},
+            birthday_data=context_data.get("birthdays") if _use_entered else {},
+            friends_family_data=context_data.get("friends_family") if _use_entered else {},
             settings_data=context_data.get("settings") or {},
             today_date=today_date,
             days_ahead=60,
@@ -3324,7 +3349,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
             "⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events.\n"
         )
 
-        if include_rich_context and context_data["diary"]:
+        if _use_entered and include_rich_context and context_data["diary"]:
             def parse_diary_date(entry: Dict) -> Optional[date]:
                 if not isinstance(entry, dict):
                     return None
@@ -3451,7 +3476,7 @@ Undated Diary Entries (use cautiously, max 5):
             "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
             "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
         ]
-        if include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
+        if _use_entered and include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
             celebrations_context += (
                 "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
                 "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
@@ -3536,6 +3561,13 @@ Undated Diary Entries (use cautiously, max 5):
         logging.warning(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
         print(f"DEBUG: About to build BASE context", flush=True)
         try:
+            # Load consent before building so we can stamp the fingerprint on the cache record.
+            _warmup_consent = await load_consent(account_id, aac_user_id)
+            _warmup_fingerprint = (
+                f"e={int(is_personalization_enabled(_warmup_consent))},"
+                f"l={int(is_learning_enabled(_warmup_consent))}"
+            )
+
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
@@ -3574,6 +3606,7 @@ Undated Diary Entries (use cautiously, max 5):
                 created_at,
                 message_count=0,
                 chat_history_cached=False,
+                consent_fingerprint=_warmup_fingerprint,
             )
             logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
@@ -3692,10 +3725,25 @@ Undated Diary Entries (use cautiously, max 5):
         """
         user_key = self._get_user_key(account_id, aac_user_id)
         cache_data = await self._load_cache_from_firestore(user_key)
-        
+
         if not cache_data:
             return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
-        
+
+        # Consent fingerprint check: rebuild if personalization/learning flags have changed
+        # since the cache was built, or if the cache predates fingerprint tracking.
+        stored_fingerprint = cache_data.get("consent_fingerprint", "")
+        current_consent = await load_consent(account_id, aac_user_id)
+        current_fingerprint = (
+            f"e={int(is_personalization_enabled(current_consent))},"
+            f"l={int(is_learning_enabled(current_consent))}"
+        )
+        if stored_fingerprint != current_fingerprint:
+            logging.info(
+                f"Consent fingerprint mismatch for '{user_key}': "
+                f"cached={stored_fingerprint!r} current={current_fingerprint!r} — rebuilding."
+            )
+            return {"should_rebuild": True, "reason": "consent_changed", "drift": 0}
+
         messages_in_cache = cache_data.get('message_count', 0)
         chat_history_cached = cache_data.get('chat_history_cached')
 
@@ -3815,7 +3863,6 @@ _gemini_client: Optional[genai.Client] = None  # Vertex AI client singleton
 _primary_model_name: str = ""
 _fallback_model_name: str = ""
 _fast_words_model_name: str = ""
-openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
 firebase_app: Optional[firebase_admin.App] = None # NEW
@@ -3862,29 +3909,6 @@ try:
 except Exception as e_genai_config:
     logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
     _gemini_client = None
-
-# --- Initialize OpenAI Client ---
-logging.info("Initializing OpenAI client...")
-openai_api_key = os.environ.get("OPENAI_API_KEY")
-
-if not openai_api_key:
-    logging.warning("OPENAI_API_KEY environment variable not set. OpenAI functionality will be disabled.")
-    openai_client = None
-else:
-    try:
-        openai_client = openai.OpenAI(api_key=openai_api_key)
-        logging.info(f"OpenAI client initialized successfully (API key first 5 chars): {openai_api_key[:5]}*****")
-        
-        # Test the connection with a simple API call
-        try:
-            models = openai_client.models.list()
-            logging.info("OpenAI API connection verified successfully.")
-        except Exception as e_test:
-            logging.warning(f"OpenAI API test call failed: {e_test}")
-            
-    except Exception as e_openai:
-        logging.error(f"Error initializing OpenAI client: {e_openai}", exc_info=True)
-        openai_client = None
 
 # --- Initialize Google Cloud Text-to-Speech Client ---
 tts_client = None
@@ -4482,103 +4506,6 @@ async def _delete_collection(coll_ref, batch_size=50):
         # If there are more documents to delete, call the function recursively
         await _delete_collection(coll_ref, batch_size)
 
-
-# --- OpenAI Helper Functions ---
-async def _generate_openai_content(prompt_text: str, model: str = None) -> str:
-    """Generate content using OpenAI API"""
-    global openai_client
-    
-    if not openai_client:
-        raise HTTPException(status_code=503, detail="OpenAI client not available.")
-    
-    if not model:
-        model = CHATGPT_PRIMARY_MODEL
-    
-    try:
-        logging.info(f"Sending request to OpenAI model: {model}")
-        
-        # Determine if this is a GPT-5 model (which has different parameter requirements)
-        # GPT-5 models: use max_completion_tokens, temperature fixed at 1.0 (omit parameter)
-        # GPT-4o/older: use max_tokens, temperature adjustable (0-2)
-        model_lower = model.lower()
-        is_gpt5_model = 'gpt-5' in model_lower
-        uses_completion_tokens = is_gpt5_model  # GPT-5 models use max_completion_tokens
-        
-        # Build the base request parameters
-        request_params = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system", 
-                    "content": "You are a helpful assistant that generates responses in valid JSON format as requested by the user. Always respond with properly formatted JSON."
-                },
-                {
-                    "role": "user", 
-                    "content": prompt_text
-                }
-            ],
-            "response_format": {"type": "json_object"}
-        }
-        
-        # Handle temperature parameter based on model type
-        if is_gpt5_model:
-            # GPT-5 models only support temperature=1.0 (default), so we omit it
-            logging.info(f"GPT-5 model detected: {model} - omitting temperature parameter (defaults to 1.0)")
-        else:
-            # Older models support adjustable temperature
-            request_params["temperature"] = 0.7
-            logging.info(f"Using temperature=0.7 for model: {model}")
-        
-        # Add the appropriate token limit parameter
-        if uses_completion_tokens:
-            request_params["max_completion_tokens"] = 2000
-            logging.info(f"Using max_completion_tokens for GPT-5 model: {model}")
-        else:
-            request_params["max_tokens"] = 2000
-            logging.info(f"Using max_tokens for model: {model}")
-        
-        response = await asyncio.to_thread(
-            openai_client.chat.completions.create,
-            **request_params
-        )
-        
-        # Log full response for debugging
-        logging.info(f"OpenAI API response: {response}")
-        
-        # Check if we have choices and content
-        if not response.choices:
-            logging.error("OpenAI response has no choices")
-            raise Exception("OpenAI response has no choices")
-        
-        choice = response.choices[0]
-        content = choice.message.content
-        
-        # Check for empty or None content
-        if not content:
-            logging.error(f"OpenAI returned empty content. Choice: {choice}")
-            logging.error(f"Finish reason: {choice.finish_reason}")
-            raise Exception("OpenAI returned empty content")
-        
-        logging.info(f"OpenAI response received (length: {len(content)})")
-        return content
-        
-    except Exception as e:
-        logging.error(f"OpenAI API error with model {model}: {e}")
-        raise
-
-async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
-    """Generate content using OpenAI with fallback to secondary model"""
-    try:
-        # Try primary ChatGPT model first
-        return await _generate_openai_content(prompt_text, CHATGPT_PRIMARY_MODEL)
-    except Exception as e:
-        logging.warning(f"Primary OpenAI model failed: {e}. Trying fallback...")
-        try:
-            # Try fallback ChatGPT model
-            return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
-        except Exception as e2:
-            logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
-            raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
 
 def _is_retryable_gemini_exception(exc: Exception) -> bool:
@@ -5268,24 +5195,38 @@ CREATIVITY BOOSTERS:
     )
 
     if use_fast_generation_profile:
-        estimated_max_output_tokens = min(768, max(320, requested_options_count * 28 + 120))
         temperature_value = 0.75
 
         if is_starter_question_prompt:
-            # Starter question prompts (What/Who/Where/When/Why/How) should be short and stable.
-            # Lowering output budget and temperature reduces long-tail generation latency variance.
-            estimated_max_output_tokens = min(estimated_max_output_tokens, max(240, requested_options_count * 14 + 60))
+            # Starter question prompts (What/Who/Where/When/Why/How) are short and stable.
+            # Return plain strings — they display as-is and don't need button summaries.
+            estimated_max_output_tokens = min(480, max(240, requested_options_count * 14 + 60))
             temperature_value = 0.45
-
-        json_format_instructions = f"""
+            json_format_instructions = f"""
 {vocab_instruction}
 
 CRITICAL FORMAT: Return ONLY a valid JSON array of strings with exactly {requested_options_count} items. Nothing else.
-Each string element must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
-For jokes, include the punchline in the same string (e.g., "Why did the chicken cross the road? To get to the other side!").
-Do NOT return objects, do NOT include keys like "option", "summary", or "keywords" - the server will handle those automatically.
+Each string must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
 No markdown, no code blocks, no commentary. Return ONLY the JSON array.
 Example: ["hello everyone", "good to see you", "what's going on"]"""
+        else:
+            # Standard fast path: include option + summary so buttons show meaningful labels.
+            estimated_max_output_tokens = min(1024, max(400, requested_options_count * 42 + 120))
+            json_format_instructions = f"""
+{vocab_instruction}
+
+CRITICAL FORMAT: Return ONLY a valid JSON array where each item has "option" and "summary" keys. Exactly {requested_options_count} items.
+The "option" key contains the FULL spoken option text.
+The "summary" key is a 3-5 word button label that captures the CORE TOPIC — not the first few words. Ask yourself: what is this option ABOUT?
+Good examples:
+- option: "Hello, how are you doing today?" → summary: "Hello today"
+- option: "I am feeling very happy today." → summary: "Feeling very happy"
+- option: "I want to go to the park." → summary: "Go to park"
+- option: "Let us go play a fun game." → summary: "Play a game"
+- option: "Have a wonderful day and goodbye!" → summary: "Wonderful goodbye"
+Bad: summary: "Hello, how are you" — just copies the start, not a useful label.
+For jokes, include question AND punchline in the same "option".
+No markdown, no code blocks. Return ONLY the JSON array."""
     else:
         estimated_max_output_tokens = max(768, min(2048, int(llm_options_value) * 140))
         temperature_value = 0.9
@@ -5293,8 +5234,14 @@ Example: ["hello everyone", "good to see you", "what's going on"]"""
 {vocab_instruction}
 
 CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
 The "option" key should contain the FULL option text.
+The "summary" key must capture the CORE TOPIC or MEANING of the option — NOT just the first few words. Think: what is this option ABOUT? What distinctive words make it recognizable as a button label?
+- "I love to go to the park, what is your favorite place?" → summary: "Love the park"
+- "I am feeling happy today, how about you?" → summary: "Feeling happy today"
+- "My favorite food is pizza, what do you like to eat?" → summary: "Favorite food pizza"
+- "I use a wheelchair to get around, how do you get around?" → summary: "Use a wheelchair"
+- BAD: "I love to go to" — this just copies the start, tells the user nothing
+Keep summaries 3-5 words. If the option is 5 words or fewer, use the full option text.
 The "keywords" key should be a list of 3-5 keywords that include BOTH the specific descriptive words from the generated option AND relevant emotional/contextual terms for image matching. Always include the key descriptive words from your generated text (like "fantastic", "delightful", "cloud", "bursting", etc.) along with relevant emotional terms. For example: ["fantastic", "amazing", "positive", "excited"], ["delightful", "wonderful", "happy", "joyful"], or ["cloud", "nine", "elated", "high"].
 IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!"
 
@@ -5413,7 +5360,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     llm_generate_start_time = time.perf_counter()
 
     # --- Route to appropriate LLM ---
-    if llm_provider != "chatgpt" and is_starter_question_prompt:
+    if llm_provider == "chatgpt":
+        logging.error("chatgpt llm_provider requested but OpenAI is not supported; falling back to gemini.")
+        llm_provider = "gemini"
+
+    if is_starter_question_prompt:
         # Starter question prompts are dynamic and short-lived. Avoid cache warm-up/drift checks and
         # generate directly to reduce latency variance caused by cache bookkeeping/fallback paths.
         logging.info(f"⚡ Starter-question fast path (cache bypass) [{log_context}]")
@@ -5466,19 +5417,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     aac_user_id,
                 )
 
-    elif llm_provider == "chatgpt":
-        logging.info(f"Using OpenAI [{log_context}]. Building full prompt manually.")
-        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(
-            account_id,
-            aac_user_id,
-            final_user_query,
-            compose_mode=request_data.compose_mode,
-            compose_body=request_data.compose_body,
-            prefetched_user_info=user_info_doc,
-            prefetched_settings=user_settings,
-            include_rich_delta_context=include_rich_delta_context,
-        )
-        llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
         # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
         logging.info(f"🚀 Using Gemini with Base+Delta caching [{log_context}].")
@@ -6348,8 +6286,10 @@ class UserCurrentState(BaseModel): location: Optional[str] = ""; people: Optiona
 
 # --- FastAPI Lifespan Context Manager (Replaces @app.on_event) ---
 
-# Background task for periodic cache cleanup
+# Background tasks
 cleanup_task = None
+consent_email_task = None
+activity_sweep_task = None
 
 async def periodic_cache_cleanup():
     """Periodic background task to clean up expired caches every hour."""
@@ -6364,9 +6304,172 @@ async def periodic_cache_cleanup():
         except Exception as e:
             logging.error(f"Error in periodic cache cleanup: {e}", exc_info=True)
 
+async def _send_pending_consent_second_emails() -> None:
+    """Find verified consent records whose 5-day window has elapsed and send the second email."""
+    if not firestore_db:
+        return
+    now = dt.now(timezone.utc)
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("second_email_due_at", "<=", now)
+    )
+    all_docs = await asyncio.to_thread(lambda: list(query.stream()))
+    # Filter unsent in Python — avoids needing a composite index.
+    docs = [d for d in all_docs if (d.to_dict() or {}).get("second_email_sent_at") is None]
+    if not docs:
+        return
+    logging.info("Consent second-email: %d pending", len(docs))
+    for snap in docs:
+        ref = snap.reference
+        data = snap.to_dict() or {}
+        token = data.get("token", "")
+        parent_email = data.get("parent_email", "")
+        account_id = data.get("account_id", "")
+        aac_user_id = data.get("aac_user_id", "")
+        if not (token and parent_email and account_id and aac_user_id):
+            logging.warning("Consent second-email: skipping incomplete record %s", snap.id)
+            continue
+        revoke_url = f"{APP_PUBLIC_BASE_URL}/revoke-consent?t={token}"
+        body_text = (
+            "Hi,\n\n"
+            "Five days ago you confirmed parental consent for Bravo to learn from "
+            "your child's conversations.\n\n"
+            "Bravo uses patterns from conversations — such as favorite foods, activities, "
+            "and topics — to personalize responses. No health, personal, or sensitive "
+            "information is ever stored.\n\n"
+            f"If you wish to withdraw consent at any time, use this link:\n{revoke_url}\n\n"
+            "You can also manage consent within the Bravo app.\n\n"
+            "— The Bravo team"
+        )
+        body_html = (
+            "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
+            "<p>Hi,</p>"
+            "<p>Five days ago you confirmed parental consent for Bravo to learn from "
+            "your child's conversations.</p>"
+            "<p>Bravo uses patterns from conversations — such as favorite foods, activities, "
+            "and topics — to personalize responses. No health, personal, or sensitive "
+            "information is ever stored.</p>"
+            "<p>If you wish to withdraw consent, click the button below:</p>"
+            f"<p style='margin:24px 0'><a href='{revoke_url}' "
+            "style='background:#1565c0;color:#fff;padding:12px 24px;border-radius:6px;"
+            "text-decoration:none'>Withdraw consent</a></p>"
+            "<p>You can also manage consent at any time from within the Bravo app.</p>"
+            "<p>— The Bravo team</p>"
+            "</body></html>"
+        )
+        sent = await send_system_email(
+            to_address=parent_email,
+            subject="Your Bravo parental consent confirmation",
+            body_text=body_text,
+            body_html=body_html,
+            purpose="consent_second_email",
+        )
+        if sent:
+            await asyncio.to_thread(ref.update, {"second_email_sent_at": dt.now(timezone.utc)})
+        else:
+            logging.error(
+                "Consent second-email: send failed for %s/%s — will retry next hour",
+                account_id, aac_user_id,
+            )
+
+
+async def periodic_consent_second_email() -> None:
+    """Background job: check hourly for verified consent records needing a second email."""
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            await _send_pending_consent_second_emails()
+        except asyncio.CancelledError:
+            logging.info("Consent second-email task cancelled.")
+            break
+        except Exception as e:
+            logging.error("Error in periodic_consent_second_email: %s", e, exc_info=True)
+
+
+async def _sweep_stale_activity_for_user(account_id: str, aac_user_id: str) -> int:
+    """Delete activity log documents older than ACTIVITY_LOG_RETENTION_DAYS for one user.
+
+    Returns the number of documents deleted.
+    """
+    if not firestore_db:
+        return 0
+    cutoff = dt.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)
+    collection_ref = firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}"
+        f"/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/button_activity_log"
+    )
+    docs = await asyncio.to_thread(lambda: list(collection_ref.stream()))
+    to_delete = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        ts_raw = data.get("timestamp")
+        if not ts_raw:
+            to_delete.append(doc.reference)
+            continue
+        try:
+            entry_dt = dt.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            if entry_dt < cutoff:
+                to_delete.append(doc.reference)
+        except (ValueError, TypeError):
+            to_delete.append(doc.reference)
+
+    for ref in to_delete:
+        await asyncio.to_thread(ref.delete)
+    return len(to_delete)
+
+
+async def _sweep_all_stale_activity() -> None:
+    """Iterate every account/user and delete activity log entries outside the retention window."""
+    if not firestore_db:
+        return
+    try:
+        accounts = await asyncio.to_thread(
+            lambda: list(firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).stream())
+        )
+        total_deleted = 0
+        for account_doc in accounts:
+            account_id = account_doc.id
+            try:
+                users_ref = (
+                    firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+                    .document(account_id)
+                    .collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+                )
+                users = await asyncio.to_thread(lambda: list(users_ref.stream()))
+                for user_doc in users:
+                    try:
+                        deleted = await _sweep_stale_activity_for_user(account_id, user_doc.id)
+                        total_deleted += deleted
+                    except Exception as e:
+                        logging.warning(
+                            "Activity sweep: error for %s/%s: %s", account_id, user_doc.id, e
+                        )
+            except Exception as e:
+                logging.warning("Activity sweep: error listing users for account %s: %s", account_id, e)
+        if total_deleted:
+            logging.info("Activity sweep: deleted %d stale entries across all profiles", total_deleted)
+        else:
+            logging.info("Activity sweep: no stale entries found")
+    except Exception as e:
+        logging.error("Activity sweep: unexpected error: %s", e, exc_info=True)
+
+
+async def periodic_activity_sweep() -> None:
+    """Background job: sweep stale activity log entries once per day."""
+    await asyncio.sleep(60)  # short initial delay so startup settles first
+    while True:
+        try:
+            await _sweep_all_stale_activity()
+        except Exception as e:
+            logging.error("periodic_activity_sweep: unexpected error: %s", e, exc_info=True)
+        await asyncio.sleep(24 * 60 * 60)  # run once per day
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global cleanup_task
+    global cleanup_task, consent_email_task, activity_sweep_task
     
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
@@ -6379,6 +6482,10 @@ async def lifespan(app: FastAPI):
     # Start periodic cache cleanup task
     cleanup_task = asyncio.create_task(periodic_cache_cleanup())
     logging.info("✅ Started periodic cache cleanup task (runs every hour)")
+    consent_email_task = asyncio.create_task(periodic_consent_second_email())
+    logging.info("✅ Started periodic consent second-email task (runs every hour)")
+    activity_sweep_task = asyncio.create_task(periodic_activity_sweep())
+    logging.info("✅ Started periodic activity log sweep task (runs once per day)")
 
     # Warm the static image index in the background so new profiles don't wait.
     # Runs automatically on every cold start; a no-op if the index is already valid.
@@ -6402,6 +6509,18 @@ async def lifespan(app: FastAPI):
         cleanup_task.cancel()
         try:
             await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    if consent_email_task:
+        consent_email_task.cancel()
+        try:
+            await consent_email_task
+        except asyncio.CancelledError:
+            pass
+    if activity_sweep_task:
+        activity_sweep_task.cancel()
+        try:
+            await activity_sweep_task
         except asyncio.CancelledError:
             pass
     logging.info("Application shutdown complete.")
@@ -8798,7 +8917,7 @@ class SettingsModel(BaseModel):
     speech_rate: Optional[int] = Field(None, description="Speech rate in WPM (e.g., 100-300).", gt=49, lt=401) # Added speech_rate
     LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 0-50)", ge=0, le=50) 
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
-    llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
+    llm_provider: Optional[str] = Field(None, description="LLM provider (only 'gemini' is supported).", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
     scanMode: Optional[str] = Field(None, description="Scanning mode: 'auto' or 'step'")
     waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
@@ -9376,6 +9495,28 @@ async def update_toolbar_pin(
         raise HTTPException(status_code=500, detail=f"Failed to update toolbar PIN: {str(e)}")
 
 
+ACTIVITY_LOG_RETENTION_DAYS = 180  # 6-month rolling retention for button activity logs
+
+
+def _prune_old_activity_entries(entries: List[Dict]) -> List[Dict]:
+    """Return only entries within the rolling retention window; drop malformed/missing timestamps."""
+    cutoff = dt.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)
+    kept = []
+    for entry in entries:
+        ts = entry.get("timestamp")
+        if not ts:
+            continue
+        try:
+            entry_dt = dt.fromisoformat(ts.replace("Z", "+00:00"))
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            if entry_dt >= cutoff:
+                kept.append(entry)
+        except ValueError:
+            pass
+    return kept
+
+
 PROFILE_SETTINGS_EXPORT_TYPE = "bravo_profile_settings"
 PROFILE_SETTINGS_SCHEMA_VERSION = 1
 PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
@@ -9384,6 +9525,18 @@ PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
     "guess_what_categories",
     "hangman_categories",
 )
+# Sections that contain personal user content (narrative, relationships, diary…).
+# Used in both directions:
+#   Export: omitted unless include_personal=true is requested.
+#   Import: skipped if the destination profile has not passed the consent gate.
+PROFILE_SETTINGS_PERSONAL_FIELDS = frozenset({
+    "user_narrative",
+    "current_state",
+    "diary_entries",
+    "friends_family",
+    "birthdays",
+    "favorites_config",
+})
 
 
 async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Dict[str, Any]:
@@ -9708,22 +9861,36 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
 
 @app.get("/api/profile-settings/export")
 async def export_profile_settings(
-    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    include_personal: bool = False,
 ):
-    """Export profile settings/configuration for transfer to another account/profile."""
+    """Export profile settings/configuration for transfer to another account/profile.
+
+    When include_personal=false (default) the personal content sections
+    (PROFILE_SETTINGS_PERSONAL_FIELDS) are omitted from the bundle so that
+    personal data is never transmitted for a config-only export.
+    """
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
 
     try:
         bundle = await _load_profile_settings_bundle(account_id, aac_user_id)
+
+        if not include_personal:
+            bundle = {k: v for k, v in bundle.items() if k not in PROFILE_SETTINGS_PERSONAL_FIELDS}
+
+        # When personal content is included, omit the display_name so the source
+        # user's name is not embedded in a file that may be shared.
+        profile_meta: Dict[str, Any] = {"aac_user_id": aac_user_id}
+        if not include_personal:
+            profile_meta["display_name"] = bundle.get("display_name")
+
         export_payload = {
             "export_type": PROFILE_SETTINGS_EXPORT_TYPE,
             "schema_version": PROFILE_SETTINGS_SCHEMA_VERSION,
             "exported_at": dt.now(timezone.utc).isoformat(),
-            "profile": {
-                "aac_user_id": aac_user_id,
-                "display_name": bundle.get("display_name"),
-            },
+            "include_personal": include_personal,
+            "profile": profile_meta,
             "payload": bundle,
         }
         return JSONResponse(content=export_payload)
@@ -9735,6 +9902,71 @@ async def export_profile_settings(
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail="Failed to export profile settings.")
+
+
+@app.get("/api/my-data/export")
+async def export_my_data(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Full data export for right-to-access / COPPA guardian requests.
+
+    Loads every store that holds personal data and returns one JSON file.
+    This is intentionally not importable — profile-settings/export handles
+    portability; this one handles transparency.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        (
+            profile_settings,
+            learned_facts,
+            chat_history,
+            activity_log_raw,
+            consent,
+        ) = await asyncio.gather(
+            _load_profile_settings_bundle(account_id, aac_user_id),
+            load_chat_derived_narrative(account_id, aac_user_id),
+            load_chat_history(account_id, aac_user_id),
+            load_button_activity_log(account_id, aac_user_id),
+            load_consent(account_id, aac_user_id),
+        )
+
+        interview_responses = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/interview_responses",
+            default_data={},
+        )
+
+        export = {
+            "export_version": 1,
+            "exported_at": dt.now(timezone.utc).isoformat(),
+            "aac_user_id": aac_user_id,
+            "profile_settings": profile_settings,
+            "learned_facts": learned_facts,
+            "interview_responses": interview_responses,
+            "chat_history": chat_history,
+            "activity_log": _prune_old_activity_entries(activity_log_raw),
+            "consent_record": {
+                k: v for k, v in consent.items()
+                if k in {"learn_from_history", "use_entered_details", "auto_approve_learned",
+                         "is_minor_under_13", "consent_given_at", "consent_withdrawn_at",
+                         "notice_version"}
+            },
+        }
+
+        filename = f"bravo_my_data_{aac_user_id[:8]}_{dt.now(timezone.utc).strftime('%Y%m%d')}.json"
+        return Response(
+            content=json.dumps(export, indent=2, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logging.error(
+            f"Failed to export my-data for {account_id}/{aac_user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to export data.")
 
 
 @app.post("/api/profile-settings/import")
@@ -9771,6 +10003,23 @@ async def import_profile_settings(
     if not isinstance(bundle, dict):
         raise HTTPException(status_code=400, detail="Import payload missing valid 'payload' object.")
 
+    # Gate personal-content sections against the consent check.
+    # Rather than rejecting the whole import, we silently strip the personal
+    # sections and report them in skipped_sections so the caller can explain.
+    skipped_sections: List[str] = []
+    consent_allows_personal = False
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+        consent_allows_personal = not _is_minor(consent) or bool(consent.get("consent_given_at"))
+    except Exception:
+        pass  # fail closed: treat as minor without consent
+
+    if not consent_allows_personal:
+        personal_present = [k for k in PROFILE_SETTINGS_PERSONAL_FIELDS if k in bundle]
+        if personal_present:
+            bundle = {k: v for k, v in bundle.items() if k not in PROFILE_SETTINGS_PERSONAL_FIELDS}
+            skipped_sections = personal_present
+
     imported_sections = await _apply_profile_settings_bundle(account_id, aac_user_id, bundle)
 
     # Imported settings affect user context and option generation; clear cache.
@@ -9785,6 +10034,7 @@ async def import_profile_settings(
             "success": True,
             "message": "Profile settings imported successfully.",
             "imported_sections": imported_sections,
+            "skipped_sections": skipped_sections,
         }
     )
 
@@ -9803,23 +10053,48 @@ class SelectAccountRequest(BaseModel):
 
 # NEW: Get account details for editing
 @app.get("/api/account/details")
-async def get_account_details(current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
-    """Get account details for editing."""
+async def get_account_details(
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+    x_admin_target_account: str = Header(None, alias="X-Admin-Target-Account"),
+):
+    """Get account details for editing. Admins may pass X-Admin-Target-Account to read a target account."""
     global firestore_db
     if not firestore_db:
         raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
-    
+
     try:
-        account_id = current_account["account_id"]
-        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
-        account_doc = await asyncio.to_thread(account_doc_ref.get)
-        
-        if not account_doc.exists:
-            raise HTTPException(status_code=404, detail="Account not found")
-        
-        account_data = account_doc.to_dict()
-        
-        # Return only the fields that can be edited
+        caller_account_id = current_account["account_id"]
+
+        # Resolve which account's details to return.
+        if x_admin_target_account:
+            # Verify the caller is the admin before exposing another account's data.
+            caller_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(caller_account_id).get
+            )
+            caller_data = caller_doc.to_dict() if caller_doc.exists else {}
+            caller_email = caller_data.get("email") or current_account.get("email", "")
+            if caller_email != "admin@talkwithbravo.com":
+                raise HTTPException(status_code=403, detail="Access denied: admin privileges required.")
+
+            target_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(x_admin_target_account).get
+            )
+            if not target_doc.exists:
+                raise HTTPException(status_code=404, detail="Target account not found")
+
+            target_data = target_doc.to_dict() or {}
+            if not target_data.get("allow_admin_access", False):
+                raise HTTPException(status_code=403, detail="Access denied to target account")
+
+            account_data = target_data
+        else:
+            account_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(caller_account_id).get
+            )
+            if not account_doc.exists:
+                raise HTTPException(status_code=404, detail="Account not found")
+            account_data = account_doc.to_dict()
+
         return {
             "email": account_data.get("email", ""),
             "account_name": account_data.get("account_name", ""),
@@ -9827,7 +10102,7 @@ async def get_account_details(current_account: Annotated[Dict[str, str], Depends
             "phone": account_data.get("phone", ""),
             "therapist_email": account_data.get("therapist_email", ""),
             "is_therapist": account_data.get("is_therapist", False),
-            "allow_admin_access": account_data.get("allow_admin_access", True)
+            "allow_admin_access": account_data.get("allow_admin_access", False),
         }
     except HTTPException:
         raise
@@ -9910,7 +10185,7 @@ async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Dep
             
             # Admin can access all accounts that allow admin access
             if is_admin:
-                if account_data.get("allow_admin_access", True):  # Default to True if not set
+                if account_data.get("allow_admin_access", False):  # Default to False if not set
                     accessible_accounts.append({
                         "account_id": account_doc.id,
                         "account_name": account_data.get("account_name", ""),
@@ -9981,7 +10256,7 @@ async def select_account_for_access(
         
         # Verify access permissions
         has_access = False
-        if is_admin and target_account_data.get("allow_admin_access", True):
+        if is_admin and target_account_data.get("allow_admin_access", False):
             has_access = True
         elif is_therapist:
             # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -10044,7 +10319,7 @@ async def get_admin_account_users(
         
         # Verify access permissions
         has_access = False
-        if is_admin and target_account_data.get("allow_admin_access", True):
+        if is_admin and target_account_data.get("allow_admin_access", False):
             has_access = True
         elif is_therapist:
             # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -11778,16 +12053,11 @@ async def migrate_recent_greetings(account_id: str, aac_user_id: str) -> bool:
 
 
 # =============================================================================
-# A7 — PREFERENCE EXTRACTION PIPELINE (DORMANT — NOT YET WIRED IN)
+# A7 — PREFERENCE EXTRACTION PIPELINE
 #
 # Five-layer approach: input gate → model extraction → output validation →
 # pending queue → adult approval → profile write.
-#
-# NOT called from process_metadata_async yet.  Before enabling:
-#   1. Decide where learning_enabled lives (per-user Firestore setting recommended).
-#   2. Run run_a7_acceptance_tests() against the production model and verify ≥80%.
-#   3. Wire maybe_propose_preference into process_metadata_async.
-#   4. Build an admin UI for approve_proposal / pending queue review.
+# Called from process_metadata_async for every AAC user response.
 # =============================================================================
 
 _A7_EXTRACTION_CATEGORIES: List[str] = [
@@ -12018,7 +12288,8 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
 
 
 async def a7_approve_proposal(account_id: str, aac_user_id: str,
-                               category: str, value: str, timestamp: Any) -> bool:
+                               category: str, value: str, timestamp: Any,
+                               sentiment: str = "likes") -> bool:
     """A7 Layer 5 — adult approval commits to profile and invalidates cache (A34).
 
     This is the ONLY path that writes to extracted_facts.
@@ -12027,10 +12298,22 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
     for fact in facts:
         if fact.get("category") == category and fact.get("fact", "").lower() == value.lower():
-            return False
+            if fact.get("sentiment") == sentiment:
+                _a7_record_metric("approve.duplicate", f'category="{category}"')
+                return False  # exact duplicate
+            # Sentiment changed (user reversed preference) — update in place
+            fact["sentiment"] = sentiment
+            fact["first_mentioned"] = timestamp
+            narrative["extracted_facts"] = facts
+            narrative["last_updated"] = timestamp
+            await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+            await cache_manager.invalidate_cache(account_id, aac_user_id)
+            _a7_record_metric("approve.sentiment_updated", f'category="{category}"')
+            return True
     facts.append({
         "fact": value,
         "category": category,
+        "sentiment": sentiment,
         "source": "learned",
         "first_mentioned": timestamp,
         "mention_count": 1,
@@ -12040,6 +12323,7 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     await save_chat_derived_narrative(account_id, aac_user_id, narrative)
     await cache_manager.invalidate_cache(account_id, aac_user_id)
     logging.info(f"Approved learned fact ({category}) for {account_id}/{aac_user_id}")
+    _a7_record_metric("approved", f'category="{category}"')
     return True
 
 
@@ -12054,9 +12338,8 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
                                    learning_enabled: bool) -> None:
     """A7 orchestration — run all five layers for one utterance.
 
-    DORMANT: not yet called from process_metadata_async.
-    Wire in only after: (1) learning_enabled source is defined, (2) acceptance
-    tests pass against production model, (3) admin approval UI is ready.
+    Called from process_metadata_async for every AAC user response.
+    Skips silently when learning_enabled is False.
     """
     try:
         if not learning_enabled:
@@ -12070,7 +12353,11 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
         if proposal is None:
             _a7_record_metric("validation.rejected", f'reason="{reason}"')
             return
-        if await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
+        consent = await load_consent(account_id, aac_user_id)
+        if is_auto_approve_enabled(consent):
+            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"))
+            _a7_record_metric("auto_approved", f'category="{proposal["category"]}"')
+        elif await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
             _a7_record_metric("proposed", f'category="{proposal["category"]}"')
     except Exception as e:
         logging.error(f"Preference extraction pipeline error: {e}", exc_info=True)
@@ -12156,6 +12443,235 @@ async def run_a7_acceptance_tests() -> bool:
     return not failures
 
 # --- End A7 dormant block ---
+
+
+# =============================================================================
+# A44 — Parental consent management
+# =============================================================================
+
+_CONSENT_DOC_SUBPATH = "info/consent"
+_CONSENT_VERIFICATIONS_COLLECTION = "consent_verifications"
+_CONSENT_TOKEN_EXPIRY_DAYS = 7
+_CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
+_MAX_CONSENT_TOKENS_PER_USER_PER_DAY = 10
+_MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_HOUR = 3
+# Bump this date whenever the consent notice shown to parents materially changes.
+CONSENT_NOTICE_VERSION = "2026-09-01"
+
+
+_CONSENT_CACHE_TTL_SECONDS = 45
+_consent_cache: Dict[tuple, tuple] = {}  # (account_id, aac_user_id) -> (consent_dict, expiry_monotonic)
+
+
+async def load_consent(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    """Load consent document. Returns empty dict (all flags default False) if absent.
+
+    Results are cached in-process for up to 45 s to avoid a Firestore read on every
+    button-click log call. save_consent() busts the cache so newly-granted consent
+    takes effect immediately rather than waiting out the TTL.
+    """
+    key = (account_id, aac_user_id)
+    cached = _consent_cache.get(key)
+    if cached:
+        cached_data, expiry = cached
+        if time.monotonic() < expiry:
+            return cached_data
+
+    data = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=_CONSENT_DOC_SUBPATH,
+        default_data={},
+    )
+    result = data or {}
+    _consent_cache[key] = (result, time.monotonic() + _CONSENT_CACHE_TTL_SECONDS)
+    return result
+
+
+async def save_consent(account_id: str, aac_user_id: str, data: Dict[str, Any]) -> None:
+    _consent_cache.pop((account_id, aac_user_id), None)  # bust cache on write
+    await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=_CONSENT_DOC_SUBPATH,
+        data_to_save=data,
+    )
+
+
+def _is_minor(consent: Dict[str, Any]) -> bool:
+    """Fail closed — unset is treated as under-13 for COPPA safety."""
+    v = consent.get("is_minor_under_13")
+    return v is None or bool(v)
+
+
+def _consent_ok(consent: Dict[str, Any]) -> bool:
+    """True when the profile is not a gated minor (adult, or minor with verified consent)."""
+    return not (_is_minor(consent) and not consent.get("consent_given_at"))
+
+
+def is_learning_enabled(consent: Dict[str, Any]) -> bool:
+    return _consent_ok(consent) and bool(consent.get("learn_from_history", False))
+
+
+async def _check_audit_consent_and_purge(account_id: str, aac_user_id: str) -> bool:
+    """Return True when the profile is allowed to surface activity data.
+
+    Fails closed: any error reading consent denies access. If the profile is a
+    minor without verified parental consent the stored log is purged (not merely
+    hidden). A purge failure is logged loudly and still denies — the data stays
+    but the caller is never served it, and the error surface makes the stuck state
+    discoverable.
+    """
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+    except Exception as e:
+        logging.error(f"Audit consent read failed for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        return False  # fail closed — can't determine consent state
+
+    if _is_minor(consent) and not consent.get("consent_given_at"):
+        try:
+            await save_button_activity_log(account_id, aac_user_id, [])
+        except Exception as e:
+            logging.error(f"Audit log purge FAILED for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        return False  # deny regardless of purge outcome
+
+    return True
+
+
+async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> None:
+    """Raise 403 when writing profile data without verified consent.
+
+    Fails closed: profiles with unknown age (is_minor_under_13 unset) are treated
+    as minors until the age question is explicitly answered. This covers every profile
+    created via Add New Profile (which doesn't ask age) and all pre-feature profiles.
+    The remedy is to answer the age question, at which point the gate opens for adults
+    and stays until consent is verified for confirmed minors.
+    """
+    consent = await load_consent(account_id, aac_user_id)
+    if _is_minor(consent) and not consent.get("consent_given_at"):
+        raise HTTPException(
+            status_code=403,
+            detail="Parental consent must be verified before storing profile data for a user under 13.",
+        )
+
+
+def is_personalization_enabled(consent: Dict[str, Any]) -> bool:
+    return _consent_ok(consent) and bool(consent.get("use_entered_details", False))
+
+
+def is_auto_approve_enabled(consent: Dict[str, Any]) -> bool:
+    return bool(consent.get("auto_approve_learned", False))
+
+
+async def set_auto_approve(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    consent = await load_consent(account_id, aac_user_id)
+    consent["auto_approve_learned"] = enabled
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Auto-approve set to %s for %s/%s", enabled, account_id, aac_user_id)
+
+
+async def set_use_entered_details(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    consent = await load_consent(account_id, aac_user_id)
+    consent["use_entered_details"] = enabled
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("use_entered_details set to %s for %s/%s", enabled, account_id, aac_user_id)
+
+
+async def record_parental_consent(
+    account_id: str, aac_user_id: str, notice_version: str | None = None
+) -> None:
+    """Mark parental consent given. Idempotent — safe to call on re-verify."""
+    consent = await load_consent(account_id, aac_user_id)
+    consent["learn_from_history"] = True
+    consent["consent_given_at"] = dt.utcnow().isoformat()
+    consent["notice_version"] = notice_version or CONSENT_NOTICE_VERSION
+    consent.pop("consent_withdrawn_at", None)
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Parental consent recorded for %s/%s", account_id, aac_user_id)
+
+
+async def withdraw_consent(account_id: str, aac_user_id: str) -> None:
+    """Withdraw parental consent. Idempotent."""
+    consent = await load_consent(account_id, aac_user_id)
+    consent["learn_from_history"] = False
+    consent["consent_withdrawn_at"] = dt.utcnow().isoformat()
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Parental consent withdrawn for %s/%s", account_id, aac_user_id)
+
+
+async def _a7_set_consent_control(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    """Programmatic toggle without the email flow (used by POST /api/consent/control)."""
+    if enabled:
+        await record_parental_consent(account_id, aac_user_id)
+    else:
+        await withdraw_consent(account_id, aac_user_id)
+
+
+async def _consent_create_verification(account_id: str, aac_user_id: str,
+                                       parent_email: str) -> str:
+    """Create a fresh verification record in the top-level collection. Returns the token."""
+    if not firestore_db:
+        raise RuntimeError("Firestore not available")
+    token = secrets.token_hex(32)
+    doc: Dict[str, Any] = {
+        "account_id": account_id,
+        "aac_user_id": aac_user_id,
+        "parent_email": parent_email,
+        "notice_version": CONSENT_NOTICE_VERSION,
+        "token": token,
+        "created_at": dt.utcnow(),
+        "used_at": None,
+        "second_email_due_at": None,
+        "second_email_sent_at": None,
+    }
+    await asyncio.to_thread(
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION).document().set, doc
+    )
+    return token
+
+
+async def _count_recent_consent_tokens(
+    account_id: str,
+    aac_user_id: str,
+    parent_email: Optional[str] = None,
+    window_hours: int = 24,
+) -> int:
+    """Count consent tokens created in the last window_hours for this user (and optionally recipient).
+
+    Raises on any Firestore error — callers must treat an exception as fail-closed (enforce the limit).
+    Uses a datetime object for the >= comparison so it works against Firestore Timestamp fields.
+    Requires a composite index on (account_id, aac_user_id, created_at) [+ parent_email for
+    the recipient variant] in consent_verifications.
+    """
+    if not firestore_db:
+        raise RuntimeError("Firestore not available")
+    cutoff = dt.utcnow() - timedelta(hours=window_hours)
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("account_id", "==", account_id)
+        .where("aac_user_id", "==", aac_user_id)
+        .where("created_at", ">=", cutoff)
+    )
+    if parent_email:
+        query = query.where("parent_email", "==", parent_email)
+    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    return len(docs)
+
+
+async def _consent_find_verification(token: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
+    """Return (doc_ref, data) for the given token, or None."""
+    if not firestore_db or not token:
+        return None
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("token", "==", token)
+        .limit(1)
+    )
+    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    if not docs:
+        return None
+    snap = docs[0]
+    return snap.reference, snap.to_dict() or {}
 
 
 def classify_message_category(message_text: str, message_type: str) -> str:
@@ -12312,6 +12828,7 @@ async def get_birthdays(current_ids: Annotated[Dict[str, str], Depends(get_curre
 async def save_birthdays(birthday_data: BirthdayData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
+    await _require_profile_write_allowed(account_id, aac_user_id)
     logging.info(f"POST /api/birthdays request received for account {account_id} and user {aac_user_id} with data: {birthday_data}")
     data_to_save = birthday_data.model_dump(mode='json')
     
@@ -12340,6 +12857,7 @@ async def get_friends_family(current_ids: Annotated[Dict[str, str], Depends(get_
 async def save_friends_family(friends_family_data: FriendsFamilyData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
+    await _require_profile_write_allowed(account_id, aac_user_id)
     logging.info(f"POST /api/friends-family request received for account {account_id} and user {aac_user_id} with data: {friends_family_data}")
     data_to_save = friends_family_data.model_dump(mode='json')
     
@@ -12526,7 +13044,8 @@ async def get_cache_debug_info(
 async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
-    
+    await _require_profile_write_allowed(account_id, aac_user_id)
+
     # The request body can have 'narrative' or 'userInfo'. Let's handle both for compatibility.
     user_info = request.get("narrative", request.get("userInfo", ""))
     current_mood = request.get("currentMood")
@@ -12618,58 +13137,123 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
 # Custom Images helpers
 # ---------------------------------------------------------------------------
 
-def _gcs_storage_path_from_url(image_url: str) -> str | None:
-    """Extract the GCS object path from a storage.googleapis.com URL."""
-    prefix = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
-    if image_url and image_url.startswith(prefix):
-        return image_url[len(prefix):]
+def _gcs_storage_path_from_url(image_url: str) -> tuple[str, str] | None:
+    """Extract (bucket_name, object_path) from a storage.googleapis.com URL.
+
+    Returns None if the URL is not a GCS URL for either of our buckets.
+    """
+    for bucket in (AAC_IMAGES_BUCKET_NAME, CUSTOM_IMAGES_BUCKET_NAME):
+        if not bucket:
+            continue
+        prefix = f"https://storage.googleapis.com/{bucket}/"
+        if image_url and image_url.startswith(prefix):
+            return bucket, image_url[len(prefix):]
     return None
 
 
-def _signed_image_url_from_path(storage_path: str) -> str:
-    """Generate a time-limited signed URL for a GCS image object."""
-    if not storage_client or not AAC_IMAGES_BUCKET_NAME:
-        return storage_path
+def _signed_url_for_custom_image(storage_path: str) -> str:
+    """Generate a V4 signed URL for an object in the private custom-images bucket.
 
-    bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
-    blob = bucket.blob(storage_path)
-
+    Requires the Cloud Run service account to have roles/iam.serviceAccountTokenCreator
+    on itself so the IAM SignBlob API can be used without a private key file.
+    Falls back to /api/image-proxy on failure.
+    """
     from datetime import timedelta
-    return blob.generate_signed_url(version="v4", expiration=timedelta(hours=6), method="GET")
+    from urllib.parse import quote
+
+    if not storage_client or not CUSTOM_IMAGES_BUCKET_NAME:
+        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        from google.auth import iam as google_iam
+        from google.oauth2 import service_account
+
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        auth_req = google.auth.transport.requests.Request()
+        credentials.refresh(auth_req)
+
+        sa_email = getattr(credentials, "service_account_email", None)
+        if not sa_email:
+            raise ValueError("No service account email available")
+
+        signer = google_iam.Signer(auth_req, credentials, sa_email)
+        signing_credentials = service_account.Credentials(
+            signer=signer,
+            service_account_email=sa_email,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+
+        from google.cloud import storage as gcs_storage
+        signing_client = gcs_storage.Client(
+            project=CONFIG.get("gcp_project_id"), credentials=signing_credentials
+        )
+        blob = signing_client.bucket(CUSTOM_IMAGES_BUCKET_NAME).blob(storage_path)
+        return blob.generate_signed_url(
+            version="v4", expiration=timedelta(hours=6), method="GET"
+        )
+    except Exception as e:
+        logging.warning(f"Failed to sign custom image URL for '{storage_path}': {e}")
+        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
 
 
 def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
-    """Return a browser-loadable image URL for stored GCS images."""
-    from urllib.parse import quote
+    """Return a browser-loadable URL for a GCS image.
 
+    - Main AAC images bucket (public, legacyObjectReader): return raw URL — <img> loads directly.
+    - Custom images bucket (private): return a signed URL (or proxy fallback) — requires auth.
+    """
     if storage_path:
-        try:
-            return _signed_image_url_from_path(storage_path)
-        except Exception as e:
-            logging.warning(f"Failed to sign image URL for path '{storage_path}': {e}")
-            return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+        if storage_path.startswith("custom_images/"):
+            return _signed_url_for_custom_image(storage_path)
+        if not AAC_IMAGES_BUCKET_NAME:
+            return image_url
+        return f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
 
     if not image_url:
         return image_url
 
-    path = _gcs_storage_path_from_url(image_url)
-    if path is None:
-        return image_url
+    result = _gcs_storage_path_from_url(image_url)
+    if result is None:
+        return image_url  # not one of our GCS buckets — return as-is
 
-    try:
-        return _signed_image_url_from_path(path)
-    except Exception as e:
-        logging.warning(f"Failed to sign image URL for '{image_url}': {e}")
-        return f"/api/image-proxy?path={quote(path, safe='')}"
+    bucket_name, path = result
+    if bucket_name == CUSTOM_IMAGES_BUCKET_NAME:
+        return _signed_url_for_custom_image(path)
+
+    # Public main bucket — direct URL works in <img> tags
+    return image_url
+
+
+def _rewrite_image_urls(obj):
+    """Recursively rewrite all image_url fields in dicts/lists through _display_image_url."""
+    if isinstance(obj, dict):
+        if "image_url" in obj and obj["image_url"]:
+            obj["image_url"] = _display_image_url(obj["image_url"], obj.get("storage_path"))
+        for v in obj.values():
+            _rewrite_image_urls(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _rewrite_image_urls(item)
 
 
 @app.get("/api/image-proxy")
 async def proxy_custom_image(
-    path: str
+    path: str,
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
-    """Proxy a custom-image object from GCS so browser image tags can load it."""
+    """Fallback proxy for private custom-image objects in GCS.
+
+    Generates a signed URL for the object in the private custom-images bucket
+    and returns a 302 redirect so the browser fetches directly from GCS.
+    The signed URL carries auth in its query string — no Authorization header needed.
+    """
+    account_id = current_account.get("account_id")
     try:
-        if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+        if not CUSTOM_IMAGES_BUCKET_NAME:
             raise HTTPException(status_code=503, detail="Storage not available")
 
         # Basic path sanity-check to prevent traversal attacks
@@ -12678,30 +13262,21 @@ async def proxy_custom_image(
         if ".." in normalised or normalised != path.lstrip("/"):
             raise HTTPException(status_code=400, detail="Invalid path")
 
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
-        blob = bucket.blob(normalised)
+        # custom_images paths are user-specific; restrict to the owning account.
+        path_parts = normalised.split("/")
+        if path_parts[0] == "custom_images":
+            if len(path_parts) < 3 or path_parts[1] != account_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
 
-        if not blob.exists():
-            raise HTTPException(status_code=404, detail="Image not found")
+        # Generate a signed URL and redirect — avoids streaming bytes through the server.
+        import asyncio
+        loop = asyncio.get_event_loop()
+        signed_url = await loop.run_in_executor(None, _signed_url_for_custom_image, normalised)
 
-        image_bytes = blob.download_as_bytes()
-
-        # Use stored content-type if available, otherwise guess from extension
-        content_type = blob.content_type or "application/octet-stream"
-        if content_type == "application/octet-stream":
-            ext = normalised.rsplit(".", 1)[-1].lower() if "." in normalised else ""
-            content_type = {
-                "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                "png": "image/png", "gif": "image/gif",
-                "webp": "image/webp"
-            }.get(ext, "application/octet-stream")
-
-        from fastapi.responses import Response
-        return Response(
-            content=image_bytes,
-            media_type=content_type,
-            headers={"Cache-Control": "private, max-age=86400"}
-        )
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=signed_url, status_code=302)
     except HTTPException:
         raise
     except Exception as e:
@@ -12758,20 +13333,20 @@ async def upload_custom_image(
         file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
         unique_filename = f"custom_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
         storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
-        
-        # Upload to Google Cloud Storage
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+
+        # Upload to the private custom-images bucket
+        bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
-        
+
         # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
             content_type=image.content_type or "image/png"
         )
-        
-        # Construct public URL
-        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
-        
+
+        # Store the canonical GCS URL; _display_image_url converts it to a signed URL at serve time.
+        image_url = f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
         # Create Firestore document
         doc_data = {
             "concept": concept,
@@ -13062,20 +13637,20 @@ async def upload_user_profile_image(
         file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
         unique_filename = f"profile_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
         storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
-        
-        # Upload to Google Cloud Storage
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+
+        # Upload to the private custom-images bucket
+        bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
-        
+
         # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
             content_type=image.content_type or "image/png"
         )
-        
-        # Construct public URL
-        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
-        
+
+        # Store the canonical GCS URL; _display_image_url converts it to a signed URL at serve time.
+        image_url = f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
         # Automatically tag with user name and personal pronouns
         # Include both proper case and lowercase for better matching
         personal_pronouns = ["I", "me", "myself"]
@@ -13259,10 +13834,12 @@ async def remove_profile_image(
         
         profile_image = profile_doc.to_dict()
         
-        # Delete from Cloud Storage
+        # Delete from Cloud Storage — determine bucket from stored URL
         if storage_client and profile_image.get("storage_path"):
             try:
-                bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+                _parsed = _gcs_storage_path_from_url(profile_image.get("image_url", ""))
+                _bucket_name = _parsed[0] if _parsed else CUSTOM_IMAGES_BUCKET_NAME or AAC_IMAGES_BUCKET_NAME
+                bucket = storage_client.bucket(_bucket_name)
                 blob = bucket.blob(profile_image["storage_path"])
                 blob.delete()
                 logging.info(f"Deleted profile image from storage: {profile_image['storage_path']}")
@@ -13411,9 +13988,14 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         account_id = current_ids["account_id"]
         question = payload.question or ""
         response = payload.response or ""
-        if not question.strip() and not response.strip(): 
+        if not question.strip() and not response.strip():
             raise HTTPException(status_code=400, detail="Either question or response must be provided.")
-        
+
+        consent = await load_consent(account_id, aac_user_id)
+        if _is_minor(consent) and not consent.get("consent_given_at"):
+            logging.info(f"record_chat_history: skipped for {account_id}/{aac_user_id} — minor without verified consent (is_minor_under_13={consent.get('is_minor_under_13')})")
+            return JSONResponse(content={"message": "Chat history recording skipped — parental consent required."})
+
         timestamp = dt.now().isoformat()
         
         # Save basic entry immediately (fast - no classification needed)
@@ -13467,12 +14049,21 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
                         # A40: only canonical greeting forms are stored, not verbatim utterances.
                         if message_type == "greeting":
                             await _update_recent_greetings(account_id, aac_user_id, response, timestamp)
-                        
+
                         break
-                
+
                 # Save updated history with metadata
                 await save_chat_history(account_id, aac_user_id, history)
                 logging.info(f"Chat history metadata processed for {account_id}/{aac_user_id}")
+
+                # A7: extract preference from the AAC user's utterance if learning is enabled
+                if response and response.strip():
+                    consent = await load_consent(account_id, aac_user_id)
+                    await maybe_propose_preference(
+                        account_id, aac_user_id,
+                        response.strip(), timestamp,
+                        is_learning_enabled(consent)
+                    )
             except Exception as e:
                 logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
         
@@ -13501,6 +14092,90 @@ class PageActivityReportItem(BaseModel):
 
 
 
+@app.get("/api/audit/reports/tap-board-activity", response_model=List[PageActivityReportItem])
+async def get_tap_board_activity_report(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Board-level activity report for Tap Interface users.
+
+    Unlike the scan global-page-activity endpoint this uses tap config boards
+    (not pages.json) and filters the activity log to tap-sourced entries only,
+    so scan pages never appear in the result.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
+        tap_config = await load_tap_nav_config(account_id, aac_user_id)
+
+        # Collect board names from tap config
+        defined_board_names: set = set()
+        if isinstance(tap_config, dict):
+            for board in tap_config.get("boards", []):
+                label = (board.get("label") or "").strip()
+                if label and label.lower() != "home":
+                    defined_board_names.add(label.lower())
+
+        # Count clicks for tap entries only, grouping by board (page_name)
+        board_click_counts: Counter = Counter()
+        for entry in activity_log:
+            if entry.get("interface_source") != "tap":
+                continue
+            board = (entry.get("page_name") or "").strip().lower()
+            if board and board != "home":
+                board_click_counts[board] += 1
+
+        report_data: List[PageActivityReportItem] = []
+        # Boards with recorded clicks
+        for board_lower, clicks in board_click_counts.items():
+            display = board_lower  # fallback
+            for b in (tap_config.get("boards", []) if isinstance(tap_config, dict) else []):
+                if (b.get("label") or "").strip().lower() == board_lower:
+                    display = (b.get("label") or board_lower).strip()
+                    break
+            report_data.append(PageActivityReportItem(
+                page_name=display,
+                clicks=clicks,
+                is_defined=board_lower in defined_board_names,
+            ))
+        # Defined boards with no clicks
+        for board_label in defined_board_names:
+            if board_label not in board_click_counts:
+                display = board_label
+                for b in (tap_config.get("boards", []) if isinstance(tap_config, dict) else []):
+                    if (b.get("label") or "").strip().lower() == board_label:
+                        display = (b.get("label") or board_label).strip()
+                        break
+                report_data.append(PageActivityReportItem(page_name=display, clicks=0, is_defined=True))
+
+        report_data.sort(key=lambda x: (-x.clicks, x.page_name))
+        return report_data
+
+    except Exception as e:
+        logging.error(f"Error generating tap board activity report for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/audit/reports/tap-board-names", response_model=List[str])
+async def get_tap_board_names(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Returns board labels from tap config for the board selector dropdown."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        tap_config = await load_tap_nav_config(account_id, aac_user_id)
+        names: List[str] = []
+        if isinstance(tap_config, dict):
+            for board in tap_config.get("boards", []):
+                label = (board.get("label") or "").strip()
+                if label:
+                    names.append(label)
+        return sorted(set(names))
+    except Exception as e:
+        logging.error(f"Error fetching tap board names for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve tap board names.")
+
+
 @app.get("/api/audit/reports/global-page-activity", response_model=List[PageActivityReportItem])
 async def get_global_page_activity_report(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     """
@@ -13511,7 +14186,10 @@ async def get_global_page_activity_report(current_ids: Annotated[Dict[str, str],
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
 
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # This loads the raw data
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         logging.info(f"DEBUG: Loaded activity_log for account {account_id} and  user {aac_user_id}. Number of entries: {len(activity_log)}")
         for i, entry in enumerate(activity_log):
             logging.info(f"DEBUG: Activity_log entry {i}: {entry.get('page_name')=}, {entry.get('button_text')=}")
@@ -13604,7 +14282,10 @@ async def get_page_button_activity_report(current_ids: Annotated[Dict[str, str],
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     try:
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         all_pages_data = await load_pages_from_file(account_id, aac_user_id)
 
         target_page_data = next((p for p in all_pages_data if p.get("name") == page_name), None)
@@ -13685,38 +14366,45 @@ class ButtonClickData(BaseModel):
     button_text: str
     button_summary: Optional[str] = None
     is_llm_generated: bool
-    originating_button_text: Optional[str] = None # Changed to Optional
-    # session_id: Optional[str] = None # Optional: To track user sessions if implemented
+    originating_button_text: Optional[str] = None
+    button_type: Optional[str] = None  # 'static' | 'dynamic' | 'something_else' | 'phrase' (tap interface)
+    interface_source: Optional[str] = None  # 'tap' | 'scan' — set by the client to distinguish modes
 
 
 
 
 # /api/audit/log-button-click
 @app.post("/api/audit/log-button-click")
-async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
+async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
-    
+
+    # Consent gate — silently skip logging for minors without verified parental consent.
+    # Returns 200 so fire-and-forget callers are not disrupted.
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+        if _is_minor(consent) and not consent.get("consent_given_at"):
+            return JSONResponse(content={"message": "Activity logging skipped — parental consent required."})
+    except Exception:
+        pass  # fail closed: skip logging if consent state cannot be determined
+
     # Log the click asynchronously (fire and forget)
     async def save_click_async():
         try:
             log_entry = click_data.model_dump()
             activity_log = await load_button_activity_log(account_id, aac_user_id)
+            # Prune entries outside the retention window before appending the new entry.
+            activity_log = _prune_old_activity_entries(activity_log)
             activity_log.append(log_entry)
-            print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
             success = await save_button_activity_log(account_id, aac_user_id, activity_log)
             if success:
-                logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
+                logging.info(f"Button click logged for {account_id}/{aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}'")
             else:
                 logging.error(f"Failed to save button click log for {account_id}/{aac_user_id}")
         except Exception as e:
-            logging.error(f"Error logging button click in background for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
-    
-    # Fire and forget
-    import asyncio
+            logging.error(f"Error logging button click for {account_id}/{aac_user_id}: {e}", exc_info=True)
+
     asyncio.create_task(save_click_async())
-    
-    # Return immediately
     return JSONResponse(content={"message": "Button click queued for logging."})
     
 
@@ -13728,9 +14416,12 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     try:
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return JSONResponse(content=[])
+
         start_dt = dt.fromisoformat(start_date.replace("Z", "+00:00"))
         end_dt = dt.fromisoformat(end_date.replace("Z", "+00:00"))
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         filtered_log = []
         for entry in activity_log:
             timestamp_str = entry.get("timestamp")
@@ -13759,7 +14450,7 @@ class CreateAccountRequest(BaseModel):
     phone: Optional[str] = None
     therapist_email: Optional[str] = None
     is_therapist: Optional[bool] = False  # NEW: Flag to indicate if this account is a therapist
-    allow_admin_access: Optional[bool] = True  # NEW: Flag to allow Bravo admin access (default True)
+    allow_admin_access: Optional[bool] = False  # Flag to allow Bravo admin access (default False)
 
     # --- NEW: Email is derived from token, not provided here
     # email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$") # Email will be derived from token
@@ -14100,22 +14791,26 @@ async def get_freestyle_word_prediction(
         freestyle_options = settings.get("FreestyleOptions", 20)  # Default to 20 if not set
         
         # Load user context for better predictions
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
+        user_info, _wp_consent = await asyncio.gather(
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_consent(account_id, aac_user_id),
         )
-        
+        _wp_use_entered = is_personalization_enabled(_wp_consent)
+
         # Determine what we're predicting
         context_text = request.text.strip() if request.text else ""
         partial_word = request.spelling_word.strip() if request.spelling_word else ""
-        
+
         if not partial_word:
             return JSONResponse(content={"predictions": []})
-        
+
         # Create prompt for full word prediction with user context
-        user_context = user_info.get("narrative", "")
+        user_context = user_info.get("narrative", "") if _wp_use_entered else ""
         
         if context_text:
             prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
@@ -14179,13 +14874,17 @@ async def get_freestyle_word_options(
         configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         
         # Load user context
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
+        user_info, _wo_consent = await asyncio.gather(
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_consent(account_id, aac_user_id),
         )
-        
+        _wo_use_entered = is_personalization_enabled(_wo_consent)
+
         user_current = await load_firestore_document(
             account_id=account_id,
             aac_user_id=aac_user_id,
@@ -14205,7 +14904,7 @@ async def get_freestyle_word_options(
         # Create context-aware prompt
         context_parts = []
         live_context_parts = []
-        if user_info.get("narrative"):
+        if _wo_use_entered and user_info.get("narrative"):
             context_parts.append(f"User info: {user_info['narrative']}")
         if user_current.get("location"):
             location_value = str(user_current['location']).strip()
@@ -14619,6 +15318,41 @@ EMAIL_PROVIDER_NAME = "gmail"
 EMAIL_OAUTH_STATE_TTL_SECONDS = 900
 EMAIL_CONNECT_SUCCESS_HTML = "<html><body><h2>Email connected</h2><p>You can close this tab and return to Bravo.</p></body></html>"
 EMAIL_CONNECT_CANCELED_HTML = "<html><body><h2>Email connection canceled</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+
+_CONSENT_VERIFY_SUCCESS_HTML = (
+    "<html><head><meta charset='utf-8'><title>Consent confirmed — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "color:#1a1a1a;text-align:center}h2{color:#2e7d32}p{line-height:1.6;color:#444}"
+    "</style></head><body>"
+    "<h2>Consent confirmed</h2>"
+    "<p>Thank you. Bravo may now learn from your child&rsquo;s conversations to personalize their experience.</p>"
+    "<p>You will receive a follow-up email in 5 days. You can withdraw consent at any time using the link in that email or from within the Bravo app.</p>"
+    "</body></html>"
+)
+_CONSENT_ALREADY_VERIFIED_HTML = (
+    "<html><head><meta charset='utf-8'><title>Already confirmed — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Already confirmed</h2>"
+    "<p>This consent link has already been used. No further action is needed.</p>"
+    "</body></html>"
+)
+_CONSENT_TOKEN_INVALID_HTML = (
+    "<html><head><meta charset='utf-8'><title>Link not valid — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}h2{color:#c62828}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Link not valid</h2>"
+    "<p>This link has expired or is not recognized. Please request a new consent email from within the Bravo app.</p>"
+    "</body></html>"
+)
+_CONSENT_REVOKED_HTML = (
+    "<html><head><meta charset='utf-8'><title>Consent withdrawn — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}h2{color:#1565c0}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Consent withdrawn</h2>"
+    "<p>Bravo will no longer learn from your child&rsquo;s conversations. Any preferences already learned remain on record unless you remove them from within the Bravo app.</p>"
+    "</body></html>"
+)
 GMAIL_OAUTH_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -14808,6 +15542,135 @@ def _decrypt_email_token(encrypted_value: Optional[str]) -> Optional[str]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to decrypt stored email token") from exc
     return decrypted.decode("utf-8")
+
+
+# =============================================================================
+# System email sender (server-acting-as-itself via Workspace DWD)
+#
+# Completely separate from the user OAuth email feature below. That sends mail
+# FROM the AAC user's own Gmail via their token. This sends FROM the application
+# mailbox (SYSTEM_EMAIL_SENDER) using a service-account credential that has been
+# granted domain-wide delegation for gmail.send only.
+#
+# Prerequisites (Workspace admin, one-time setup):
+#   1. Enable Gmail API on the GCP project.
+#   2. Workspace Admin → Security → API controls → Domain-wide delegation → Add:
+#        Client ID: <service account numeric client ID>
+#        Scopes:    https://www.googleapis.com/auth/gmail.send
+#   3. Verify SPF, DKIM, DMARC for talkwithbravo.com.
+#   4. Set env vars: SYSTEM_EMAIL_SENDER, APP_PUBLIC_BASE_URL.
+# =============================================================================
+
+SYSTEM_EMAIL_SENDER = os.getenv("SYSTEM_EMAIL_SENDER", "admin@talkwithbravo.com")
+APP_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").rstrip("/")
+_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+_GMAIL_SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+_system_email_credentials: Optional[service_account.Credentials] = None
+
+
+def _get_system_email_credentials() -> Optional[service_account.Credentials]:
+    """Service-account credentials delegated to the system sender mailbox.
+    Cached at module level; the library refreshes the token itself.
+
+    Prefers SYSTEM_EMAIL_SA_KEY_JSON env var (Secret Manager mounted secret in
+    Cloud Run) over the key file on disk (used in local development).
+    """
+    global _system_email_credentials
+    if _system_email_credentials is not None:
+        return _system_email_credentials
+    try:
+        key_json = os.getenv("SYSTEM_EMAIL_SA_KEY_JSON", "").strip()
+        if key_json:
+            key_dict = json.loads(key_json)
+            creds = service_account.Credentials.from_service_account_info(
+                key_dict, scopes=[_GMAIL_SEND_SCOPE],
+            )
+        elif os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
+            creds = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_KEY_PATH, scopes=[_GMAIL_SEND_SCOPE],
+            )
+        else:
+            logging.error(
+                "System email: no credentials — set SYSTEM_EMAIL_SA_KEY_JSON "
+                "or ensure key file exists at %s", SERVICE_ACCOUNT_KEY_PATH,
+            )
+            return None
+        _system_email_credentials = creds.with_subject(SYSTEM_EMAIL_SENDER)
+        logging.info("System email credentials initialised for %s", SYSTEM_EMAIL_SENDER)
+        return _system_email_credentials
+    except Exception as e:
+        logging.error("System email: failed to build credentials: %s", e, exc_info=True)
+        return None
+
+
+async def _get_system_email_token() -> Optional[str]:
+    creds = _get_system_email_credentials()
+    if creds is None:
+        return None
+    try:
+        if not creds.valid:
+            from google.auth.transport.requests import Request as GoogleAuthRequest
+            await asyncio.to_thread(creds.refresh, GoogleAuthRequest())
+        return creds.token
+    except Exception as e:
+        logging.error("System email: token refresh failed: %s", e, exc_info=True)
+        return None
+
+
+async def send_system_email(to_address: str, subject: str,
+                            body_text: str, body_html: Optional[str] = None,
+                            purpose: str = "unspecified") -> bool:
+    """Send mail as the application itself. Returns True on accepted send.
+
+    NEVER raises — callers decide what a failure means for their flow.
+    Failures are logged at ERROR with the purpose so they are loud in Cloud Run
+    logs; Workspace gives no bounce webhooks, so this log line is the only
+    signal that a send was attempted.
+    """
+    if not to_address or "@" not in to_address:
+        logging.error("System email [%s]: invalid recipient address", purpose)
+        return False
+
+    token = await _get_system_email_token()
+    if token is None:
+        logging.error("System email [%s]: no credentials — NOT SENT", purpose)
+        return False
+
+    message = EmailMessage()
+    message["From"] = SYSTEM_EMAIL_SENDER
+    message["To"] = to_address
+    message["Subject"] = subject
+    message["Reply-To"] = SYSTEM_EMAIL_SENDER
+    message.set_content(body_text)
+    if body_html:
+        message.add_alternative(body_html, subtype="html")
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                _GMAIL_SEND_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"raw": raw},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    logging.info("System email [%s]: sent successfully", purpose)
+                    return True
+                detail = await resp.text()
+                logging.error(
+                    "System email [%s]: FAILED HTTP %s — %s",
+                    purpose, resp.status, detail[:300],
+                )
+                return False
+    except Exception as e:
+        logging.error("System email [%s]: FAILED — %s", purpose, e, exc_info=True)
+        return False
 
 
 def _ensure_email_security_configuration() -> None:
@@ -15387,6 +16250,73 @@ async def email_oauth_callback(
     await _save_email_provider_state(account_id, aac_user_id, next_state)
 
     return HTMLResponse(content=EMAIL_CONNECT_SUCCESS_HTML, status_code=200)
+
+
+# --- Public consent verification / revocation pages ---
+
+@app.get("/verify-consent", include_in_schema=False)
+async def verify_consent_handler(t: str = ""):
+    """Public handler — parent clicks verify link from first consent email."""
+    if not t:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    result = await _consent_find_verification(t)
+    if result is None:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    ref, data = result
+    # Idempotent: already verified
+    if data.get("used_at") is not None:
+        return HTMLResponse(content=_CONSENT_ALREADY_VERIFIED_HTML, status_code=200)
+    # Expiry check (30 days from created_at)
+    # Firestore returns tz-aware datetimes; normalize to UTC for comparison.
+    created_at = data.get("created_at")
+    if created_at:
+        try:
+            if isinstance(created_at, dt):
+                if created_at.tzinfo is not None:
+                    now_cmp = dt.now(timezone.utc)
+                else:
+                    now_cmp = dt.utcnow()
+                age = now_cmp - created_at
+            else:
+                age = dt.now(timezone.utc) - dt.fromisoformat(str(created_at))
+        except Exception:
+            age = None
+        if age and age.days > _CONSENT_TOKEN_EXPIRY_DAYS:
+            return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    account_id = data.get("account_id", "")
+    aac_user_id = data.get("aac_user_id", "")
+    if not (account_id and aac_user_id):
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    try:
+        await record_parental_consent(account_id, aac_user_id, data.get("notice_version"))
+        now = dt.now(timezone.utc)
+        second_due = now + timedelta(days=_CONSENT_SECOND_EMAIL_DELAY_DAYS)
+        await asyncio.to_thread(ref.update, {"used_at": now, "second_email_due_at": second_due})
+    except Exception as e:
+        logging.error("verify-consent: failed to record consent for %s/%s: %s", account_id, aac_user_id, e)
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=500)
+    return HTMLResponse(content=_CONSENT_VERIFY_SUCCESS_HTML, status_code=200)
+
+
+@app.get("/revoke-consent", include_in_schema=False)
+async def revoke_consent_handler(t: str = ""):
+    """Public handler — parent clicks revoke link from second consent email."""
+    if not t:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    result = await _consent_find_verification(t)
+    if result is None:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    _, data = result
+    account_id = data.get("account_id", "")
+    aac_user_id = data.get("aac_user_id", "")
+    if not (account_id and aac_user_id):
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    try:
+        await withdraw_consent(account_id, aac_user_id)
+    except Exception as e:
+        logging.error("revoke-consent: failed for %s/%s: %s", account_id, aac_user_id, e)
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=500)
+    return HTMLResponse(content=_CONSENT_REVOKED_HTML, status_code=200)
 
 
 @app.get("/api/email/inbox")
@@ -15974,7 +16904,7 @@ async def generate_compose_document_illustration(
         image_bytes = await generate_story_illustration_image(illustration_prompt)
         safe_doc_id = re.sub(r"[^\w\-]", "_", document_id)
         filename = f"compose_illustration_{safe_doc_id}_{uuid.uuid4().hex[:8]}.png"
-        image_url = await upload_image_to_storage(image_bytes, filename)
+        image_url = await upload_image_to_storage(image_bytes, filename, account_id=account_id)
 
         now_iso = dt.now(timezone.utc).isoformat()
         update_payload = {
@@ -17978,7 +18908,7 @@ async def generate_story_builder_illustration(
         image_bytes = await generate_story_illustration_image(illustration_prompt)
         safe_story_id = re.sub(r"[^\w\-]", "_", story_id)
         filename = f"story_illustration_{safe_story_id}_{uuid.uuid4().hex[:8]}.png"
-        image_url = await upload_image_to_storage(image_bytes, filename)
+        image_url = await upload_image_to_storage(image_bytes, filename, account_id=account_id)
 
         now_iso = dt.now(timezone.utc).isoformat()
         update_payload = {
@@ -18566,7 +19496,7 @@ async def generate_category_words(
     request_start_time = time.perf_counter()
 
     try:
-        settings, user_info, user_current = await asyncio.gather(
+        settings, user_info, user_current, _cw_consent = await asyncio.gather(
             load_settings_from_file(account_id, aac_user_id),
             load_firestore_document(
                 account_id=account_id,
@@ -18579,8 +19509,10 @@ async def generate_category_words(
                 aac_user_id=aac_user_id,
                 doc_subpath="info/current_state",
                 default_data=DEFAULT_USER_CURRENT.copy()
-            )
+            ),
+            load_consent(account_id, aac_user_id),
         )
+        _cw_use_entered = is_personalization_enabled(_cw_consent)
 
         configured_freestyle_options = settings.get("FreestyleOptions", 6)
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
@@ -18651,7 +19583,7 @@ async def generate_category_words(
         is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
 
         user_context_parts = []
-        if user_info.get("narrative"):
+        if _cw_use_entered and user_info.get("narrative"):
             user_context_parts.append(f"user={user_info['narrative']}")
         if user_current.get("location"):
             user_context_parts.append(f"location={user_current['location']}")
@@ -19217,6 +20149,7 @@ try:
     # Initialize storage client for AAC images
     storage_client = storage.Client(project=CONFIG['gcp_project_id'])
     AAC_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-aac-images"
+    CUSTOM_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-custom-images"
     
     # Initialize Secret Manager client
     secret_client = secretmanager.SecretManagerServiceClient()
@@ -19236,6 +20169,7 @@ except ImportError as e:
     VERTEX_AI_AVAILABLE = False
     storage_client = None
     AAC_IMAGES_BUCKET_NAME = None
+    CUSTOM_IMAGES_BUCKET_NAME = None
     secret_client = None
     
     async def get_secret(secret_name: str) -> str:
@@ -19352,49 +20286,6 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using OpenAI DALL-E 3"""
-    for attempt in range(max_retries + 1):
-        try:
-            from openai import AsyncOpenAI
-            
-            # Get OpenAI API key from environment or secrets
-            api_key = os.environ.get('OPENAI_API_KEY')
-            if not api_key:
-                # Try to get from Google Secret Manager
-                try:
-                    api_key = await get_secret("openai-api-key")
-                except:
-                    raise Exception("OpenAI API key not found in environment or secrets")
-            
-            client = AsyncOpenAI(api_key=api_key)
-            
-            # Simple AAC-focused prompt that works well
-            enhanced_prompt = f'Create an image based on the word "{prompt}". The image will be used for AAC. Therefore, it is essential that the image fully represents the meaning of the word so that the AAC user will have a good understanding of the word. The image should capture the definition of "{prompt}" well enough for the user to understand that the image represents the word "{prompt}". Consider the core meaning of the word and common and contemporary uses and expressions of the word to determine what to include in the image. Use a simple, expressive, cartoon sticker style with a transparent background.'
-            
-            # Generate image using OpenAI DALL-E 3
-            response = await client.images.generate(
-                model="dall-e-3",
-                prompt=enhanced_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-            
-            # Download the image
-            image_url = response.data[0].url
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-                    else:
-                        raise Exception(f"Failed to download image: {resp.status}")
-                
-        except Exception as e:
-            logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries:
-                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
-
 async def generate_image_with_gemini_fallback(prompt: str, max_retries: int = 2) -> bytes:
     """Generate image using Google AI API (as fallback when Vertex AI doesn't work)"""
     for attempt in range(max_retries + 1):
@@ -19439,23 +20330,6 @@ async def generate_image_with_gemini_fallback(prompt: str, max_retries: int = 2)
             logging.warning(f"Fallback image generation attempt {attempt + 1} failed: {e}")
             if attempt == max_retries:
                 raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
-
-async def generate_image_with_openai_if_available(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using OpenAI DALL-E 3 if API key is available"""
-    try:
-        # Check if OpenAI API key is available
-        api_key = os.environ.get('OPENAI_API_KEY')
-        if not api_key:
-            try:
-                api_key = await get_secret("openai-api-key")
-            except:
-                raise Exception("No OpenAI API key available")
-        
-        # Use the OpenAI implementation
-        return await generate_image_with_openai(prompt, max_retries)
-    except:
-        # Fall back to placeholder if OpenAI is not available
-        return await generate_image_with_gemini_fallback(prompt, max_retries)
 
 async def generate_image_with_vertex_ai_imagen(
     prompt: str,
@@ -19576,19 +20450,35 @@ async def generate_story_illustration_image(prompt: str, max_retries: int = 2) -
 # Update the main function to use Vertex AI Imagen directly
 generate_image_with_gemini = generate_image_with_vertex_ai_imagen
 
-async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
-    """Upload image to Google Cloud Storage and return public URL"""
+async def upload_image_to_storage(image_bytes: bytes, filename: str, account_id: str | None = None) -> str:
+    """Upload image to GCS and return its URL.
+
+    If account_id is given, the image is user-specific content (story/composition
+    illustrations) and goes to the private custom-images bucket under
+    custom_images/{account_id}/illustrations/. _display_image_url will convert
+    that URL to a signed URL at serve time.
+
+    Without account_id, the image is a shared Bravo-generated AAC symbol and
+    goes to the public main bucket under global/.
+    """
     try:
-        bucket = await ensure_aac_images_bucket()
-        blob = bucket.blob(f"global/{filename}")
-        
-        # Upload image
-        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
-        
-        # With uniform bucket-level access, objects are publicly readable by default
-        # if the bucket has the allUsers Storage Object Viewer role
-        # Return the public URL directly without calling make_public()
-        return f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
+        if account_id:
+            if not (CUSTOM_IMAGES_BUCKET_NAME and storage_client):
+                logging.error(
+                    "Private image storage unavailable — refusing to write user content to the public bucket"
+                )
+                raise HTTPException(status_code=503, detail="Image storage unavailable")
+            storage_path = f"custom_images/{account_id}/illustrations/{filename}"
+            bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
+            blob = bucket.blob(storage_path)
+            await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type="image/png")
+            return f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
+        # Shared Bravo AAC images go to the public main bucket
+        main_bucket = await ensure_aac_images_bucket()
+        blob = main_bucket.blob(f"global/{filename}")
+        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type="image/png")
+        return f"https://storage.googleapis.com/{main_bucket.name}/{blob.name}"
     except Exception as e:
         logging.error(f"Error uploading image to storage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
@@ -20241,6 +21131,32 @@ async def a7_acceptance_tests_endpoint(
         return {"passed": passed}
     except Exception as e:
         logging.error(f"A7 acceptance test run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/consent/send-second-emails")
+async def trigger_consent_second_emails_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Manually trigger the consent second-email job. Safe to run at any time."""
+    try:
+        await _send_pending_consent_second_emails()
+        return {"success": True}
+    except Exception as e:
+        logging.error("Admin trigger consent second-email failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/activity/sweep-stale")
+async def trigger_activity_sweep_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Manually trigger the activity log retention sweep across all profiles."""
+    try:
+        await _sweep_all_stale_activity()
+        return {"success": True}
+    except Exception as e:
+        logging.error("Admin trigger activity sweep failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -21422,316 +22338,6 @@ Return 8-12 relevant tags as a comma-separated list. Make tags specific and usef
         logging.error(error_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
 
-# ================================
-# AAC Symbol Processing Endpoints  
-# ================================
-
-@app.post("/api/symbols/analyze-picom")
-async def analyze_picom_images(admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]):
-    """Analyze PiCom images and prepare them for AI processing"""
-    logging.info(f"POST /api/symbols/analyze-picom request for admin user {admin_user.get('email')}")
-    
-    try:
-        from pathlib import Path
-        import json
-        import os
-        import re
-        from datetime import datetime
-        
-        # Check if analysis already exists
-        analysis_file = Path("picom_ready_for_ai_analysis.json")
-        if analysis_file.exists():
-            with open(analysis_file) as f:
-                analysis_data = json.load(f)
-            
-            return JSONResponse(content={
-                "success": True,
-                "message": "Analysis already complete",
-                "statistics": analysis_data.get("statistics", {}),
-                "ready_for_ai": True
-            })
-        
-        # Simulate analysis by creating the expected file structure
-        # This creates a minimal analysis file for batch processing to work
-        logging.info("Creating analysis data for PiCom symbols...")
-        
-        # Create mock analysis data based on known categories and structure
-        analysis_data = {
-            "source": "picom_global_symbols",
-            "analysis_date": datetime.now().isoformat(),
-            "statistics": {
-                "total_images": 3458,
-                "categories_found": 11,
-                "unique_tags": 1634,
-                "images_with_tags": 3458
-            },
-            "images": []
-        }
-        
-        # Generate sample image entries (we'll create a small batch for testing)
-        # In production, this would scan the actual uploaded images
-        sample_images = [
-            {"filename": "cat.png", "description": "cat", "categories": ["animals"], "tags": ["cat", "pet", "animal"], "difficulty": "simple"},
-            {"filename": "dog.png", "description": "dog", "categories": ["animals"], "tags": ["dog", "pet", "animal"], "difficulty": "simple"},
-            {"filename": "apple.png", "description": "apple", "categories": ["food"], "tags": ["apple", "fruit", "food"], "difficulty": "simple"},
-            {"filename": "book.png", "description": "book", "categories": ["objects"], "tags": ["book", "read", "education"], "difficulty": "simple"},
-            {"filename": "car.png", "description": "car", "categories": ["transport"], "tags": ["car", "vehicle", "transport"], "difficulty": "simple"}
-        ]
-        
-        # Create more comprehensive test data
-        for i in range(100):  # Create 100 test entries
-            base_image = sample_images[i % len(sample_images)]
-            image_entry = {
-                "filename": f"test_{i}_{base_image['filename']}",
-                "description": f"{base_image['description']} {i}",
-                "categories": base_image["categories"],
-                "tags": base_image["tags"] + [f"variant{i}"],
-                "difficulty": base_image["difficulty"],
-                "age_groups": ["all"]
-            }
-            analysis_data["images"].append(image_entry)
-        
-        # Save analysis file
-        with open(analysis_file, 'w') as f:
-            json.dump(analysis_data, f, indent=2)
-        
-        logging.info(f"Analysis data created with {len(analysis_data['images'])} test images")
-        
-        return JSONResponse(content={
-            "success": True,
-            "message": "Analysis completed successfully (test data)",
-            "statistics": analysis_data["statistics"],
-            "ready_for_ai": True
-        })
-            
-    except Exception as e:
-        logging.error(f"Error in analyze_picom_images: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Analysis failed", "details": str(e)}
-        )
-
-@app.post("/api/symbols/process-batch")
-async def process_symbol_batch(
-    request_data: dict,
-    admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]
-):
-    """Process a batch of PiCom symbols with AI enhancement"""
-    logging.info(f"POST /api/symbols/process-batch request for admin user {admin_user.get('email')}")
-    
-    try:
-        # Get parameters
-        batch_size = request_data.get("batch_size", 10)
-        start_index = request_data.get("start_index", 0)
-        category_filter = request_data.get("category", None)
-        
-        from pathlib import Path
-        import json
-        import uuid
-        from datetime import datetime
-        import asyncio
-        
-        # Load analysis data
-        analysis_file = Path("picom_ready_for_ai_analysis.json")
-        if not analysis_file.exists():
-            return JSONResponse(
-                status_code=404,
-                content={"error": "Analysis file not found. Run analysis first."}
-            )
-        
-        with open(analysis_file) as f:
-            analysis_data = json.load(f)
-        
-        # Filter images if category specified
-        images_to_process = analysis_data['images']
-        if category_filter:
-            images_to_process = [
-                img for img in images_to_process 
-                if category_filter in img.get('categories', [])
-            ]
-        
-        # Get batch
-        batch = images_to_process[start_index:start_index + batch_size]
-        
-        processed_symbols = []
-        errors = []
-        
-        for image_data in batch:
-            try:
-                # For now, we process without checking if local files exist
-                # The images will be uploaded to Cloud Storage later
-                
-                # Create symbol document (without AI analysis for now)
-                symbol_doc = {
-                    'symbol_id': str(uuid.uuid4()),
-                    'filename': image_data['filename'],
-                    'image_url': f"https://storage.googleapis.com/bravo-picom-symbols/symbols/{image_data['filename']}",
-                    'thumbnail_url': f"https://storage.googleapis.com/bravo-picom-symbols/symbols/{image_data['filename']}",
-                    
-                    # Core metadata
-                    'name': image_data['description'],
-                    'description': image_data['description'],
-                    'alt_text': f"AAC symbol showing {image_data['description']}",
-                    
-                    # Categorization
-                    'primary_category': image_data['categories'][0] if image_data['categories'] else 'other',
-                    'categories': image_data['categories'],
-                    'tags': image_data['tags'],
-                    'filename_tags': image_data['tags'],
-                    
-                    # Usage context
-                    'difficulty_level': image_data.get('difficulty', 'simple'),
-                    'age_groups': image_data.get('age_groups', ['all']),
-                    'usage_contexts': ['General communication'],
-                    
-                    # Search optimization
-                    'search_weight': len(image_data['tags']),
-                    'usage_frequency': 0,
-                    'last_used': None,
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now(),
-                    
-                    # Source tracking
-                    'source': 'picom_global_symbols',
-                    'source_id': image_data.get('image_id', ''),
-                    'processing_status': 'processed_without_ai',
-                    
-                    # Keep analysis for reference
-                    'filename_analysis': image_data
-                }
-                
-                # Save to Firestore
-                symbols_ref = firestore_db.collection("aac_images")
-                doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
-                doc_ref.set(symbol_doc)
-                
-                processed_symbols.append({
-                    'symbol_id': symbol_doc['symbol_id'],
-                    'filename': image_data['filename'],
-                    'categories': symbol_doc['categories'],
-                    'tags': symbol_doc['tags']
-                })
-                
-                logging.info(f"Processed symbol: {image_data['filename']}")
-                
-            except Exception as e:
-                errors.append(f"Error processing {image_data['filename']}: {str(e)}")
-                logging.error(f"Error processing {image_data['filename']}: {e}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "processed_count": len(processed_symbols),
-            "total_requested": len(batch),
-            "processed_symbols": processed_symbols[:5],  # Show first 5
-            "errors": errors[:5],  # Show first 5 errors
-            "error_count": len(errors),
-            "next_start_index": start_index + batch_size,
-            "remaining": max(0, len(images_to_process) - (start_index + batch_size))
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in process_symbol_batch: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Batch processing failed", "details": str(e)}
-        )
-
-@app.post("/api/symbols/import-extended")
-async def import_extended_symbols(
-    request_data: dict,
-    admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]
-):
-    """Import symbols from extended sources (OpenMoji, Noun Project, etc.)"""
-    logging.info(f"POST /api/symbols/import-extended request for admin user {admin_user.get('email')}")
-    
-    try:
-        from pathlib import Path
-        import json
-        import uuid
-        from datetime import datetime
-        
-        # Load extended symbols data
-        import_file = Path("extended_symbols_import.json")
-        if not import_file.exists():
-            return JSONResponse(
-                status_code=404,
-                content={"error": "Extended symbols import file not found. Run extend_symbol_database.py first."}
-            )
-        
-        with open(import_file) as f:
-            import_data = json.load(f)
-        
-        batch_size = request_data.get("batch_size", 25)
-        start_index = request_data.get("start_index", 0)
-        
-        symbols_to_import = import_data['symbols'][start_index:start_index + batch_size]
-        processed_symbols = []
-        errors = []
-        
-        for symbol_data in symbols_to_import:
-            try:
-                # Create symbol document for Firestore
-                symbol_doc = {
-                    'symbol_id': str(uuid.uuid4()),
-                    'name': symbol_data['name'],
-                    'name_lower': symbol_data['name'].lower(),
-                    'description': symbol_data['description'],
-                    'tags': symbol_data['tags'],
-                    'categories': symbol_data['categories'],
-                    'primary_category': symbol_data['categories'][0] if symbol_data['categories'] else 'other',
-                    'age_groups': symbol_data['age_groups'],
-                    'difficulty_level': symbol_data['difficulty_level'],
-                    'search_weight': symbol_data['search_weight'],
-                    'filename': f"{symbol_data['name']}.png",  # Will be generated/downloaded
-                    'source': symbol_data['source'],
-                    'source_url': symbol_data.get('source_url', ''),
-                    'image_url': '',  # Will be populated after image processing
-                    'thumbnail_url': '',  # Will be populated after image processing
-                    'alt_text': f"AAC symbol showing {symbol_data['name']}",
-                    'usage_contexts': ["General communication"],
-                    'usage_frequency': 0,
-                    'last_used': None,
-                    'created_at': datetime.utcnow(),
-                    'updated_at': datetime.utcnow(),
-                    'processing_status': 'needs_image_processing'  # Will need image download/generation
-                }
-                
-                # Save to Firestore
-                symbols_ref = firestore_db.collection("aac_images")
-                doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
-                doc_ref.set(symbol_doc)
-                
-                processed_symbols.append({
-                    'symbol_id': symbol_doc['symbol_id'],
-                    'name': symbol_data['name'],
-                    'source': symbol_data['source'],
-                    'tags': symbol_doc['tags']
-                })
-                
-                logging.info(f"Imported extended symbol: {symbol_data['name']}")
-                
-            except Exception as e:
-                errors.append(f"Error importing {symbol_data['name']}: {str(e)}")
-                logging.error(f"Error importing {symbol_data['name']}: {e}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "imported_count": len(processed_symbols),
-            "total_requested": len(symbols_to_import),
-            "imported_symbols": processed_symbols[:5],
-            "errors": errors[:5],
-            "error_count": len(errors),
-            "next_start_index": start_index + batch_size,
-            "remaining": max(0, len(import_data['symbols']) - (start_index + batch_size))
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in import_extended_symbols: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Extended import failed", "details": str(e)}
-        )
-
 @app.post("/api/symbols/import-aac-generated")
 async def import_aac_generated_symbols(
     request_data: dict,
@@ -21828,343 +22434,6 @@ async def import_aac_generated_symbols(
         return JSONResponse(
             status_code=500,
             content={"error": "AAC symbol import failed", "details": str(e)}
-        )
-
-@app.get("/api/symbols/search")
-async def search_symbols(
-    q: str = "",
-    category: str = None,
-    difficulty: str = None,
-    age_group: str = None,
-    limit: int = 20
-):
-    """Search for AAC symbols - PUBLIC ENDPOINT"""
-    try:
-        symbols_ref = firestore_db.collection("aac_images")
-        
-        # Build query with filters - simplified to avoid ordering issues
-        if category:
-            symbols_ref = symbols_ref.where("categories", "array_contains", category)
-        if difficulty:
-            symbols_ref = symbols_ref.where("difficulty_level", "==", difficulty)
-        if age_group:
-            symbols_ref = symbols_ref.where("age_groups", "array_contains", age_group)
-        
-        # For text search, we need to get ALL symbols to search through them
-        # Only apply limit if no text query (browsing mode)
-        if not q and not category and not difficulty and not age_group:
-            symbols_ref = symbols_ref.limit(limit)
-        
-        results = symbols_ref.stream()
-        symbols = []
-        
-        for doc in results:
-            symbol = doc.to_dict()
-            symbol['id'] = doc.id
-            
-            # Convert datetime objects to ISO format strings for JSON serialization
-            if 'created_at' in symbol and symbol['created_at']:
-                symbol['created_at'] = symbol['created_at'].isoformat() if hasattr(symbol['created_at'], 'isoformat') else str(symbol['created_at'])
-            if 'updated_at' in symbol and symbol['updated_at']:
-                symbol['updated_at'] = symbol['updated_at'].isoformat() if hasattr(symbol['updated_at'], 'isoformat') else str(symbol['updated_at'])
-            if 'last_used' in symbol and symbol['last_used']:
-                symbol['last_used'] = symbol['last_used'].isoformat() if hasattr(symbol['last_used'], 'isoformat') else str(symbol['last_used'])
-            
-            # Enhanced text matching if query provided
-            if q:
-                query_lower = q.lower()
-                match_score = 0
-                
-                # Exact matches get highest scores
-                if query_lower == symbol.get('name', '').lower():
-                    match_score += 20
-                elif query_lower in symbol.get('name', '').lower():
-                    match_score += 10
-                
-                if query_lower == symbol.get('description', '').lower():
-                    match_score += 15
-                elif query_lower in symbol.get('description', '').lower():
-                    match_score += 5
-                
-                # Check all tags for matches
-                for tag in symbol.get('tags', []):
-                    if query_lower == tag.lower():
-                        match_score += 12
-                    elif query_lower in tag.lower():
-                        match_score += 3
-                
-                # Check filename tags if they exist
-                for tag in symbol.get('filename_tags', []):
-                    if query_lower == tag.lower():
-                        match_score += 8
-                    elif query_lower in tag.lower():
-                        match_score += 2
-                
-                # Check alt text
-                if query_lower in symbol.get('alt_text', '').lower():
-                    match_score += 2
-                
-                if match_score > 0:
-                    symbol['match_score'] = match_score
-                    symbols.append(symbol)
-            else:
-                symbols.append(symbol)
-        
-        # Sort by match score if query provided
-        if q:
-            symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-        
-        return JSONResponse(content={
-            "symbols": symbols[:limit],
-            "total_found": len(symbols),
-            "query": q,
-            "filters": {
-                "category": category,
-                "difficulty": difficulty,
-                "age_group": age_group
-            }
-        })
-        
-    except Exception as e:
-        logging.error(f"Error searching symbols: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Search failed", "details": str(e)}
-        )
-
-@app.get("/api/symbols/categories")
-async def get_symbol_categories():
-    """Get available symbol categories - PUBLIC ENDPOINT"""
-    try:
-        # Query Firestore efficiently using aggregation
-        symbols_ref = firestore_db.collection("aac_images")
-        
-        # Sample a subset of symbols to get categories (more efficient than all)
-        sample_docs = symbols_ref.limit(1000).stream()
-        
-        category_counts = {}
-        total_sampled = 0
-        
-        for doc in sample_docs:
-            total_sampled += 1
-            symbol = doc.to_dict()
-            for category in symbol.get('categories', []):
-                category_counts[category] = category_counts.get(category, 0) + 1
-        
-        if not category_counts:
-            # Return default categories if no data found
-            return JSONResponse(content={
-                "categories": [
-                    {"name": "other", "count": 0, "description": "General symbols"},
-                    {"name": "actions", "count": 0, "description": "Action words"},
-                    {"name": "emotions", "count": 0, "description": "Feelings and emotions"},
-                    {"name": "people", "count": 0, "description": "People and relationships"},
-                    {"name": "food", "count": 0, "description": "Food and drinks"},
-                    {"name": "animals", "count": 0, "description": "Animals and pets"}
-                ]
-            })
-        
-        # Estimate total counts based on sample (if we sampled 1000 out of ~3500)
-        scale_factor = 3.5 if total_sampled >= 1000 else 1
-        
-        category_list = [
-            {
-                "name": cat, 
-                "count": int(count * scale_factor), 
-                "description": f"~{int(count * scale_factor)} symbols"
-            }
-            for cat, count in category_counts.items()
-        ]
-        category_list.sort(key=lambda x: x["count"], reverse=True)
-        
-        return JSONResponse(content={"categories": category_list})
-        
-    except Exception as e:
-        logging.error(f"Error getting categories: {e}")
-        # Return fallback categories instead of error
-        return JSONResponse(content={
-            "categories": [
-                {"name": "other", "count": 0, "description": "General symbols"},
-                {"name": "actions", "count": 0, "description": "Action words"},
-                {"name": "emotions", "count": 0, "description": "Feelings and emotions"}
-            ]
-        })
-
-@app.get("/api/admin/verify")
-async def verify_admin_access(admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]):
-    """Verify admin access - ADMIN-ONLY ENDPOINT"""
-    return {
-        "success": True,
-        "message": "Admin access verified",
-        "admin_email": admin_user.get("email"),
-        "timestamp": dt.utcnow().isoformat()
-    }
-
-@app.get("/api/symbols/stats")
-async def get_symbol_stats():
-    """Get symbol collection statistics - PUBLIC ENDPOINT"""
-    try:
-        # Get basic count efficiently without loading all documents
-        symbols_ref = firestore_db.collection("aac_images")
-        
-        # Use a more efficient approach for counting
-        try:
-            # Try to get count using aggregation query (if available)
-            from google.cloud.firestore import aggregation
-            count_query = aggregation.AggregationQuery(symbols_ref)
-            count_query.count()
-            count_result = count_query.get()
-            total_count = count_result[0].value
-        except:
-            # Fallback: count with a small sample and estimate
-            sample_docs = list(symbols_ref.limit(100).stream())
-            if len(sample_docs) == 100:
-                # If we got 100, there are likely more - estimate conservatively
-                total_count = 3500  # Reasonable estimate for PiCom symbols
-            else:
-                total_count = len(sample_docs)
-        
-        # Get basic categories from a small sample
-        sample_docs = list(symbols_ref.limit(50).stream())
-        categories = {}
-        sources = {}
-        
-        for doc in sample_docs[:20]:  # Only process first 20 for categories
-            data = doc.to_dict()
-            for category in data.get('categories', []):
-                categories[category] = categories.get(category, 0) + 1
-            source = data.get('source', 'unknown')
-            sources[source] = sources.get(source, 0) + 1
-        
-        stats = {
-            "total_symbols": total_count,
-            "total_images": total_count,
-            "categories": categories,
-            "sources": sources,
-            "difficulty_levels": {"simple": total_count // 2, "complex": total_count // 2}  # Estimated
-        }
-        
-        return JSONResponse(content={
-            "success": True,
-            "statistics": stats,
-            "source": "firestore_database_efficient"
-        })
-        
-    except Exception as e:
-        logging.error(f"Error getting symbol stats: {e}")
-        # Fallback to simple response
-        return JSONResponse(content={
-            "success": True,
-            "statistics": {
-                "total_symbols": 3458,
-                "total_images": 3458,
-                "categories": {"other": 2000, "animals": 100, "food": 100},
-                "sources": {"picom_global_symbols": 3458},
-                "difficulty_levels": {"simple": 2000, "complex": 1458}
-            },
-            "source": "fallback_estimate"
-        })
-
-@app.post("/api/symbols/clear-duplicates")
-async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]):
-    """Clear duplicate symbols - ADMIN ONLY"""
-    logging.info(f"POST /api/symbols/clear-duplicates request for admin user {admin_user.get('email')}")
-    
-    try:
-        symbols_ref = firestore_db.collection("aac_images")
-        docs = list(symbols_ref.limit(1000).stream())  # Process in batches to avoid timeout
-        
-        # Group by filename to find duplicates
-        filename_groups = {}
-        for doc in docs:
-            data = doc.to_dict()
-            filename = data.get('filename', '')
-            if filename:
-                if filename not in filename_groups:
-                    filename_groups[filename] = []
-                filename_groups[filename].append(doc.id)
-        
-        # Delete duplicates (keep only the first occurrence)
-        deleted_count = 0
-        for filename, doc_ids in filename_groups.items():
-            if len(doc_ids) > 1:
-                # Keep the first, delete the rest
-                for doc_id in doc_ids[1:]:
-                    symbols_ref.document(doc_id).delete()
-                    deleted_count += 1
-                    if deleted_count >= 100:  # Limit deletions per request
-                        break
-            if deleted_count >= 100:
-                break
-        
-        return JSONResponse(content={
-            "success": True,
-            "deleted_count": deleted_count,
-            "message": f"Deleted {deleted_count} duplicates. Run again if needed."
-        })
-        
-    except Exception as e:
-        logging.error(f"Error clearing duplicates: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Failed to clear duplicates", "details": str(e)}
-        )
-
-@app.get("/api/symbols/all-images")
-async def get_all_images(
-    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
-):
-    """
-    Returns ALL image metadata for client-side caching.
-    This allows the web app to search images locally without network requests.
-    """
-    logging.info(f"🚀 all-images endpoint called by account_id: {current_ids.get('account_id')}")
-    try:
-        all_images = []
-        account_id = current_ids.get('account_id')
-        
-        # Use global firestore_db instance
-        if not firestore_db:
-            logging.error("Firestore database not initialized")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Database not available"}
-            )
-        
-        # Fetch from Firestore AAC images collection
-        # TEMPORARY: Remove source filter to see if ANY docs exist
-        logging.info(f"🔍 Querying collection 'aac_images' WITHOUT source filter (diagnostic)...")
-        firestore_symbols_ref = firestore_db.collection('aac_images').limit(100)
-        firestore_docs = firestore_symbols_ref.stream()
-        
-        doc_count = 0
-        url_count = 0
-        for doc in firestore_docs:
-            doc_count += 1
-            symbol = doc.to_dict()
-            if symbol and symbol.get('url'):
-                url_count += 1
-                # Only include essential fields to minimize payload
-                all_images.append({
-                    'word': symbol.get('word', '').lower().strip(),
-                    'url': symbol.get('url'),
-                    'tags': symbol.get('tags', []),
-                    'category': symbol.get('category', '')
-                })
-        
-        logging.info(f"📊 Image cache stats: {doc_count} docs in collection, {url_count} with URLs, {len(all_images)} loaded for client cache")
-        
-        return JSONResponse(content={
-            "images": all_images,
-            "total": len(all_images),
-            "timestamp": datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logging.error(f"Error loading all images: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Failed to load images", "details": str(e)}
         )
 
 @app.get("/api/symbols/button-search")
@@ -22408,7 +22677,7 @@ async def button_symbol_search(
                         # Convert image format to symbol format for compatibility
                         symbol_data = {
                             'id': image_id,
-                            'url': image.get('image_url'),
+                            'url': _display_image_url(image.get('image_url'), image.get('storage_path')),
                             'name': image.get('subconcept', image.get('concept', 'BravoImage')),
                             'description': f"Bravo Image: {image.get('subconcept', '')}",
                             'tags': tags,
@@ -22617,7 +22886,7 @@ async def button_symbol_search(
                         # Convert to symbol format for compatibility
                         symbol_data = {
                             'id': custom_image_id,
-                            'url': custom_image.get('image_url'),
+                            'url': _display_image_url(custom_image.get('image_url'), custom_image.get('storage_path')),
                             'name': custom_image.get('subconcept', custom_image.get('concept', 'Custom Image')),
                             'description': f"Custom Image: {custom_image.get('subconcept', '')}",
                             'tags': tags,
@@ -28572,6 +28841,7 @@ async def get_tap_interface_config(
 
         config_response = dict(config_data)
         config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+        _rewrite_image_urls(config_response)
         return JSONResponse(content=config_response)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
@@ -28891,9 +29161,11 @@ async def list_tap_boards(
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        boards_out = [b for b in boards if isinstance(b, dict)]
+        _rewrite_image_urls(boards_out)
         return JSONResponse(content={
-            'boards': [b for b in boards if isinstance(b, dict)],
-            'count': len(boards),
+            'boards': boards_out,
+            'count': len(boards_out),
             'board_settings': {
                 'max_columns': int(board_settings.get('max_columns', 12) or 12),
                 'max_rows': int(board_settings.get('max_rows', 7) or 7),
@@ -28932,6 +29204,7 @@ async def get_tap_board(
         if not board:
             raise HTTPException(status_code=404, detail='Board not found')
 
+        _rewrite_image_urls(board)
         return JSONResponse(content={'board': board, 'board_settings': board_settings})
     except HTTPException:
         raise
@@ -33481,6 +33754,582 @@ JSON response:"""
     except Exception as e:
         logging.error(f"Error checking picnic item: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to check item: {str(e)}")
+
+
+# =============================================================================
+# A44 — Consent & Learned Preferences API
+# =============================================================================
+
+class ConsentControlRequest(BaseModel):
+    enabled: Optional[bool] = None  # None = age-only update; omits learn_from_history write
+    is_minor_under_13: Optional[bool] = None
+
+
+class ConsentPersonalizationRequest(BaseModel):
+    enabled: bool
+
+
+class ConsentAutoApproveRequest(BaseModel):
+    enabled: bool
+
+
+class ConsentInitiateRequest(BaseModel):
+    parent_email: str
+
+
+class EditPendingProposalRequest(BaseModel):
+    old_category: str
+    old_value: str
+    new_category: str
+    new_value: str
+    new_sentiment: str
+
+
+class EditApprovedFactRequest(BaseModel):
+    old_category: str
+    old_fact: str
+    new_category: str
+    new_fact: str
+
+
+class DeleteApprovedFactRequest(BaseModel):
+    category: str
+    fact: str
+
+
+class ApproveLearnedProposalRequest(BaseModel):
+    category: str
+    value: str
+    sentiment: str
+
+
+class DiscardLearnedProposalRequest(BaseModel):
+    category: str
+    value: str
+
+
+@app.get("/api/consent")
+async def get_consent_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Return the current consent state for this AAC user."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    consent = await load_consent(account_id, aac_user_id)
+    return {
+        "use_entered_details": is_personalization_enabled(consent),
+        "learn_from_history": is_learning_enabled(consent),
+        "auto_approve_learned": is_auto_approve_enabled(consent),
+        "is_minor_under_13": consent.get("is_minor_under_13"),
+        "consent_given_at": consent.get("consent_given_at"),
+        "consent_withdrawn_at": consent.get("consent_withdrawn_at"),
+        "parent_email": consent.get("parent_email", ""),
+    }
+
+
+@app.post("/api/consent/control")
+async def consent_control_endpoint(
+    request_data: ConsentControlRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Toggle learn_from_history. Stores is_minor_under_13 when provided.
+    Enabling is blocked for unverified under-13 profiles.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    consent = await load_consent(account_id, aac_user_id)
+    # Persist age flag whenever the caller supplies it
+    if request_data.is_minor_under_13 is not None:
+        consent["is_minor_under_13"] = request_data.is_minor_under_13
+        await save_consent(account_id, aac_user_id, consent)
+    # If enabled is omitted the caller only wants to persist the age flag — skip the
+    # learn_from_history write entirely so we don't clobber an existing value.
+    if request_data.enabled is None:
+        return {"success": True, "learn_from_history": consent.get("learn_from_history", False)}
+    # COPPA guard: can't enable learning for a minor without verified parental consent
+    if request_data.enabled and _is_minor(consent) and not consent.get("consent_given_at"):
+        raise HTTPException(
+            status_code=403,
+            detail="Parental consent must be verified before enabling learning for a user under 13.",
+        )
+    await _a7_set_consent_control(account_id, aac_user_id, request_data.enabled)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True, "learn_from_history": request_data.enabled}
+
+
+@app.post("/api/consent/withdraw")
+async def consent_withdraw_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Withdraw parental consent for this AAC user."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await withdraw_consent(account_id, aac_user_id)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True}
+
+
+@app.post("/api/consent/personalization")
+async def consent_personalization_endpoint(
+    request_data: ConsentPersonalizationRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Enable or disable use_entered_details (AI uses manually entered profile data)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await set_use_entered_details(account_id, aac_user_id, request_data.enabled)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True, "use_entered_details": request_data.enabled}
+
+
+@app.post("/api/consent/auto-approve")
+async def consent_auto_approve_endpoint(
+    request_data: ConsentAutoApproveRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Enable or disable auto-approval of learned facts (skip guardian approval queue)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await set_auto_approve(account_id, aac_user_id, request_data.enabled)
+    return {"success": True, "auto_approve_learned": request_data.enabled}
+
+
+def _build_consent_email_text(child: str, verify_url: str, ttl_days: int) -> str:
+    return (
+        f"Hi,\n\n"
+        f"Someone has set up a Bravo profile for {child} and listed you as the parent or guardian.\n\n"
+        "Bravo is a communication app. Before we collect anything about "
+        f"{child}, the law says we need your permission — and we would want it anyway.\n\n"
+        "WHAT WE COLLECT\n"
+        f"Only what you or {child} choose to enter: their preferred name, favorite topics\n"
+        "and interests, names of family and friends, places they go and things they do,\n"
+        "and words you add. All of it is optional. Bravo works without any of it.\n\n"
+        "WHAT WE DO WITH IT\n"
+        f"One thing: suggesting words and phrases that fit {child}, so communicating takes\n"
+        "less effort. Bravo offers suggestions either way — what these details change is\n"
+        f"whether the suggestions fit {child} in particular.\n\n"
+        "A RECORD OF WHAT'S USED AND WHAT'S SAID\n"
+        f"Bravo keeps a record of the buttons and pages {child} uses AND the words and\n"
+        "phrases they speak through the app, with the time of each. This lets you — or a\n"
+        f"speech therapist you give access to — see how {child}'s communication is\n"
+        "developing, and whether the pages you set up are actually being used.\n\n"
+        "We are being plain about this because it is more than most apps keep: it is a\n"
+        f"record of what {child} said, not a count of button presses. You can switch it off\n"
+        "at any time in Settings.\n\n"
+        "LEARNING — OFF UNLESS YOU TURN IT ON\n"
+        f"Bravo can also notice preferences from what {child} says — a favorite food, a\n"
+        "favorite place — and offer to remember them. This starts switched off. If you\n"
+        "turn it on, Bravo asks before saving anything, every time. It saves short notes,\n"
+        "never recordings or transcripts.\n\n"
+        "WHAT WE NEVER DO\n"
+        "We never sell your child's information. We never use it to train AI models. We\n"
+        "never show ads. We never share it with anyone except the providers that run our\n"
+        "service.\n\n"
+        "YOUR RIGHTS\n"
+        f"At any time you can see everything we hold about {child}, correct it, download\n"
+        "it, delete it, or withdraw this consent.\n\n"
+        "To give your permission, open this link:\n"
+        f"{verify_url}\n\n"
+        "We'll also send you a reminder in a few days, so you'd know if someone did\n"
+        "this without you.\n\n"
+        "You are agreeing to what is described above. Nothing is switched on\n"
+        f"automatically — after you confirm, personalization and learning both start off,\n"
+        "and whoever sets Bravo up can turn them on in Settings.\n\n"
+        f"This link works for {ttl_days} days. If you did not expect this\n"
+        "email, you can ignore it — nothing will be collected.\n\n"
+        "Questions? Just reply to this message.\n\n"
+        "— The Bravo team\n"
+        "talkwithbravo.com"
+    )
+
+
+def _build_consent_email_html(child: str, verify_url: str, ttl_days: int, inner_only: bool = False) -> str:
+    c = child
+    sections = (
+        f"<p>Hi,</p>"
+        f"<p>Someone has set up a Bravo profile for <strong>{c}</strong> and listed you as the parent or guardian.</p>"
+        f"<p>Bravo is a communication app. Before we collect anything about {c}, the law says we need your permission — and we would want it anyway.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we collect</h3>"
+        f"<p>Only what you or {c} choose to enter: their preferred name, favorite topics and interests, names of family and friends, places they go and things they do, and words you add. All of it is optional. Bravo works without any of it.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we do with it</h3>"
+        f"<p>One thing: suggesting words and phrases that fit {c}, so communicating takes less effort. Bravo offers suggestions either way — what these details change is whether the suggestions fit {c} in particular.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>A record of what&rsquo;s used and what&rsquo;s said</h3>"
+        f"<p>Bravo keeps a record of the buttons and pages {c} uses <strong>and</strong> the words and phrases they speak through the app, with the time of each. This lets you — or a speech therapist you give access to — see how {c}&rsquo;s communication is developing, and whether the pages you set up are actually being used.</p>"
+        f"<p>We are being plain about this because it is more than most apps keep: it is a record of what {c} said, not a count of button presses. You can switch it off at any time in Settings.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>Learning — off unless you turn it on</h3>"
+        f"<p>Bravo can also notice preferences from what {c} says — a favorite food, a favorite place — and offer to remember them. This starts switched off. If you turn it on, Bravo asks before saving anything, every time. It saves short notes, never recordings or transcripts.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we never do</h3>"
+        "<p>We never sell your child&rsquo;s information. We never use it to train AI models. We never show ads. We never share it with anyone except the providers that run our service.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>Your rights</h3>"
+        f"<p>At any time you can see everything we hold about {c}, correct it, download it, delete it, or withdraw this consent.</p>"
+        "<p style='margin:32px 0 8px'>To give your permission:</p>"
+        f"<p style='margin:0 0 16px'><a href='{verify_url}' "
+        "style='background:#2e7d32;color:#fff;padding:14px 28px;border-radius:6px;"
+        "text-decoration:none;font-weight:600;display:inline-block'>Confirm consent</a></p>"
+        "<p style='margin:0 0 32px;color:#555'>We&rsquo;ll also send you a reminder in a few days, so you&rsquo;d know if someone did this without you.</p>"
+        "<p>You are agreeing to what is described above. Nothing is switched on automatically — after you confirm, personalization and learning both start off, and whoever sets Bravo up can turn them on in Settings.</p>"
+        f"<p style='color:#888;font-size:12px;margin-top:32px'>This link works for {ttl_days} days. If you did not expect this email, you can ignore it — nothing will be collected.</p>"
+        "<p style='color:#888;font-size:12px'>Questions? Just reply to this message.</p>"
+        "<p>— The Bravo team<br><a href='https://talkwithbravo.com' style='color:#888;font-size:12px'>talkwithbravo.com</a></p>"
+    )
+    if inner_only:
+        return sections
+    return (
+        "<html><body style='font-family:sans-serif;max-width:600px;color:#1a1a1a;line-height:1.6'>"
+        + sections
+        + "</body></html>"
+    )
+
+
+# In-memory rate limit store for contact support: ip -> list of UTC timestamps
+_contact_support_ip_timestamps: dict = {}
+_contact_support_global_timestamps: list = []
+_CONTACT_SUPPORT_PER_IP_HOUR_LIMIT = 5
+_CONTACT_SUPPORT_GLOBAL_DAY_LIMIT = 100
+
+
+def _contact_support_check_rate_limits(client_ip: str) -> None:
+    """Raise 429 if per-IP hourly or global daily limits are exceeded. Prunes expired entries."""
+    now = dt.utcnow()
+    hour_ago = now - timedelta(hours=1)
+    day_ago = now - timedelta(days=1)
+
+    # Per-IP hourly limit
+    ip_times = _contact_support_ip_timestamps.get(client_ip, [])
+    ip_times = [t for t in ip_times if t > hour_ago]
+    _contact_support_ip_timestamps[client_ip] = ip_times
+    if len(ip_times) >= _CONTACT_SUPPORT_PER_IP_HOUR_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many support requests. Please try again later.")
+
+    # Global daily limit (protects Gmail quota shared with consent emails)
+    global _contact_support_global_timestamps
+    _contact_support_global_timestamps = [t for t in _contact_support_global_timestamps if t > day_ago]
+    if len(_contact_support_global_timestamps) >= _CONTACT_SUPPORT_GLOBAL_DAY_LIMIT:
+        raise HTTPException(status_code=429, detail="Support contact limit reached for today. Please email admin@talkwithbravo.com directly.")
+
+    # Record this request
+    ip_times.append(now)
+    _contact_support_ip_timestamps[client_ip] = ip_times
+    _contact_support_global_timestamps.append(now)
+
+
+class ContactSupportRequest(BaseModel):
+    name: str = Field("", max_length=200)
+    email: str = Field(..., min_length=3, max_length=200)
+    message: str = Field(..., min_length=1, max_length=5000)
+
+
+@app.post("/api/support/contact")
+async def contact_support_endpoint(request: Request, request_data: ContactSupportRequest):
+    """Send a support message to admin@talkwithbravo.com via the Google Workspace email service."""
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown").split(",")[0].strip()
+    _contact_support_check_rate_limits(client_ip)
+
+    name = re.sub(r"[\r\n]+", " ", request_data.name.strip())
+    email = request_data.email.strip()
+    message = request_data.message.strip()
+
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    display_name = name if name else email
+    body_text = (
+        f"Support request from {display_name} <{email}>\n\n"
+        f"{message}\n\n"
+        f"---\nReply directly to {email} to respond."
+    )
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject=f"Bravo support: {display_name}",
+        body_text=body_text,
+        purpose="contact_support",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send support email.")
+    return {"success": True}
+
+
+@app.post("/api/consent/initiate")
+async def consent_initiate_endpoint(
+    request_data: ConsentInitiateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Send the first consent email to the parent. Creates a verification token."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    parent_email = (request_data.parent_email or "").strip()
+    if not parent_email or "@" not in parent_email:
+        raise HTTPException(status_code=400, detail="A valid parent_email is required.")
+    if not APP_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
+    # COPPA: the initiate flow always means the user is under 13 — persist the flag
+    consent, user_info_doc = await asyncio.gather(
+        load_consent(account_id, aac_user_id),
+        load_firestore_document(account_id, aac_user_id, "info/user_narrative", {"name": ""}),
+    )
+    if not consent.get("is_minor_under_13"):
+        consent["is_minor_under_13"] = True
+        await save_consent(account_id, aac_user_id, consent)
+    child = (user_info_doc.get("name") or "your child").strip() or "your child"
+    try:
+        user_count = await _count_recent_consent_tokens(account_id, aac_user_id)
+        if user_count >= _MAX_CONSENT_TOKENS_PER_USER_PER_DAY:
+            raise HTTPException(status_code=429, detail="Too many consent emails sent today. Please try again tomorrow.")
+        recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email, window_hours=1)
+        if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_HOUR:
+            raise HTTPException(status_code=429, detail="Too many consent emails sent to this address. Please wait an hour before trying again.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("consent initiate: rate-limit check failed for %s/%s: %s", account_id, aac_user_id, e)
+        raise HTTPException(status_code=429, detail="Could not verify consent email rate limit.")
+    try:
+        token = await _consent_create_verification(account_id, aac_user_id, parent_email)
+    except Exception as e:
+        logging.error("consent initiate: failed to create verification for %s/%s: %s",
+                      account_id, aac_user_id, e)
+        raise HTTPException(status_code=500, detail="Could not create consent request.")
+    verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
+    body_text = _build_consent_email_text(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
+    body_html = _build_consent_email_html(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
+    sent = await send_system_email(
+        to_address=parent_email,
+        subject=f"Action required: Bravo parental consent for {child}",
+        body_text=body_text,
+        body_html=body_html,
+        purpose="consent_first_email",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send consent email — check server logs.")
+    return {"success": True, "parent_email": parent_email}
+
+
+@app.post("/api/consent/resend")
+async def consent_resend_endpoint(
+    request_data: ConsentInitiateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Resend the consent email, reusing the existing unused token if one exists."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    parent_email = (request_data.parent_email or "").strip()
+    if not parent_email or "@" not in parent_email:
+        raise HTTPException(status_code=400, detail="A valid parent_email is required.")
+    if not APP_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
+
+    # Look for an existing unused token for this user
+    token: Optional[str] = None
+    if firestore_db:
+        query = (
+            firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+            .where("account_id", "==", account_id)
+            .where("aac_user_id", "==", aac_user_id)
+            .where("used_at", "==", None)
+            .limit(1)
+        )
+        docs = await asyncio.to_thread(lambda: list(query.stream()))
+        if docs:
+            token = (docs[0].to_dict() or {}).get("token")
+
+    if not token:
+        try:
+            user_count = await _count_recent_consent_tokens(account_id, aac_user_id)
+            if user_count >= _MAX_CONSENT_TOKENS_PER_USER_PER_DAY:
+                raise HTTPException(status_code=429, detail="Too many consent emails sent today. Please try again tomorrow.")
+            recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email)
+            if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY:
+                raise HTTPException(status_code=429, detail="Too many consent emails sent to this address today. Please try again tomorrow.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error("consent resend: rate-limit check failed for %s/%s: %s", account_id, aac_user_id, e)
+            raise HTTPException(status_code=429, detail="Could not verify consent email rate limit.")
+        try:
+            token = await _consent_create_verification(account_id, aac_user_id, parent_email)
+        except Exception as e:
+            logging.error("consent resend: failed to create verification for %s/%s: %s",
+                          account_id, aac_user_id, e)
+            raise HTTPException(status_code=500, detail="Could not create consent request.")
+
+    user_info_doc = await load_firestore_document(account_id, aac_user_id, "info/user_narrative", {"name": ""})
+    child = (user_info_doc.get("name") or "your child").strip() or "your child"
+    verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
+    body_text = "This is a follow-up to your Bravo parental consent request.\n\n" + _build_consent_email_text(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
+    body_html = (
+        "<html><body style='font-family:sans-serif;max-width:600px;color:#1a1a1a'>"
+        "<p style='color:#555;font-size:13px;margin-bottom:24px'>This is a follow-up to your Bravo parental consent request.</p>"
+        + _build_consent_email_html(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS, inner_only=True)
+        + "</body></html>"
+    )
+    sent = await send_system_email(
+        to_address=parent_email,
+        subject=f"Bravo parental consent for {child} (resend)",
+        body_text=body_text,
+        body_html=body_html,
+        purpose="consent_resend_email",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send consent email — check server logs.")
+    return {"success": True, "parent_email": parent_email}
+
+
+@app.get("/api/learned/pending")
+async def get_learned_pending_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Return pending A7 preference proposals awaiting parent approval."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    return {"proposals": pending.get("proposals", []), "last_updated": pending.get("last_updated")}
+
+
+@app.post("/api/learned/approve")
+async def approve_learned_proposal_endpoint(
+    request_data: ApproveLearnedProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Approve a pending A7 proposal — commits it to the profile and invalidates cache."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    value = (request_data.value or "").strip()
+    sentiment = (request_data.sentiment or "").strip()
+    if not category or not value or sentiment not in ("likes", "dislikes"):
+        raise HTTPException(status_code=400, detail="category, value, and sentiment ('likes'/'dislikes') are required.")
+    if category not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {category!r}")
+    timestamp = dt.utcnow().isoformat()
+    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment)
+    # Remove from pending queue
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    pending["proposals"] = [
+        p for p in proposals
+        if not (p.get("category") == category and p.get("value", "").lower() == value.lower())
+    ]
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    return {"success": True, "committed": committed}
+
+
+@app.post("/api/learned/discard")
+async def discard_learned_proposal_endpoint(
+    request_data: DiscardLearnedProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Discard a pending A7 proposal without committing it."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    value = (request_data.value or "").strip()
+    if not category or not value:
+        raise HTTPException(status_code=400, detail="category and value are required.")
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    before = len(proposals)
+    pending["proposals"] = [
+        p for p in proposals
+        if not (p.get("category") == category and p.get("value", "").lower() == value.lower())
+    ]
+    discarded = before - len(pending["proposals"])
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    if discarded:
+        _a7_record_metric("discarded", f'category="{category}"')
+    return {"success": True, "discarded": discarded}
+
+
+@app.put("/api/learned/pending")
+async def edit_pending_proposal_endpoint(
+    request_data: EditPendingProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Edit a pending proposal's category, value, or sentiment before approving."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    old_cat = (request_data.old_category or "").strip()
+    old_val = (request_data.old_value or "").strip()
+    new_cat = (request_data.new_category or "").strip()
+    new_val = (request_data.new_value or "").strip()
+    new_sent = (request_data.new_sentiment or "").strip()
+    if not all([old_cat, old_val, new_cat, new_val]) or new_sent not in ("likes", "dislikes"):
+        raise HTTPException(status_code=400, detail="old_category, old_value, new_category, new_value, and new_sentiment ('likes'/'dislikes') are required.")
+    if new_cat not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {new_cat!r}")
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    updated = False
+    for p in proposals:
+        if p.get("category") == old_cat and p.get("value", "").lower() == old_val.lower():
+            p["category"] = new_cat
+            p["value"] = new_val
+            p["sentiment"] = new_sent
+            updated = True
+            break
+    if not updated:
+        raise HTTPException(status_code=404, detail="Proposal not found.")
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    return {"success": True}
+
+
+@app.put("/api/learned/approved")
+async def edit_approved_fact_endpoint(
+    request_data: EditApprovedFactRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Edit a committed fact's category or text."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    old_cat = (request_data.old_category or "").strip()
+    old_fact = (request_data.old_fact or "").strip()
+    new_cat = (request_data.new_category or "").strip()
+    new_fact = (request_data.new_fact or "").strip()
+    if not all([old_cat, old_fact, new_cat, new_fact]):
+        raise HTTPException(status_code=400, detail="old_category, old_fact, new_category, and new_fact are required.")
+    if new_cat not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {new_cat!r}")
+    narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+    facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
+    updated = False
+    for f in facts:
+        if f.get("category") == old_cat and f.get("fact", "").lower() == old_fact.lower():
+            f["category"] = new_cat
+            f["fact"] = new_fact
+            updated = True
+            break
+    if not updated:
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    narrative["extracted_facts"] = facts
+    await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True}
+
+
+@app.delete("/api/learned/approved")
+async def delete_approved_fact_endpoint(
+    request_data: DeleteApprovedFactRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Delete a committed fact from the profile."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    fact = (request_data.fact or "").strip()
+    if not category or not fact:
+        raise HTTPException(status_code=400, detail="category and fact are required.")
+    narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+    facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
+    before = len(facts)
+    narrative["extracted_facts"] = [
+        f for f in facts
+        if not (f.get("category") == category and f.get("fact", "").lower() == fact.lower())
+    ]
+    deleted = before - len(narrative["extracted_facts"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True, "deleted": deleted}
 
 
 if __name__ == "__main__":

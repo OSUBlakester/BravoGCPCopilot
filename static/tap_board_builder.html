@@ -2622,7 +2622,7 @@
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
-            <form id="contact-support-form" class="space-y-2" method="POST" action="https://formspree.io/f/myzpzero">
+            <form id="contact-support-form" class="space-y-2">
                 <input type="text" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <input type="email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <textarea name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
@@ -2653,9 +2653,18 @@
 
         document.getElementById('contact-support-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const data = new FormData(e.target);
+            document.getElementById('bb-support-success').classList.add('hidden');
+            document.getElementById('bb-support-error').classList.add('hidden');
             try {
-                const res = await fetch(e.target.action, { method: 'POST', body: data, headers: { Accept: 'application/json' } });
+                const res = await fetch('/api/support/contact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: document.getElementById('support-name').value.trim(),
+                        email: document.getElementById('support-email').value.trim(),
+                        message: document.getElementById('support-message').value.trim(),
+                    })
+                });
                 if (res.ok) { document.getElementById('bb-support-success').classList.remove('hidden'); e.target.reset(); }
                 else { document.getElementById('bb-support-error').classList.remove('hidden'); }
             } catch { document.getElementById('bb-support-error').classList.remove('hidden'); }

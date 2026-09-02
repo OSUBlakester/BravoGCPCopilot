@@ -366,6 +366,106 @@
 
     <div class="container mx-auto mt-6 p-4 space-y-6">
 
+        <!-- COPPA Consent Banner -->
+        <div id="coppa-consent-banner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-5">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-exclamation-triangle text-amber-600 mt-1 text-lg flex-shrink-0"></i>
+                <div class="flex-1">
+                    <p class="font-semibold text-amber-800 mb-1">Parental consent required</p>
+                    <p class="text-sm text-amber-700 mb-3">This profile is marked as under 13. Personalized learning and activity reporting are locked until a parent or guardian verifies consent by clicking the link in the email.</p>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <input type="email" id="coppa-consent-email" placeholder="parent@example.com"
+                               class="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400 w-64">
+                        <button type="button" id="coppa-send-consent-btn"
+                                class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                            Send Consent Email
+                        </button>
+                        <button type="button" id="coppa-check-consent-btn"
+                                class="bg-white border border-amber-400 hover:bg-amber-50 text-amber-800 text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                            Check for Consent
+                        </button>
+                    </div>
+                    <p id="coppa-consent-status" class="text-xs mt-2 hidden"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature Flags / Personalization Settings -->
+        <div id="feature-flags-panel" class="bg-indigo-50 p-6 rounded-lg shadow-lg border-l-4 border-indigo-500">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">
+                <i class="fas fa-sliders-h mr-3 text-indigo-600"></i>Personalization Settings
+            </h2>
+            <div id="flags-loading" class="text-gray-500 italic text-sm">Loading settings…</div>
+            <div id="flags-content" class="hidden space-y-5">
+
+                <!-- is_minor_under_13 -->
+                <div class="flex items-start gap-4">
+                    <div class="flex-1">
+                        <div class="font-semibold text-gray-800">Age Group</div>
+                        <p class="text-sm text-gray-600">Whether this user is under 13. Determines COPPA consent requirements for personalized learning.</p>
+                    </div>
+                    <select id="flag-age-group"
+                            class="mt-1 flex-shrink-0 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        <option value="null">Not set / unknown</option>
+                        <option value="minor">Under 13</option>
+                        <option value="adult">13 or older</option>
+                    </select>
+                </div>
+
+                <!-- use_entered_details -->
+                <div class="flex items-start gap-4">
+                    <div class="flex-1">
+                        <div class="font-semibold text-gray-800">Use Entered Details</div>
+                        <p class="text-sm text-gray-600">When enabled, the profile narrative and People data are used to personalise AI responses.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer mt-1 flex-shrink-0">
+                        <input type="checkbox" id="flag-use-entered-details" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+
+                <!-- learn_from_history -->
+                <div class="flex items-start gap-4">
+                    <div class="flex-1">
+                        <div class="font-semibold text-gray-800">Learn from History</div>
+                        <p class="text-sm text-gray-600">When enabled, Bravo analyses conversations to learn and remember user preferences automatically.</p>
+                        <!-- auto_approve sub-option, visible only when learn_from_history is on -->
+                        <div id="flag-auto-approve-row" class="hidden mt-3 ml-4 pl-4 border-l-2 border-indigo-200">
+                            <div class="flex items-center gap-3">
+                                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                    <input type="checkbox" id="flag-auto-approve" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                                </label>
+                                <div>
+                                    <div class="text-sm font-semibold text-gray-700">Auto-approve Learned Facts</div>
+                                    <p class="text-xs text-gray-500">Skip the approval queue — facts are applied to the profile immediately.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer mt-1 flex-shrink-0">
+                        <input type="checkbox" id="flag-learn-from-history" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+
+                <div class="flex items-center gap-4 pt-1">
+                    <button type="button" id="flags-save-btn"
+                            class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-5 py-2 rounded-md shadow-sm transition-colors duration-150">
+                        Save
+                    </button>
+                    <div id="flags-save-status" class="text-sm h-4"></div>
+                </div>
+                <div class="pt-3 border-t mt-2">
+                    <button type="button" id="download-my-data-btn"
+                            class="flex items-center gap-2 text-sm text-indigo-700 hover:text-indigo-900 font-medium underline underline-offset-2">
+                        <i class="fas fa-download text-xs"></i>Download a full copy of this user's data
+                    </button>
+                    <p class="text-xs text-gray-500 mt-1">Includes narrative, learned facts, interview answers, chat history, activity log, and consent record.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Current Mood Section -->
         <div class="bg-blue-50 p-6 rounded-lg shadow-lg border-l-4 border-blue-500">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2 flex items-center">
@@ -393,150 +493,198 @@
         </div>
 
         <div class="bg-white p-6 rounded-lg shadow-lg">
-            <div class="mb-6 border-b pb-4">
-                <h2 class="text-2xl font-bold text-gray-800 mb-2">User Information</h2>
-                <p class="text-sm text-gray-600 mb-4">Use the optional Interview feature below or input information manually</p>
-                <button type="button" id="startInterviewButton" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
-                    <i class="fas fa-microphone mr-2"></i> Start Interview
-                </button>
-            </div>
-            <form id="user-info-form">
-                <div class="space-y-6">
-                    <div>
-                        <label for="userName" class="block text-lg font-medium text-gray-700 mb-2">User's Name</label>
-                        <input type="text" id="userName" name="userName" placeholder="Enter the user's preferred name" class="max-w-md">
-                        <p class="text-xs text-gray-500 mt-1">This name will be used for pronouns and possessive references (I, me, myself, mine).</p>
-                    </div>
 
-                    <!-- Profile Image Section -->
-                    <div>
-                        <label class="block text-lg font-medium text-gray-700 mb-2">
-                            <i class="fas fa-user-circle mr-2 text-blue-600"></i>Profile Picture
-                        </label>
-                        <p class="text-sm text-gray-600 mb-4">
-                            Upload a profile picture that will be used for the user's name and personal pronouns (I, me, myself, mine, etc.)
-                        </p>
-                        
-                        <!-- Current Profile Image Display -->
-                        <div id="currentProfileImageContainer" class="mb-4" style="display: none;">
-                            <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border">
-                                <img id="currentProfileImage" src="" alt="Current Profile Picture" class="w-16 h-16 object-cover rounded-full border-2 border-gray-300">
-                                <div>
-                                    <p class="text-sm font-medium text-gray-700">Current Profile Picture</p>
-                                    <p class="text-xs text-gray-500">Used for personal pronouns and identity</p>
+            <!-- Gated by use_entered_details flag -->
+            <div id="use-entered-content">
+                <div class="mb-6 border-b pb-4">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">User Information</h2>
+                    <p class="text-sm text-gray-600 mb-4">Use the optional Interview feature below or input information manually</p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button type="button" id="startInterviewButton" class="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
+                            <i class="fas fa-microphone mr-2"></i> Start Interview
+                        </button>
+                        <button type="button" id="checkConsentButton" class="hidden bg-orange-500 hover:bg-orange-600 text-white font-semibold px-4 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center text-sm">
+                            <i class="fas fa-sync-alt mr-2"></i> Check for Consent
+                        </button>
+                        <span id="checkConsentStatus" class="text-sm text-gray-600 hidden"></span>
+                    </div>
+                </div>
+                <form id="user-info-form">
+                    <div class="space-y-6">
+                        <div>
+                            <label for="userName" class="block text-lg font-medium text-gray-700 mb-2">User's Name</label>
+                            <input type="text" id="userName" name="userName" placeholder="Enter the user's preferred name" class="max-w-md">
+                            <p class="text-xs text-gray-500 mt-1">This name will be used for pronouns and possessive references (I, me, myself, mine).</p>
+                        </div>
+
+                        <!-- Profile Image Section -->
+                        <div>
+                            <label class="block text-lg font-medium text-gray-700 mb-2">
+                                <i class="fas fa-user-circle mr-2 text-blue-600"></i>Profile Picture
+                            </label>
+                            <p class="text-sm text-gray-600 mb-4">
+                                Upload a profile picture that will be used for the user's name and personal pronouns (I, me, myself, mine, etc.)
+                            </p>
+
+                            <!-- Current Profile Image Display -->
+                            <div id="currentProfileImageContainer" class="mb-4" style="display: none;">
+                                <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border">
+                                    <img id="currentProfileImage" src="" alt="Current Profile Picture" class="w-16 h-16 object-cover rounded-full border-2 border-gray-300">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-700">Current Profile Picture</p>
+                                        <p class="text-xs text-gray-500">Used for personal pronouns and identity</p>
+                                    </div>
+                                    <button type="button" id="removeProfileImageBtn" class="button-danger px-3 py-1 text-xs ml-auto">
+                                        <i class="fas fa-trash mr-1"></i>Remove
+                                    </button>
                                 </div>
-                                <button type="button" id="removeProfileImageBtn" class="button-danger px-3 py-1 text-xs ml-auto">
-                                    <i class="fas fa-trash mr-1"></i>Remove
+                            </div>
+
+                            <!-- Upload New Profile Image -->
+                            <div id="uploadProfileImageContainer" class="space-y-3">
+                                <div>
+                                    <input type="file" id="profileImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
+                                </div>
+                                <button type="button" id="uploadProfileImageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
+                                    <i class="fas fa-upload mr-3 text-xl"></i>Upload Profile Picture
+                                </button>
+                            </div>
+
+                            <span id="profile-image-status" class="text-sm text-green-600 h-4 inline-block mt-2"></span>
+                        </div>
+
+                        <div>
+                            <label for="user-info" class="block text-lg font-medium text-gray-700 mb-2">User Narrative (Admin Input)</label>
+                            <textarea id="user-info" name="user-info" rows="10" placeholder="Enter a complete user story including personality, history, interests, preferences, favorites, family, pets, and any other relevant details. This helps personalize responses." class="w-full"></textarea>
+                            <p class="text-xs text-gray-500 mt-1">Include as much relevant detail as possible to create a comprehensive narrative about the user.</p>
+                            <!-- Shown when narrative exists but Use Entered Details is off -->
+                            <div id="narrative-personalization-prompt" class="hidden mt-3 flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-lg p-3">
+                                <svg class="flex-shrink-0 w-5 h-5 text-amber-500 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
+                                <div class="flex-1">
+                                    <p class="text-sm font-semibold text-amber-800">Narrative not in use</p>
+                                    <p class="text-xs text-amber-700 mt-0.5">A narrative exists but <strong>Use Entered Details</strong> is off — Bravo is not using it to personalise responses.</p>
+                                </div>
+                                <button type="button" id="narrative-personalization-enable-btn"
+                                        class="flex-shrink-0 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors duration-150">
+                                    Enable
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Upload New Profile Image -->
-                        <div id="uploadProfileImageContainer" class="space-y-3">
-                            <div>
-                                <input type="file" id="profileImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
+                        <div class="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-semibold text-blue-800">AI Option Overrides</h3>
+                                    <p class="text-xs text-blue-700">Define hard include/exclude rules for generated AAC options.</p>
+                                </div>
+                                <button type="button" id="openAiOverridesModalBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-lg shadow-lg transition-colors duration-200 text-base flex items-center">
+                                    <i class="fas fa-shield-alt mr-2"></i>AI Option Overrides
+                                </button>
                             </div>
-                            <button type="button" id="uploadProfileImageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
-                                <i class="fas fa-upload mr-3 text-xl"></i>Upload Profile Picture
-                            </button>
+                            <p class="text-xs text-gray-600">These overrides are profile-specific and are applied to AI option generation and filtering.</p>
                         </div>
-                        
-                        <span id="profile-image-status" class="text-sm text-green-600 h-4 inline-block mt-2"></span>
-                    </div>
 
-                    <div>
-                        <label for="user-info" class="block text-lg font-medium text-gray-700 mb-2">User Narrative (Admin Input)</label>
-                        <textarea id="user-info" name="user-info" rows="10" placeholder="Enter a complete user story including personality, history, interests, preferences, favorites, family, pets, and any other relevant details. This helps personalize responses." class="w-full"></textarea>
-                        <p class="text-xs text-gray-500 mt-1">Include as much relevant detail as possible to create a comprehensive narrative about the user.</p>
-                    </div>
-
-                    <div class="border border-blue-200 rounded-lg p-4 bg-blue-50">
-                        <div class="flex items-center justify-between mb-2">
-                            <div>
-                                <h3 class="text-lg font-semibold text-blue-800">AI Option Overrides</h3>
-                                <p class="text-xs text-blue-700">Define hard include/exclude rules for generated AAC options.</p>
-                            </div>
-                            <button type="button" id="openAiOverridesModalBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-lg shadow-lg transition-colors duration-200 text-base flex items-center">
-                                <i class="fas fa-shield-alt mr-2"></i>AI Option Overrides
-                            </button>
+                        <div>
+                            <label for="userBirthdate" class="block text-lg font-medium text-gray-700 mb-2">User's Birthday</label>
+                            <input type="date" id="userBirthdate" name="userBirthdate" class="max-w-xs">
+                            <p class="text-xs text-gray-500 mt-1">Include the year to calculate age.</p>
                         </div>
-                        <p class="text-xs text-gray-600">These overrides are profile-specific and are applied to AI option generation and filtering.</p>
+
+                    </div>
+                    <div class="mt-8 flex gap-4">
+                        <button type="button" id="saveInfoButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
+                             <i class="fas fa-save mr-3 text-xl"></i> Save User Name, Info & Birthday
+                        </button>
+                        <span id="info-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Gated by learn_from_history flag -->
+            <div id="learn-history-content">
+
+                <!-- AI-Extracted Narrative from Chat History -->
+                <div class="border-2 border-purple-200 rounded-lg p-4 bg-purple-50 mt-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-lg font-medium text-purple-700">
+                            <i class="fas fa-robot mr-2"></i>AI-Extracted Narrative (from Chat History)
+                        </label>
+                        <button type="button" id="refreshChatNarrativeBtn" class="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors">
+                            <i class="fas fa-sync-alt mr-1"></i>Refresh
+                        </button>
                     </div>
 
-                    <!-- AI-Extracted Narrative from Chat History -->
-                    <div class="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
-                        <div class="flex items-center justify-between mb-2">
-                            <label class="block text-lg font-medium text-purple-700">
-                                <i class="fas fa-robot mr-2"></i>AI-Extracted Narrative (from Chat History)
+                    <div id="chat-narrative-content" class="space-y-3">
+                        <div id="chat-narrative-loading" class="text-gray-500 italic">Loading...</div>
+
+                        <!-- Narrative Text -->
+                        <div id="chat-narrative-text-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Summary</label>
+                            <textarea id="chat-narrative-text" rows="4" class="w-full text-sm bg-white" placeholder="No narrative extracted yet. Run the chat history processor to extract insights."></textarea>
+                        </div>
+
+                        <!-- Approved Extracted Facts -->
+                        <div id="chat-facts-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Approved Facts (<span id="facts-count">0</span>)
                             </label>
-                            <button type="button" id="refreshChatNarrativeBtn" class="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors">
-                                <i class="fas fa-sync-alt mr-1"></i>Refresh
-                            </button>
+                            <div id="chat-facts-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
                         </div>
-                        
-                        <div id="chat-narrative-content" class="space-y-3">
-                            <div id="chat-narrative-loading" class="text-gray-500 italic">Loading...</div>
-                            
-                            <!-- Narrative Text -->
-                            <div id="chat-narrative-text-section" class="hidden">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Summary</label>
-                                <textarea id="chat-narrative-text" rows="4" class="w-full text-sm bg-white" placeholder="No narrative extracted yet. Run the chat history processor to extract insights."></textarea>
-                            </div>
-                            
-                            <!-- Extracted Facts -->
-                            <div id="chat-facts-section" class="hidden">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Extracted Facts (<span id="facts-count">0</span>)
-                                </label>
-                                <div id="chat-facts-list" class="space-y-2 max-h-48 overflow-y-auto"></div>
-                            </div>
-                            
-                            <!-- Answered Questions -->
-                            <div id="chat-questions-section" class="hidden">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Known Preferences (<span id="questions-count">0</span>)
-                                </label>
-                                <div id="chat-questions-list" class="grid grid-cols-2 gap-2 text-sm"></div>
-                            </div>
-                            
-                            <!-- Recent Greetings -->
-                            <div id="chat-greetings-section" class="hidden">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Recent Greetings</label>
-                                <div id="chat-greetings-list" class="flex flex-wrap gap-2"></div>
-                            </div>
+
+                        <!-- Answered Questions -->
+                        <div id="chat-questions-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Known Preferences (<span id="questions-count">0</span>)
+                            </label>
+                            <div id="chat-questions-list" class="grid grid-cols-2 gap-2 text-sm"></div>
                         </div>
-                        
-                        <div class="mt-3 flex gap-2 text-xs text-gray-600">
-                            <span id="chat-narrative-meta">
-                                Last updated: <span id="chat-narrative-updated">Never</span> | 
-                                Source: <span id="chat-narrative-message-count">0</span> messages
-                            </span>
+
+                        <!-- Recent Greetings -->
+                        <div id="chat-greetings-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Recent Greetings</label>
+                            <div id="chat-greetings-list" class="flex flex-wrap gap-2"></div>
                         </div>
-                        
-                        <p class="text-xs text-purple-600 mt-2">
-                            <i class="fas fa-info-circle mr-1"></i>
-                            This narrative is automatically extracted from chat messages older than 7 days. 
-                            It captures user preferences, personal facts, and communication patterns.
-                        </p>
                     </div>
 
-                    <div>
-                        <label for="userBirthdate" class="block text-lg font-medium text-gray-700 mb-2">User's Birthday</label>
-                        <input type="date" id="userBirthdate" name="userBirthdate" class="max-w-xs">
-                        <p class="text-xs text-gray-500 mt-1">Include the year to calculate age.</p>
+                    <div class="mt-3 flex gap-2 text-xs text-gray-600">
+                        <span id="chat-narrative-meta">
+                            Last updated: <span id="chat-narrative-updated">Never</span> |
+                            Source: <span id="chat-narrative-message-count">0</span> messages
+                        </span>
                     </div>
 
+                    <p class="text-xs text-purple-600 mt-2">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        This narrative is automatically extracted from chat messages older than 7 days.
+                        It captures user preferences, personal facts, and communication patterns.
+                    </p>
                 </div>
-                <div class="mt-8 flex gap-4">
-                    <button type="button" id="saveInfoButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
-                         <i class="fas fa-save mr-3 text-xl"></i> Save User Name, Info & Birthday
-                    </button>
-                    <span id="info-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
+
+                <!-- Pending Learned Proposals -->
+                <div class="border-2 border-yellow-300 rounded-lg p-4 bg-yellow-50 mt-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <label class="block text-lg font-medium text-yellow-800">
+                            <i class="fas fa-clock mr-2"></i>Pending Learned Facts
+                            <span id="pending-count-badge" class="hidden ml-2 px-2 py-0.5 rounded-full bg-yellow-400 text-yellow-900 text-sm font-bold"></span>
+                        </label>
+                        <button type="button" id="refreshPendingBtn" class="px-3 py-1 text-xs bg-yellow-600 hover:bg-yellow-700 text-white rounded transition-colors">
+                            <i class="fas fa-sync-alt mr-1"></i>Refresh
+                        </button>
+                    </div>
+                    <p class="text-xs text-yellow-700 mb-3">
+                        These facts were learned from conversation history and are waiting for a guardian to approve or discard them.
+                    </p>
+                    <div id="pending-loading" class="text-gray-500 italic text-sm hidden">Loading…</div>
+                    <div id="pending-proposals-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
+                    <div id="pending-empty" class="text-gray-500 italic text-sm hidden">No pending proposals.</div>
+                    <div id="pending-status" class="text-sm mt-2 h-4"></div>
                 </div>
-            </form>
+
+            </div><!-- /learn-history-content -->
+
         </div>
 
-        <div class="bg-white p-6 rounded-lg shadow-lg">
+        <div id="friends-family-panel" class="bg-white p-6 rounded-lg shadow-lg">
             <div class="flex justify-between items-center mb-6 border-b pb-2">
                 <h2 class="text-2xl font-bold text-gray-800">Family & Friends</h2>
                 <button type="button" id="manageRelationshipsBtn" class="button-secondary">

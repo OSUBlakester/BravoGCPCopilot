@@ -46,6 +46,9 @@ steps:
       - '300'
       - '--port'
       - '8080'
+      - '--cpu-boost'
+      - '--startup-probe'
+      - 'tcpSocket.port=8080,initialDelaySeconds=0,failureThreshold=2,periodSeconds=240,timeoutSeconds=240'
 
 # Images to be pushed to Google Container Registry
 images:

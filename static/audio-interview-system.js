@@ -280,9 +280,13 @@ class AudioInterviewSystem {
     }
 
     async openInterviewModal() {
-        // When launched from the setup wizard always start completely fresh
+        // When launched from the setup wizard, consent was already handled by the
+        // Personalized Learning wizard step — go straight into the interview.
         if (sessionStorage.getItem('wizardInterviewMode') === '1') {
             this._resetState();
+            this.modal.classList.remove('hidden');
+            await this.startInterview();
+            return;
         }
 
         this.modal.classList.remove('hidden');
@@ -1083,19 +1087,21 @@ Write in third person as a cohesive, professional profile that caregivers and th
             console.warn('[Interview] No birthday response found in interviewData.responses');
         }
 
-        // Save name and birthday to backend so they persist regardless of which page we're on
+        // Save narrative, name, and birthday to backend so they persist regardless of which page we're on
         console.log('[Interview] window.authenticatedFetch defined:', typeof window.authenticatedFetch === 'function');
         if (typeof window.authenticatedFetch === 'function') {
-            if (nameResponse) {
-                try {
-                    await window.authenticatedFetch('/api/user-info', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: nameResponse.answer.trim() })
-                    });
-                } catch (e) {
-                    console.error('Failed to save user name to backend:', e);
-                }
+            // Always save the narrative; include name in the same call when available
+            try {
+                const savePayload = { userInfo: narrative };
+                if (nameResponse) savePayload.name = nameResponse.answer.trim();
+                await window.authenticatedFetch('/api/user-info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload)
+                });
+                console.log('[Interview] Narrative saved to backend successfully');
+            } catch (e) {
+                console.error('Failed to save narrative to backend:', e);
             }
             if (parsedDate) {
                 try {
@@ -1126,11 +1132,11 @@ Write in third person as a cohesive, professional profile that caregivers and th
 
     async parseBirthdayFromResponse(birthdayText) {
         try {
-            const prompt = `Extract a date from this text and return it in YYYY-MM-DD format. If no year is mentioned, use 2000 as default.
+            const prompt = `Extract a date from this text and return it in YYYY-MM-DD format. If no year is mentioned, return "NONE" — do not guess a year.
 
 Text: "${birthdayText}"
 
-Return only the date in YYYY-MM-DD format or "NONE" if no valid date can be extracted.`;
+Return only the date in YYYY-MM-DD format or "NONE" if the year is missing or no valid date can be extracted.`;
             
             const response = await this.callLLM(prompt);
             const dateMatch = response.match(/\d{4}-\d{2}-\d{2}/);
