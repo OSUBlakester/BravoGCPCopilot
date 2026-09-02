@@ -16897,7 +16897,7 @@ async def generate_compose_document_illustration(
         image_bytes = await generate_story_illustration_image(illustration_prompt)
         safe_doc_id = re.sub(r"[^\w\-]", "_", document_id)
         filename = f"compose_illustration_{safe_doc_id}_{uuid.uuid4().hex[:8]}.png"
-        image_url = await upload_image_to_storage(image_bytes, filename)
+        image_url = await upload_image_to_storage(image_bytes, filename, account_id=account_id)
 
         now_iso = dt.now(timezone.utc).isoformat()
         update_payload = {
@@ -18901,7 +18901,7 @@ async def generate_story_builder_illustration(
         image_bytes = await generate_story_illustration_image(illustration_prompt)
         safe_story_id = re.sub(r"[^\w\-]", "_", story_id)
         filename = f"story_illustration_{safe_story_id}_{uuid.uuid4().hex[:8]}.png"
-        image_url = await upload_image_to_storage(image_bytes, filename)
+        image_url = await upload_image_to_storage(image_bytes, filename, account_id=account_id)
 
         now_iso = dt.now(timezone.utc).isoformat()
         update_payload = {
@@ -20443,19 +20443,30 @@ async def generate_story_illustration_image(prompt: str, max_retries: int = 2) -
 # Update the main function to use Vertex AI Imagen directly
 generate_image_with_gemini = generate_image_with_vertex_ai_imagen
 
-async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
-    """Upload image to Google Cloud Storage and return public URL"""
+async def upload_image_to_storage(image_bytes: bytes, filename: str, account_id: str | None = None) -> str:
+    """Upload image to GCS and return its URL.
+
+    If account_id is given, the image is user-specific content (story/composition
+    illustrations) and goes to the private custom-images bucket under
+    custom_images/{account_id}/illustrations/. _display_image_url will convert
+    that URL to a signed URL at serve time.
+
+    Without account_id, the image is a shared Bravo-generated AAC symbol and
+    goes to the public main bucket under global/.
+    """
     try:
-        bucket = await ensure_aac_images_bucket()
-        blob = bucket.blob(f"global/{filename}")
-        
-        # Upload image
-        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
-        
-        # With uniform bucket-level access, objects are publicly readable by default
-        # if the bucket has the allUsers Storage Object Viewer role
-        # Return the public URL directly without calling make_public()
-        return f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
+        if account_id and CUSTOM_IMAGES_BUCKET_NAME and storage_client:
+            storage_path = f"custom_images/{account_id}/illustrations/{filename}"
+            bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
+            blob = bucket.blob(storage_path)
+            await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type="image/png")
+            return f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
+        # Shared Bravo AAC images go to the public main bucket
+        main_bucket = await ensure_aac_images_bucket()
+        blob = main_bucket.blob(f"global/{filename}")
+        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type="image/png")
+        return f"https://storage.googleapis.com/{main_bucket.name}/{blob.name}"
     except Exception as e:
         logging.error(f"Error uploading image to storage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
