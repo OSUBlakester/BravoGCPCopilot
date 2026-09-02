@@ -9950,7 +9950,8 @@ async def export_my_data(
             "consent_record": {
                 k: v for k, v in consent.items()
                 if k in {"learn_from_history", "use_entered_details", "auto_approve_learned",
-                         "is_minor_under_13", "consent_given_at", "consent_withdrawn_at"}
+                         "is_minor_under_13", "consent_given_at", "consent_withdrawn_at",
+                         "notice_version"}
             },
         }
 
@@ -12454,6 +12455,8 @@ _CONSENT_TOKEN_EXPIRY_DAYS = 7
 _CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
 _MAX_CONSENT_TOKENS_PER_USER_PER_DAY = 10
 _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_HOUR = 3
+# Bump this date whenever the consent notice shown to parents materially changes.
+CONSENT_NOTICE_VERSION = "2026-09-01"
 
 
 _CONSENT_CACHE_TTL_SECONDS = 45
@@ -12574,11 +12577,14 @@ async def set_use_entered_details(account_id: str, aac_user_id: str, enabled: bo
     logging.info("use_entered_details set to %s for %s/%s", enabled, account_id, aac_user_id)
 
 
-async def record_parental_consent(account_id: str, aac_user_id: str) -> None:
+async def record_parental_consent(
+    account_id: str, aac_user_id: str, notice_version: str | None = None
+) -> None:
     """Mark parental consent given. Idempotent — safe to call on re-verify."""
     consent = await load_consent(account_id, aac_user_id)
     consent["learn_from_history"] = True
     consent["consent_given_at"] = dt.utcnow().isoformat()
+    consent["notice_version"] = notice_version or CONSENT_NOTICE_VERSION
     consent.pop("consent_withdrawn_at", None)
     await save_consent(account_id, aac_user_id, consent)
     logging.info("Parental consent recorded for %s/%s", account_id, aac_user_id)
@@ -12611,6 +12617,7 @@ async def _consent_create_verification(account_id: str, aac_user_id: str,
         "account_id": account_id,
         "aac_user_id": aac_user_id,
         "parent_email": parent_email,
+        "notice_version": CONSENT_NOTICE_VERSION,
         "token": token,
         "created_at": dt.utcnow(),
         "used_at": None,
@@ -16281,7 +16288,7 @@ async def verify_consent_handler(t: str = ""):
     if not (account_id and aac_user_id):
         return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
     try:
-        await record_parental_consent(account_id, aac_user_id)
+        await record_parental_consent(account_id, aac_user_id, data.get("notice_version"))
         now = dt.now(timezone.utc)
         second_due = now + timedelta(days=_CONSENT_SECOND_EMAIL_DELAY_DAYS)
         await asyncio.to_thread(ref.update, {"used_at": now, "second_email_due_at": second_due})
