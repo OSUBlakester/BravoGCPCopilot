@@ -740,11 +740,49 @@
                         <ul class="text-xs text-gray-700 ml-4 space-y-1">
                           <li>• <strong>Topic Name:</strong> Clear, descriptive title (e.g., "Denver Broncos", "Disney Movies")</li>
                           <li>• <strong>Speech Phrase:</strong> Optional phrase to say before reading content (e.g., "Let me get the latest Denver Broncos news")</li>
+                          <li>• <strong>Content Source:</strong> Choose between AI Web Search (default — just enter a search query) or Manual Scraping (configure a specific website)</li>
+                          <li>• <strong>Search Query:</strong> When using AI Web Search, describe what to look up — e.g., "Denver Broncos latest NFL news"</li>
+                          <li>• <strong>Test (AI Web Search):</strong> Run a live preview of what content would be retrieved</li>
                           <li>• <strong>Save Changes:</strong> Click Save to store the topic configuration</li>
                           <li>• <strong>Delete Topic:</strong> Remove topics that are no longer needed</li>
                         </ul>
                       </div>
-                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> Choose topics that match the user's interests for more engaging conversations.</p>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> AI Web Search is the easiest way to keep topics current — just describe what to search for and Bravo handles the rest.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Content Source -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-search text-teal-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Content Source</div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="event.stopPropagation(); startFavoritesGuide('content-source');" class="px-3 py-1 bg-teal-500 text-white text-xs rounded-lg hover:bg-teal-600 transition flex items-center">
+                        <i class="fas fa-route mr-1"></i>Guide Me
+                      </button>
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <p><strong>Purpose:</strong> Choose how each topic fetches its content — either via AI web search or a manually configured website scrape.</p>
+                      <div class="bg-teal-50 border-l-4 border-teal-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-teal-900 mb-1">Two modes:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>AI Web Search (recommended):</strong> Enter a plain-language search query and Bravo uses AI-powered web search to find current, relevant content automatically. No website configuration needed.</li>
+                          <li>• <strong>Search Query:</strong> Describe what to look up — e.g., "Denver Broncos latest NFL news" or "Vail ski report conditions". The more specific, the better the results.</li>
+                          <li>• <strong>Test (AI Web Search):</strong> Run a live search to preview what content would be retrieved before saving.</li>
+                          <li>• <strong>Manual Scraping:</strong> Configure a specific website URL for Bravo to pull content from. Use this for sources not well-covered by web search, or when a specific site is always preferred.</li>
+                        </ul>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> AI Web Search is simpler and works well for most topics. Use Manual Scraping only when you need content from a very specific site.</p>
                     </div>
                   </div>
                 </div>
@@ -860,7 +898,7 @@
       </div>
       
       <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
-        <button id="contact-support-btn" class="text-sm text-[#FB4F14] hover:text-orange-600 transition-colors flex items-center">
+        <button id="contact-support-btn" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
           <i class="fas fa-envelope mr-2"></i>Contact Support
         </button>
         <button id="close-help-modal-footer" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
@@ -882,6 +920,10 @@
       <div class="p-6">
         <form id="contact-form">
           <div class="space-y-4">
+            <div>
+              <label for="contact-name" class="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
+              <input type="text" id="contact-name" name="name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+            </div>
             <div>
               <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-1">Your Email</label>
               <input type="email" id="contact-email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
@@ -991,6 +1033,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            name: document.getElementById('contact-name').value.trim(),
             email: document.getElementById('contact-email').value.trim(),
             message: document.getElementById('contact-message').value.trim(),
           })
@@ -1100,8 +1143,56 @@
           }
         },
         {
+          title: 'Content Source Toggle',
+          content: 'Choose how this topic fetches its content. <strong>AI Web Search</strong> (recommended — selected by default) uses a plain-language search query and lets Bravo find current content automatically. <strong>Manual Scraping</strong> lets you configure a specific website to pull from.',
+          highlight: '#sourceGroundingBtn',
+          action: function() {
+            const btn = document.getElementById('sourceGroundingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('sourceGroundingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Search Query (AI Web Search)',
+          content: 'When AI Web Search is selected, enter a plain-language description of what to look up. Be specific for better results — e.g., "Denver Broncos latest NFL news" or "Vail ski report snow conditions".',
+          highlight: '#searchQuery',
+          action: function() {
+            const input = document.getElementById('searchQuery');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('searchQuery');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Test AI Web Search',
+          content: 'Click Test to run a live preview of what content would be retrieved for this topic. Check the results before saving to make sure Bravo is finding the right kind of content.',
+          highlight: '#testGroundingBtn',
+          action: function() {
+            const btn = document.getElementById('testGroundingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('testGroundingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
           title: 'Configure Web Scraping',
-          content: 'Click this button to set up automatic content retrieval from websites. This allows the topic to pull fresh news, scores, or other current information.',
+          content: 'If you selected Manual Scraping, click this button to set up a specific website for content retrieval. This opens a step-by-step wizard to configure and test the website connection.',
           highlight: '#configureScrapingBtn',
           action: function() {
             const btn = document.getElementById('configureScrapingBtn');
@@ -1112,6 +1203,76 @@
           },
           cleanup: function() {
             const btn = document.getElementById('configureScrapingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        }
+      ]
+    };
+
+    const contentSourceGuide = {
+      id: 'content-source',
+      steps: [
+        {
+          title: 'Content Source Toggle',
+          content: 'Each topic has two ways to fetch content. The toggle at the top of the content source section lets you switch between them. <strong>AI Web Search</strong> is selected by default and is the recommended choice for most topics.',
+          highlight: '#sourceGroundingBtn',
+          action: function() {
+            const btn = document.getElementById('sourceGroundingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('sourceGroundingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'AI Web Search — Search Query',
+          content: 'With AI Web Search active, enter a plain-language description of what to search for. Bravo uses this to find current, relevant content from across the web. The more specific the query, the more focused the results.',
+          highlight: '#searchQuery',
+          action: function() {
+            const input = document.getElementById('searchQuery');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('searchQuery');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Test AI Web Search',
+          content: 'Click Test to run a live search with the current query. The results preview lets you confirm the right content is being found before you save the topic.',
+          highlight: '#testGroundingBtn',
+          action: function() {
+            const btn = document.getElementById('testGroundingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('testGroundingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Manual Scraping (Legacy)',
+          content: 'Switch to Manual Scraping if you want to pull content from one specific website. Click Configure Web Scraping to open the setup wizard. Use this when AI Web Search doesn\'t cover a specialized or private source.',
+          highlight: '#sourceScrapingBtn',
+          action: function() {
+            const btn = document.getElementById('sourceScrapingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('sourceScrapingBtn');
             if (btn) btn.classList.remove('guide-highlight-target');
           }
         }
@@ -1251,6 +1412,7 @@
       const guides = {
         'grid': gridGuide,
         'creating': creatingGuide,
+        'content-source': contentSourceGuide,
         'scraping': scrapingGuide,
         'saving': savingGuide
       };

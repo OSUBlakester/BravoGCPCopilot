@@ -84,6 +84,7 @@
         .root-drop-zone.drag-over { border-color: #3498db; background-color: rgba(52,152,219,0.1); color: #2980b9; }
         .hidden-badge { font-size: 0.7rem; background: #fbbf24; color: #92400e; border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
         .page-actions { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: white; border-bottom: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); flex-wrap: wrap; }
+        html.in-iframe .page-banner { display: none !important; }
     </style>
 </head>
 <body>
@@ -113,9 +114,6 @@
     </div>
 
     <div class="page-actions">
-        <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full hover:bg-orange-100" title="Back to Board Builder">
-            <i class="fas fa-table-cells-large mr-2"></i>Board Builder
-        </button>
         <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
         <button class="btn btn-primary h-10 px-4 flex items-center justify-center rounded-full text-sm" id="addMenuItemBtn">+ Add Root Menu Item</button>
         <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
@@ -123,9 +121,6 @@
         </button>
         <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
             <i class="fas fa-times mr-1"></i>Cancel
-        </button>
-        <button class="h-10 px-4 flex items-center justify-center text-white bg-blue-600 rounded-full text-sm hover:bg-blue-700" id="translateMenuBtn" title="Translate all menu items">
-            <i class="fas fa-language mr-1"></i>Translate
         </button>
     </div>
 
@@ -417,6 +412,10 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
     <script>
+        if (window.self !== window.top) {
+            document.documentElement.classList.add('in-iframe');
+        }
+
         let authToken = null, currentAacUserId = null;
         let boards = [], menuTree = [], originalMenuTree = [];
         let selectedPath = null, draggedPath = null, hasUnsavedChanges = false;
@@ -442,7 +441,7 @@
             document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
             document.getElementById('expandAllTreeBtn').addEventListener('click', expandAllTreeNodes);
             document.getElementById('collapseAllTreeBtn').addEventListener('click', collapseAllTreeNodes);
-document.getElementById('translateMenuBtn').addEventListener('click', openTranslateMenuModal);
+document.getElementById('translateMenuBtn')?.addEventListener('click', openTranslateMenuModal);
                         document.getElementById('closeTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('cancelTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('performMenuTranslationBtn').addEventListener('click', performMenuTranslation);
@@ -770,27 +769,12 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             let iconStyle = 'color:#6b7280;font-size:0.85rem;';
             if (hasChildren) {
                 iconClass = isExpanded ? 'fa-folder-open' : 'fa-folder';
-            } else if (boardType === 'static') {
-                iconClass = 'fa-table-cells';
-                iconStyle = 'color:#2563eb;font-size:0.85rem;';
-            } else if (boardType === 'ai') {
-                iconClass = 'fa-wand-magic-sparkles';
-                iconStyle = 'color:#7c3aed;font-size:0.85rem;';
             }
 
             const boardLabel = getBoardLabel(node.board_id);
             let boardLabelSpan = '';
             if (boardLabel) {
-                let pillClass = 'board-target-pill';
-                let pillIcon = '';
-                if (boardType === 'static') {
-                    pillClass += ' static-pill';
-                    pillIcon = '<i class="fas fa-table-cells mr-1"></i>';
-                } else if (boardType === 'ai') {
-                    pillClass += ' ai-pill';
-                    pillIcon = '<i class="fas fa-wand-magic-sparkles mr-1"></i>';
-                }
-                boardLabelSpan = `<span class="${pillClass}" title="${escapeHtml(boardLabel)}">${pillIcon}${escapeHtml(boardLabel)}</span>`;
+                boardLabelSpan = `<span class="board-target-pill" title="${escapeHtml(boardLabel)}">${escapeHtml(boardLabel)}</span>`;
             }
 
             row.innerHTML =
@@ -887,8 +871,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             if (!boardId) return '';
             const board = boards.find((item) => item.id === boardId);
             if (board) {
-                const typeSuffix = board.board_type ? ` (${board.board_type.toUpperCase()})` : '';
-                return String(board.label || board.id || '') + typeSuffix;
+                return String(board.label || board.id || '');
             }
             return String(boardId);
         }
@@ -1035,7 +1018,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
                 opt.value = b.id;
                 opt.dataset.boardType = b.board_type || '';
                 opt.dataset.source = b.source || '';
-                opt.textContent = (b.label || b.id) + (b.board_type ? ' (' + b.board_type + ')' : '');
+                opt.textContent = (b.label || b.id);
                 if (b.id === selectedId) opt.selected = true;
                 sel.appendChild(opt);
             });
@@ -1404,14 +1387,17 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             <div id="help-modal-content" class="overflow-y-auto flex-1 px-0 py-0">
                 <div id="help-loading" class="text-center text-gray-400">Loading help...</div>
             </div>
-            <div class="mt-4 text-center">
-                <button onclick="openBMAContactModal()" class="inline-block text-green-700 font-semibold underline hover:text-green-900">Contact Support</button>
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <button onclick="openBMAContactModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
+                <button onclick="document.getElementById('help-modal').classList.add('hidden')" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors text-sm">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Contact Support Modal -->
-    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden" style="z-index: 9999;">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
@@ -1472,7 +1458,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
 
         function closeHelpModal() { helpModal.classList.add('hidden'); }
 
-        window.openBMAContactModal = function () { closeHelpModal(); contactModal.classList.remove('hidden'); };
+        window.openBMAContactModal = function () { contactModal.classList.remove('hidden'); };
 
         window.toggleBMAGuideDetails = function (element) {
             const details = element.querySelector('.guide-details');
@@ -1595,12 +1581,6 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
 
                 </div>
 
-                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
-                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
-                    <button onclick="openBMAContactModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                        <i class="fas fa-envelope mr-2"></i>Contact Support
-                    </button>
-                </div>
             </div>`;
         }
     })();

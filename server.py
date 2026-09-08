@@ -29145,15 +29145,45 @@ async def list_tap_boards(
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
                 continue
-            # Skip only when pool buttons already exist AND the count matches the current pool.
-            # Stale boards (e.g. created with the old 84-item padded pool) must be replaced.
-            if pool_btns and len(pool_btns) == len(pool):
-                continue
             max_on_page = static_rows * grid_cols
-            board['buttons'] = [
-                _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
-                for idx, word in enumerate(pool)
-            ]
+            # Skip if the board has any manually placed custom buttons (no pool_index, but has
+            # row/col assigned). This means the admin has customized the board and we must not
+            # overwrite their work with the auto-generated pool.
+            has_custom_placed = any(
+                isinstance(b, dict) and b.get('pool_index') is None and b.get('row') is not None
+                for b in existing_btns
+            )
+            if has_custom_placed:
+                continue
+            # Skip when pool buttons exist, count matches the pool, AND the on-page/overflow
+            # split still reflects the current static_rows. If static_rows changed (e.g. admin
+            # toggled Include Dynamic Row), on_page_pool will differ from max_on_page and we
+            # must re-backfill to reposition the buttons correctly.
+            if pool_btns and len(pool_btns) == len(pool):
+                on_page_pool = sum(
+                    1 for b in pool_btns
+                    if isinstance(b, dict) and b.get('row') is not None
+                )
+                if on_page_pool == max_on_page:
+                    continue
+            # Build a map of existing pool buttons by pool_index so we can preserve
+            # any custom fields (image_url, custom_audio_file, background_color, text_color)
+            # that the admin assigned to individual buttons.
+            existing_by_pool_idx = {
+                b['pool_index']: b
+                for b in pool_btns
+                if isinstance(b, dict) and b.get('pool_index') is not None
+            }
+            new_buttons = []
+            for idx, word in enumerate(pool):
+                btn = _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
+                existing = existing_by_pool_idx.get(idx)
+                if existing:
+                    for preserve in ('image_url', 'custom_audio_file', 'background_color', 'text_color'):
+                        if existing.get(preserve) is not None:
+                            btn[preserve] = existing[preserve]
+                new_buttons.append(btn)
+            board['buttons'] = new_buttons
             board['dynamic_rows'] = tap_dynamic_rows
             pool_backfilled = True
         if pool_backfilled:

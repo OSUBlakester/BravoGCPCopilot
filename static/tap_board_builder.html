@@ -17,6 +17,7 @@
         .visual-button.has-navigation { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-color: #d97706; }
         .visual-button.dragging { opacity: 0.5; transform: rotate(4deg); }
         .visual-button.drop-target { border-color: #ef4444; border-width: 3px; background-color: #fef2f2; }
+        .visual-button.insert-target { border-color: #16a34a !important; border-width: 3px !important; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.35); z-index: 1; }
         .button-indicator { position: absolute; top: 4px; right: 4px; width: 14px; height: 14px; border-radius: 50%; font-size: 8px; display: flex; align-items: center; justify-content: center; }
         .indicator-nav { background-color: #d97706; color: white; }
         .indicator-speech { background-color: #059669; color: white; }
@@ -33,6 +34,40 @@
         #dragZoneRight { right: 0; background: rgba(99,102,241,0.10); color: #4338ca; border-left:  3px dashed #6366f1; }
         .drag-zones-active .drag-zone { display: flex; pointer-events: all; }
         .drag-zone.hidden-zone { opacity: 0.2; pointer-events: none; }
+
+        /* ── Page banner sticky ──────────────────────────── */
+        .page-banner { position: sticky; top: 0; z-index: 50; }
+        /* ── Settings layout ──────────────────────────── */
+        .ts-layout { display: flex; min-height: calc(100vh - 56px); }
+        .ts-nav { width: 220px; flex-shrink: 0; background: white; border-right: 1px solid #e5e7eb; box-shadow: 2px 0 8px rgba(0,0,0,0.06); padding: 0.75rem 0; position: sticky; top: 56px; align-self: flex-start; height: calc(100vh - 56px); overflow-y: auto; z-index: 10; }
+        .ts-nav-label { padding: 0.4rem 1.25rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; }
+        .ts-nav-item { display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 1.25rem; cursor: pointer; border-left: 3px solid transparent; transition: background 0.12s, border-color 0.12s, color 0.12s; color: #4b5563; font-size: 0.82rem; font-weight: 500; line-height: 1.3; user-select: none; }
+        .ts-nav-item:hover { background: #f9fafb; color: #111827; }
+        .ts-nav-item.active { background: #eff6ff; border-left-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+        .ts-nav-icon { width: 1.25rem; text-align: center; flex-shrink: 0; font-size: 0.9rem; }
+        .ts-content { flex: 1; min-width: 0; background: #f3f4f6; }
+        .ts-section { display: none; }
+        .ts-section.active { display: block; }
+        .ts-save-bar { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid #e5e7eb; text-align: center; }
+        /* ── Setting groups & rows ──────────────────────────────── */
+        .sgroup { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.625rem; overflow: hidden; margin-bottom: 1rem; }
+        .sgroup-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1rem; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; }
+        .srow { display: flex; align-items: center; gap: 1.5rem; padding: 0.8rem 1rem; border-bottom: 1px solid #f3f4f6; min-height: 58px; background: white; }
+        .srow:last-child { border-bottom: none; }
+        .srow-meta { flex: 1; min-width: 0; }
+        .srow-label { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; display: block; }
+        .srow-desc { font-size: 0.72rem; color: #6b7280; margin-top: 0.15rem; line-height: 1.4; display: block; }
+        .srow-ctrl { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; }
+        .tog { position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer; flex-shrink: 0; }
+        .tog input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .tog-slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 12px; transition: background 0.18s; }
+        .tog-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.18); transition: transform 0.18s; }
+        .tog input:checked + .tog-slider { background: #3b82f6; }
+        .tog input:checked + .tog-slider::before { transform: translateX(20px); }
+        .sinput { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; }
+        .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+        .sselect { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 2rem 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background-color: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; min-width: 180px; }
+        .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
     </style>
 </head>
 <body>
@@ -64,19 +99,125 @@
         </div>
     </div>
 
-    <div class="border-b border-gray-200 bg-white shadow-sm">
-        <div class="max-w-[1700px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
-            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Open Boards Menu Admin">
-                <i class="fas fa-sitemap mr-2"></i>Boards Menu
-            </button>
-                <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
-                <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
-                <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
-                <button id="reassignImagesBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"><i class="fas fa-images mr-1"></i>Reassign Images</button>
-        </div>
-    </div>
+    <div id="tap-layout" class="ts-layout">
+        <nav class="ts-nav">
+            <div class="ts-nav-label">Settings</div>
+            <div class="ts-nav-item active" data-ts-target="tap-section-global">
+                <i class="fas fa-sliders-h ts-nav-icon" style="color:#4f46e5"></i>
+                <span>Global Settings</span>
+            </div>
+            <div class="ts-nav-item" data-ts-target="tap-section-board">
+                <i class="fas fa-th ts-nav-icon" style="color:#059669"></i>
+                <span>Board Settings</span>
+            </div>
+            <div class="ts-nav-item" data-ts-target="tap-section-menu">
+                <i class="fas fa-sitemap ts-nav-icon" style="color:#d97706"></i>
+                <span>Menu Settings</span>
+            </div>
+            <div class="ts-nav-item" data-ts-target="tap-section-translate">
+                <i class="fas fa-language ts-nav-icon" style="color:#2563eb"></i>
+                <span>Translate</span>
+            </div>
+            <div class="ts-nav-item" data-ts-target="tap-section-reassign">
+                <i class="fas fa-images ts-nav-icon" style="color:#7c3aed"></i>
+                <span>Reassign Images</span>
+            </div>
+            <div class="ts-nav-item" data-ts-target="tap-section-migrate">
+                <i class="fas fa-file-import ts-nav-icon" style="color:#059669"></i>
+                <span>Migrate User Data</span>
+            </div>
+        </nav>
+        <div class="ts-content">
+            <!-- Global Settings -->
+            <div id="tap-section-global" class="ts-section active" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-hand-pointer mr-2 text-indigo-600"></i>Global Settings
+                </h2>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-th"></i> Grid Layout</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Buttons per Row</span>
+                            <span class="srow-desc">Number of buttons displayed per row (2–18). Fewer columns = larger buttons</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ts-gridColumnsSlider" min="2" max="18" step="1" value="6" class="sinput" style="width:80px; text-align:center;">
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Word Rows</span>
+                            <span class="srow-desc">Number of Freestyle word rows shown (1–7)</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ts-tapWordsRows" min="1" max="7" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="3">
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Include Dynamic Row</span>
+                            <span class="srow-desc">Add one AI-generated predictive row at the bottom of the word grid</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ts-tapDynamicRows"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-spell-check"></i> Sight Words &amp; Pictograms</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Enable Sight Word Logic</span>
+                            <span class="srow-desc">Show Dolch sight words as text-only (no pictograms) based on grade level</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ts-enableSightWords"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Sight Words Grade Level</span>
+                            <span class="srow-desc">Words at or below this grade level appear as text-only (selection is cumulative)</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <select id="ts-sightWordGradeLevel" class="sselect">
+                                <option value="pre_k">Pre-Kindergarten</option>
+                                <option value="kindergarten">Kindergarten (+ Pre-K)</option>
+                                <option value="first_grade">First Grade (+ Pre-K, K)</option>
+                                <option value="second_grade">Second Grade (+ Pre-K, K, 1st)</option>
+                                <option value="third_grade">Third Grade (cumulative)</option>
+                                <option value="third_grade_with_nouns">Third Grade + Nouns (complete)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Disable Tap Interface Pictograms</span>
+                            <span class="srow-desc">When on, all buttons in the Tap Interface display text only — no pictogram images</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ts-disableTapPictograms"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="ts-save-bar">
+                    <button id="ts-save-btn" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">
+                        <i class="fas fa-save mr-2"></i>Save Settings
+                    </button>
+                    <div id="ts-save-status" class="mt-2 text-sm hidden"></div>
+                </div>
+            </div>
 
-    <main class="max-w-[1700px] mx-auto p-4">
+            <!-- Board Settings -->
+            <div id="tap-section-board" class="ts-section">
+                <div class="border-b border-gray-200 bg-white shadow-sm sticky z-20" style="top:56px;">
+                    <div class="px-4 py-3 flex flex-wrap items-center gap-3">
+                        <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
+                        <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
+                        <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
+                    </div>
+                </div>
+                <div class="p-4">
         <div class="bg-white p-4 border rounded-md mb-4">
             <div class="flex flex-wrap gap-3 items-end">
                 <div class="min-w-[360px] flex-1">
@@ -87,12 +228,6 @@
                     <div class="flex flex-col gap-2">
                         <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
                     </div>
-                </div>
-                <div>
-                    <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
-                </div>
-                <div>
-                    <button id="openTouchChatMigrationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-file-import mr-1"></i>Migrate User Data</button>
                 </div>
             </div>
             <p class="text-sm text-gray-600 mt-3">Recommended workflow: build or edit boards here first, then open Boards Menu to decide how those boards appear in Tap Interface.</p>
@@ -126,13 +261,22 @@
         </div>
 
         <div id="gridSectionHeader" class="bg-white px-4 pt-4 pb-2 border border-b-0 rounded-t-md sticky top-0 z-10">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
+            <div class="mb-2">
+                <h3 class="text-xl font-semibold mb-2">Board Buttons</h3>
                 <div class="flex gap-2 flex-wrap">
-                    <button id="aiBulkBuildBtn" type="button" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>Use AI to Create Buttons</button>
-                    <button id="setDynamicRowsBtn" type="button" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"><i class="fas fa-sliders-h mr-1"></i>Configure Dynamic Rows</button>
+                    <button id="insertButtonBtn" type="button" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-plus-square mr-1"></i>Insert Button</button>
+                    <button id="aiBulkBuildBtn" type="button" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>Let Bravo Create Buttons</button>
+                    <button id="setDynamicRowsBtn" type="button" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"><i class="fas fa-sliders-h mr-1"></i>Dynamic Prompt</button>
                     <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
-                    <button id="createNextBoardsBtn" type="button" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-sitemap mr-1"></i>Create Next Boards</button>
+                    <button id="createNextBoardsBtn" type="button" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-sitemap mr-1"></i>Let Bravo Create Next Board</button>
+                </div>
+            </div>
+            <div id="insertModeBar" class="hidden flex items-center gap-3 mb-2 px-3 py-2 bg-green-50 border-2 border-green-400 rounded-md text-green-800 text-sm font-medium">
+                <i class="fas fa-crosshairs text-green-600"></i>
+                <span id="insertModeMsg">Click a button in the grid to select where to insert</span>
+                <div class="ml-auto flex gap-2">
+                    <button id="confirmInsertBtn" type="button" disabled class="px-4 py-1.5 bg-green-600 text-white text-sm font-bold rounded-md hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity">Confirm</button>
+                    <button id="cancelInsertBtn" type="button" class="px-4 py-1.5 bg-white border-2 border-red-400 text-red-600 text-sm font-bold rounded-md hover:bg-red-50 transition-colors">Cancel</button>
                 </div>
             </div>
             <div class="flex items-center justify-between pb-2">
@@ -150,7 +294,131 @@
             <div id="dragZoneLeft"  class="drag-zone">◀ PREV</div>
             <div id="dragZoneRight" class="drag-zone">NEXT ▶</div>
         </section>
-    </main>
+                </div><!-- end board inner -->
+            </div><!-- end tap-section-board -->
+
+            <!-- Menu Settings -->
+            <div id="tap-section-menu" class="ts-section">
+                <iframe src="tap_boards_menu_admin.html" style="width:100%; height:calc(100vh - 56px); border:none; display:block;" title="Boards Menu Admin"></iframe>
+            </div>
+            <!-- Translate Board Section -->
+            <div id="tap-section-translate" class="ts-section" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-language mr-2 text-blue-600"></i>Translate
+                </h2>
+                <p class="text-sm text-gray-600 mb-6">Translate button labels, speech text, plural/past tense values, and AI prompts for the selected boards.</p>
+
+                <div class="max-w-2xl space-y-6">
+                    <!-- Board Scope -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-list-check"></i> Select Boards</div>
+                        <div class="srow" style="flex-direction:column; align-items:flex-start; gap:0.75rem;">
+                            <div style="width:100%; display:flex; justify-content:flex-end;">
+                                <button id="tbSelectAllBtn" type="button" class="px-3 py-1.5 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">Select All</button>
+                            </div>
+                            <div id="tbBoardList" class="w-full border border-gray-300 rounded-md bg-white overflow-y-auto" style="max-height:260px; min-height:120px; padding:0.5rem;">
+                                <div class="text-sm text-gray-400 p-2">Loading boards...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Language -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-globe"></i> Language</div>
+                        <div class="srow">
+                            <div class="srow-meta"><span class="srow-label">Source Language</span></div>
+                            <div class="srow-ctrl">
+                                <select id="tbSourceLanguage" class="sselect">
+                                    <option value="">(Auto-detect)</option>
+                                    <option value="en">English</option>
+                                    <option value="es">Spanish</option>
+                                    <option value="fr">French</option>
+                                    <option value="de">German</option>
+                                    <option value="it">Italian</option>
+                                    <option value="pt">Portuguese</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="srow">
+                            <div class="srow-meta"><span class="srow-label">Target Language</span></div>
+                            <div class="srow-ctrl">
+                                <select id="tbTargetLanguage" class="sselect">
+                                    <option value="">Select language...</option>
+                                    <option value="es">Spanish</option>
+                                    <option value="fr">French</option>
+                                    <option value="de">German</option>
+                                    <option value="it">Italian</option>
+                                    <option value="pt">Portuguese</option>
+                                    <option value="ru">Russian</option>
+                                    <option value="ja">Japanese</option>
+                                    <option value="zh">Chinese (Simplified)</option>
+                                    <option value="ar">Arabic</option>
+                                    <option value="ko">Korean</option>
+                                    <option value="en">English</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Translate Menus -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-sitemap"></i> Additional</div>
+                        <div class="srow">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input id="tbTranslateMenus" type="checkbox">
+                                <span class="srow-label">Translate Menus</span>
+                            </label>
+                            <span class="srow-desc ml-2 text-xs text-gray-500">Also translate all menu item labels in the Boards Menu</span>
+                        </div>
+                    </div>
+
+                    <div id="tbTranslateStatus" class="hidden text-sm rounded-md px-3 py-2"></div>
+
+                    <div class="flex justify-end">
+                        <button id="tbTranslateNowBtn" type="button" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            Translate Now
+                        </button>
+                    </div>
+                </div>
+            </div><!-- end tap-section-translate -->
+
+            <!-- Reassign Images Section -->
+            <div id="tap-section-reassign" class="ts-section" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-images mr-2 text-purple-600"></i>Reassign Images
+                </h2>
+                <p class="text-sm text-gray-600 mb-6">Look up and assign the best matching image for every button on the selected boards. Run this after changing your mascot or adding new images.</p>
+
+                <div class="max-w-2xl space-y-6">
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-list-check"></i> Select Boards</div>
+                        <div class="srow" style="flex-direction:column; align-items:flex-start; gap:0.75rem;">
+                            <div style="width:100%; display:flex; justify-content:flex-end;">
+                                <button id="riSelectAllBtn" type="button" class="px-3 py-1.5 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">Select All</button>
+                            </div>
+                            <div id="riBoardList" class="w-full border border-gray-300 rounded-md bg-white overflow-y-auto" style="max-height:260px; min-height:120px; padding:0.5rem;">
+                                <div class="text-sm text-gray-400 p-2">Loading boards...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="riStatus" class="hidden text-sm rounded-md px-3 py-2"></div>
+
+                    <div class="flex justify-end">
+                        <button id="riReassignNowBtn" type="button" class="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+                            Reassign Images Now
+                        </button>
+                    </div>
+                </div>
+            </div><!-- end tap-section-reassign -->
+
+            <!-- Migrate User Data Section -->
+            <div id="tap-section-migrate" class="ts-section" style="height:calc(100vh - 56px); display:none;">
+                <iframe id="touchchatMigrationFrameInline" src="about:blank" class="w-full border-0" style="height:100%; display:block;" title="AAC Migration"></iframe>
+            </div><!-- end tap-section-migrate -->
+
+        </div><!-- end ts-content -->
+    </div><!-- end ts-layout -->
 
     <div id="buttonEditorModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5000;">
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
@@ -388,67 +656,7 @@
         </div>
     </div>
 
-    <div id="touchchatMigrationModal" class="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full hidden" style="z-index: 5300;">
-        <div class="relative top-5 mx-auto border w-11/12 max-w-7xl shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center border-b px-4 py-3">
-                <h3 class="text-lg font-bold text-gray-900">AAC Migration</h3>
-                <button id="closeTouchChatMigrationModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
-            </div>
-            <iframe id="touchchatMigrationFrame" src="about:blank" class="w-full" style="height: 78vh; border: 0;" title="AAC Migration"></iframe>
-        </div>
-    </div>
-
     <div id="notification" class="notification"></div>
-
-    <div id="translateBoardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5300;">
-        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Translate Board</h3>
-                <button id="closeTranslateModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
-            </div>
-            <p class="text-sm text-gray-600 mb-4">Translates all button labels, speech text, plural and past tense values, and the AI prompt into the selected language. The board will be saved automatically.</p>
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Target Language</label>
-                <select id="translateTargetLanguage" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-                    <option value="">Select language...</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="it">Italian</option>
-                    <option value="pt">Portuguese</option>
-                    <option value="ru">Russian</option>
-                    <option value="ja">Japanese</option>
-                    <option value="zh">Chinese (Simplified)</option>
-                    <option value="ar">Arabic</option>
-                    <option value="ko">Korean</option>
-                </select>
-            </div>
-            <div id="translateResultsContainer" class="bg-gray-50 p-4 rounded-md hidden">
-                <div id="translateResults"></div>
-            </div>
-            <div id="translateLoadingSpinner" class="text-center py-4 hidden">
-                <i class="fas fa-spinner fa-spin mr-2"></i>Translating...
-            </div>
-            <div class="flex justify-end gap-2 mt-4">
-                <button id="cancelTranslateModal" class="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400">Close</button>
-                <button id="performTranslationAllBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700" disabled>Translate &amp; Save All Boards</button>
-                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate &amp; Save Board</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Reassign Images Modal -->
-    <div id="reassignImagesModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6100;">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Reassign Images</h3>
-            <p class="text-sm text-gray-600 mb-5">Look up and assign the best matching image for every button. Run this after changing your mascot or adding new images.</p>
-            <div class="flex flex-col gap-3">
-                <button id="reassignThisBoardBtn" class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium">Reassign — This Board Only</button>
-                <button id="reassignAllBoardsBtn" class="w-full px-4 py-2 bg-purple-800 text-white rounded-md hover:bg-purple-900 font-medium">Reassign — All Boards</button>
-                <button id="reassignCancelBtn" class="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Create Next Boards Modal -->
     <div id="createNextBoardsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6200;">
@@ -513,6 +721,8 @@
         let useHybridPages = false;
         let authToken = null, currentAacUserId = null;
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
+        let insertMode = false;
+        let insertTargetRow = null, insertTargetCol = null;
         let adminPageIndex = 0; // Current pool page shown in the button grid (0 = first page)
         let dragPageTimer = null;
         let currentOverflowPageMap = null; // Elevated from renderButtonGrid so drag handlers can access it
@@ -546,8 +756,6 @@
         function setupEventListeners() {
             document.getElementById('selectBoard').addEventListener('change', handleBoardSelected);
             document.getElementById('createNewBoardBtn').addEventListener('click', promptCreateNewBoard);
-            document.getElementById('openTouchChatMigrationBtn').addEventListener('click', openTouchChatMigrationModal);
-            document.getElementById('closeTouchChatMigrationModal').addEventListener('click', closeTouchChatMigrationModal);
             document.getElementById('switch-user-button').addEventListener('click', () => {
                 window.location.href = 'auth.html';
             });
@@ -561,12 +769,7 @@
             });
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
-            document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
-            document.getElementById('reassignImagesBtn').addEventListener('click', openReassignImagesModal);
             document.getElementById('createNextBoardsBtn').addEventListener('click', openCreateNextBoardsModal);
-            document.getElementById('reassignThisBoardBtn').addEventListener('click', () => reassignImages('this'));
-            document.getElementById('reassignAllBoardsBtn').addEventListener('click', () => reassignImages('all'));
-            document.getElementById('reassignCancelBtn').addEventListener('click', closeReassignImagesModal);
             document.getElementById('poolPrevPageBtn').addEventListener('click', () => {
                 if (adminPageIndex > 0) { adminPageIndex--; renderButtonGrid(); }
             });
@@ -574,18 +777,34 @@
                 adminPageIndex++;
                 renderButtonGrid();
             });
-            document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
-            document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
-            document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
-            document.getElementById('performTranslationAllBtn').addEventListener('click', performAllBoardsTranslation);
             document.getElementById('setAsHomeBoardBtn').addEventListener('click', openSetAsHomeBoardModal);
             document.getElementById('setAsHomeBoardCancel').addEventListener('click', closeSetAsHomeBoardModal);
             document.getElementById('setAsHomeBoardConfirm').addEventListener('click', confirmSetAsHomeBoard);
-            document.getElementById('translateTargetLanguage').addEventListener('change', () => {
-                const hasLocale = !!document.getElementById('translateTargetLanguage').value;
-                document.getElementById('performTranslationBtn').disabled = !hasLocale;
-                document.getElementById('performTranslationAllBtn').disabled = !hasLocale;
+
+            // Translate Board section
+            document.getElementById('tbSelectAllBtn').addEventListener('click', () => {
+                const list = document.getElementById('tbBoardList');
+                const all = list.querySelectorAll('input[type="checkbox"]');
+                const anyUnchecked = Array.from(all).some(cb => !cb.checked);
+                all.forEach(cb => { cb.checked = anyUnchecked; });
+                document.getElementById('tbSelectAllBtn').textContent = anyUnchecked ? 'Deselect All' : 'Select All';
             });
+            document.getElementById('tbTranslateNowBtn').addEventListener('click', performInlineTranslation);
+
+            // Reassign Images section
+            document.getElementById('riSelectAllBtn').addEventListener('click', () => {
+                const list = document.getElementById('riBoardList');
+                const all = list.querySelectorAll('input[type="checkbox"]');
+                const anyUnchecked = Array.from(all).some(cb => !cb.checked);
+                all.forEach(cb => { cb.checked = anyUnchecked; });
+                document.getElementById('riSelectAllBtn').textContent = anyUnchecked ? 'Deselect All' : 'Select All';
+            });
+            document.getElementById('riReassignNowBtn').addEventListener('click', performInlineReassign);
+            document.getElementById('insertButtonBtn').addEventListener('click', () => {
+                if (insertMode) { exitInsertMode(); } else { enterInsertMode(); }
+            });
+            document.getElementById('confirmInsertBtn').addEventListener('click', confirmInsert);
+            document.getElementById('cancelInsertBtn').addEventListener('click', exitInsertMode);
             document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
             document.getElementById('setAllAfterSelectionBtn').addEventListener('click', openSetAllAfterSelectionModal);
             document.getElementById('closeSetAllAfterSelectionModal').addEventListener('click', closeSetAllAfterSelectionModal);
@@ -678,6 +897,11 @@
                 if (!currentAacUserId) { window.location.href = 'auth.html'; return; }
                 authToken = await user.getIdToken();
                 await loadUserSettings();
+                // Fire adminUserContextReady so the Global Settings IIFE can populate its
+                // form fields with the authenticated user's saved settings (the IIFE registers
+                // a { once: true } listener for this event because adminContextInitializedByInlineScript
+                // is never set on this page).
+                document.dispatchEvent(new Event('adminUserContextReady'));
                 await loadBoards();
                 const params = new URLSearchParams(window.location.search);
                 const boardId = params.get('board_id');
@@ -780,8 +1004,10 @@
             const board = allBoards.find(b => b.id === boardId);
             if (!board) return;
             adminPageIndex = 0; // Reset to page 1 when switching boards
+            if (insertMode) exitInsertMode();
             currentBoardData = JSON.parse(JSON.stringify(board));
             bindBoardToForm();
+            normalizeButtonPositions();
             renderButtonGrid();
             updateBoardModeUI();
             applyReadOnlyState();
@@ -946,7 +1172,8 @@
             for (let row = 0; row < GRID_ROWS; row++) {
                 for (let col = 0; col < GRID_COLS; col++) {
                     const buttonDiv = document.createElement('div');
-                    buttonDiv.className = 'visual-button';
+                    const isInsertTarget = insertMode && row === insertTargetRow && col === insertTargetCol;
+                    buttonDiv.className = 'visual-button' + (isInsertTarget ? ' insert-target' : '');
                     buttonDiv.dataset.row = String(row);
                     buttonDiv.dataset.col = String(col);
 
@@ -1018,7 +1245,10 @@
                         // On page > 0, overflow buttons are identified by their ID (pool_index-based),
                         // not by visual row/col which maps to page-0 buttons.
                         const overflowBtnId = (currentOverflowPageMap && row < staticRowsCount && buttonData) ? (buttonData.id || null) : null;
-                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col, overflowBtnId));
+                        buttonDiv.addEventListener('click', () => {
+                            if (insertMode) { handleInsertModeClick(row, col); return; }
+                            openButtonEditor(row, col, overflowBtnId);
+                        });
                         buttonDiv.draggable = true;
                         buttonDiv.addEventListener('dragstart', handleDragStart);
                         buttonDiv.addEventListener('dragover', handleDragOver);
@@ -1028,6 +1258,100 @@
                     grid.appendChild(buttonDiv);
                 }
             }
+        }
+
+        function enterInsertMode() {
+            insertMode = true;
+            insertTargetRow = null;
+            insertTargetCol = null;
+            document.getElementById('insertModeBar').classList.remove('hidden');
+            document.getElementById('insertModeMsg').textContent = 'Click a button in the grid to select where to insert';
+            document.getElementById('confirmInsertBtn').disabled = true;
+            document.getElementById('insertButtonBtn').classList.add('ring-2', 'ring-green-400');
+            renderButtonGrid();
+        }
+
+        function exitInsertMode() {
+            insertMode = false;
+            insertTargetRow = null;
+            insertTargetCol = null;
+            document.getElementById('insertModeBar').classList.add('hidden');
+            document.getElementById('insertButtonBtn').classList.remove('ring-2', 'ring-green-400');
+            renderButtonGrid();
+        }
+
+        function handleInsertModeClick(row, col) {
+            insertTargetRow = row;
+            insertTargetCol = col;
+            document.getElementById('insertModeMsg').textContent = `Row ${row + 1}, Col ${col + 1} selected — click Confirm to insert`;
+            document.getElementById('confirmInsertBtn').disabled = false;
+            renderButtonGrid();
+        }
+
+        function confirmInsert() {
+            if (insertTargetRow === null || insertTargetCol === null) return;
+            const r = insertTargetRow, c = insertTargetCol;
+            insertMode = false;
+            insertTargetRow = null;
+            insertTargetCol = null;
+            document.getElementById('insertModeBar').classList.add('hidden');
+            document.getElementById('insertButtonBtn').classList.remove('ring-2', 'ring-green-400');
+            insertButtonAtPosition(r, c);
+        }
+
+        function insertButtonAtPosition(row, col) {
+            if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return;
+
+            const COLS = GRID_COLS; // 12
+            const staticRowsCount = getStaticRowsCount();
+            const totalSlots = staticRowsCount * COLS;
+
+            // Convert row/col to linear index
+            const insertIndex = row * COLS + col;
+
+            // Collect static positioned buttons and sort by position
+            const staticBtns = currentBoardData.buttons.filter(b =>
+                b.row !== null && b.row !== undefined &&
+                b.col !== null && b.col !== undefined
+            ).sort((a, b) => Number(a.row) * COLS + Number(a.col) - (Number(b.row) * COLS + Number(b.col)));
+
+            // Shift all static buttons at or after insertIndex forward by one slot
+            for (const btn of staticBtns) {
+                const btnIndex = Number(btn.row) * COLS + Number(btn.col);
+                if (btnIndex >= insertIndex) {
+                    const newIndex = btnIndex + 1;
+                    if (newIndex >= totalSlots) {
+                        // Button would fall off the grid — remove it
+                        currentBoardData.buttons = currentBoardData.buttons.filter(b => b !== btn);
+                    } else {
+                        btn.row = Math.floor(newIndex / COLS);
+                        btn.col = newIndex % COLS;
+                    }
+                }
+            }
+
+            // Insert new empty button at the target position
+            const newBtn = {
+                id: 'btn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                row: row,
+                col: col,
+                label: '',
+                button_type: 'static',
+                image_url: null,
+                speech_text: null,
+                after_selection: 'do_nothing',
+                action_type: 'announce',
+                target_board_id: null,
+                background_color: '#FFFFFF',
+                text_color: '#000000',
+                pool_index: null,
+                llm_prompt: null
+            };
+            currentBoardData.buttons.push(newBtn);
+
+            renderButtonGrid();
+            // Open editor for the new button
+            openButtonEditor(row, col, null);
         }
 
         function handleDragStart(e) {
@@ -1632,18 +1956,11 @@
         }
 
         function openTouchChatMigrationModal() {
-            const modal = document.getElementById('touchchatMigrationModal');
-            const iframe = document.getElementById('touchchatMigrationFrame');
-            iframe.src = 'touchchat_migration.html?v=' + Date.now();
-            modal.classList.remove('hidden');
+            const navItem = document.querySelector('[data-ts-target="tap-section-migrate"]');
+            if (navItem) navItem.click();
         }
 
-        function closeTouchChatMigrationModal() {
-            const modal = document.getElementById('touchchatMigrationModal');
-            const iframe = document.getElementById('touchchatMigrationFrame');
-            iframe.src = 'about:blank';
-            modal.classList.add('hidden');
-        }
+        function closeTouchChatMigrationModal() { /* no-op: section-based */ }
 
         function handleAIBulkAfterSelectionChange() {
             const afterSelection = document.getElementById('aiBulkAfterSelection').value;
@@ -1807,6 +2124,39 @@
             } finally {
                 previewBtn.disabled = false;
             }
+        }
+
+        // Promote pool buttons into row/col positions when tapWordsRows has grown since the
+        // board was last saved. Pool buttons with pool_index < pageSize but no row/col are
+        // invisible on page 0 (findButtonAtPosition misses them) and also absent from overflow
+        // pages (which start at pageSize). Assigning row/col makes them visible and editable.
+        function normalizeButtonPositions() {
+            if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return;
+            const staticRows = getStaticRowsCount();
+            const pageSize = staticRows * GRID_COLS;
+            if (pageSize <= 0) return;
+
+            currentBoardData.buttons.forEach(btn => {
+                if (btn.pool_index === null || btn.pool_index === undefined) return;
+                const idx = Number(btn.pool_index);
+                if (idx >= pageSize) return;           // genuine overflow — leave it
+                if (btn.row !== null && btn.row !== undefined) return; // already positioned
+
+                const targetRow = Math.floor(idx / GRID_COLS);
+                const targetCol = idx % GRID_COLS;
+                if (targetRow >= staticRows) return;
+
+                // Only promote if the slot isn't already occupied by a positioned button
+                const occupied = currentBoardData.buttons.some(b =>
+                    b !== btn &&
+                    b.row !== null && b.row !== undefined &&
+                    Number(b.row) === targetRow && Number(b.col) === targetCol
+                );
+                if (!occupied) {
+                    btn.row = targetRow;
+                    btn.col = targetCol;
+                }
+            });
         }
 
         function getStaticRowsCount() {
@@ -2060,245 +2410,13 @@
         }
 
         function openTranslateModal() {
-            if (!currentBoardData) { showNotification('Select a board first', 'error'); return; }
-            document.getElementById('translateTargetLanguage').value = '';
-            document.getElementById('performTranslationBtn').disabled = true;
-            document.getElementById('performTranslationAllBtn').disabled = true;
-            document.getElementById('translateResultsContainer').classList.add('hidden');
-            document.getElementById('translateLoadingSpinner').classList.add('hidden');
-            document.getElementById('translateResults').innerHTML = '';
-            document.getElementById('translateBoardModal').classList.remove('hidden');
+            // Navigate to translate section via nav click
+            const navItem = document.querySelector('[data-ts-target="tap-section-translate"]');
+            if (navItem) navItem.click();
         }
 
-        function closeTranslateModal() {
-            document.getElementById('translateBoardModal').classList.add('hidden');
-        }
+        function closeTranslateModal() { /* no-op: section-based */ }
 
-        function getBoardTranslateTargetLocale() {
-            const raw = String(document.getElementById('translateTargetLanguage').value || '').trim().toLowerCase();
-            const localeMap = {
-                es: 'es-US',
-                fr: 'fr-FR',
-                de: 'de-DE',
-                it: 'it-IT',
-                pt: 'pt-BR',
-                ar: 'ar-XA',
-                ja: 'ja-JP',
-                zh: 'zh-CN',
-                ko: 'ko-KR',
-                ru: 'ru-RU',
-                en: 'en-US',
-            };
-            return localeMap[raw] || raw;
-        }
-
-        async function performBoardTranslation() {
-            const targetLanguage = getBoardTranslateTargetLocale();
-            if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
-            if (!currentBoardData) { showNotification('No board selected', 'error'); return; }
-
-            const btn = document.getElementById('performTranslationBtn');
-            btn.disabled = true;
-            document.getElementById('translateLoadingSpinner').classList.remove('hidden');
-            document.getElementById('translateResultsContainer').classList.add('hidden');
-
-            try {
-                // Deduplicated ordered list of texts to translate
-                const textsToTranslate = [];
-                const textIndex = {}; // text → index in textsToTranslate
-                const addText = (t) => {
-                    const s = String(t || '').trim();
-                    if (!s || s in textIndex) return;
-                    textIndex[s] = textsToTranslate.length;
-                    textsToTranslate.push(s);
-                };
-
-                // Board-level AI prompt
-                if (currentBoardData.llm_prompt) addText(currentBoardData.llm_prompt);
-
-                // Button fields: label, speech_text, plural, past_tense
-                const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
-                buttons.forEach(btn => {
-                    addText(btn.label);
-                    if (btn.speech_text && btn.speech_text !== btn.label) addText(btn.speech_text);
-                    if (btn.plural) addText(btn.plural);
-                    if (btn.past_tense) addText(btn.past_tense);
-                });
-
-                if (textsToTranslate.length === 0) {
-                    showNotification('No text to translate', 'error');
-                    document.getElementById('translateLoadingSpinner').classList.add('hidden');
-                    btn.disabled = false;
-                    return;
-                }
-
-                const response = await fetch('/api/translate-lines', {
-                    method: 'POST',
-                    headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const payload = await response.json();
-                const translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
-
-                // Build lookup: original → translated
-                const tr = (original) => {
-                    const s = String(original || '').trim();
-                    if (!s || !(s in textIndex)) return original;
-                    return translated[textIndex[s]] || original;
-                };
-
-                // Apply to board
-                if (currentBoardData.llm_prompt) {
-                    currentBoardData.llm_prompt = tr(currentBoardData.llm_prompt);
-                }
-                let labelCount = 0;
-                buttons.forEach(b => {
-                    if (b.label) { b.label = tr(b.label); labelCount++; }
-                    if (b.speech_text) b.speech_text = tr(b.speech_text);
-                    if (b.plural) b.plural = tr(b.plural);
-                    if (b.past_tense) b.past_tense = tr(b.past_tense);
-                });
-
-                // Save the board
-                await saveBoard();
-
-                document.getElementById('translateResults').innerHTML = `
-                    <div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm">
-                        <p class="font-semibold text-green-900">Translation complete</p>
-                        <p class="text-gray-700 mt-1">${labelCount} button label${labelCount !== 1 ? 's' : ''} translated to <span class="font-medium">${escapeHtml(targetLanguage)}</span>. Board saved.</p>
-                    </div>`;
-                document.getElementById('translateResultsContainer').classList.remove('hidden');
-                showNotification(`Board translated and saved (${labelCount} buttons)`, 'success');
-                renderButtonGrid();
-            } catch (error) {
-                console.error(error);
-                showNotification('Translation failed: ' + error.message, 'error');
-            } finally {
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
-                btn.disabled = false;
-            }
-        }
-
-        async function performAllBoardsTranslation() {
-            const targetLanguage = getBoardTranslateTargetLocale();
-            if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
-            if (!Array.isArray(allBoards) || allBoards.length === 0) { showNotification('No boards loaded', 'error'); return; }
-
-            const allBtn = document.getElementById('performTranslationAllBtn');
-            const singleBtn = document.getElementById('performTranslationBtn');
-            allBtn.disabled = true;
-            singleBtn.disabled = true;
-            document.getElementById('translateLoadingSpinner').classList.remove('hidden');
-            document.getElementById('translateResultsContainer').classList.add('hidden');
-
-            const resultsLog = [];
-            let successCount = 0;
-
-            try {
-                for (const boardMeta of allBoards) {
-                    // allBoards already contains full board data including buttons from the list endpoint
-                    const boardId = boardMeta.id;
-                    const boardLabel = boardMeta.label || boardId;
-
-                    const textsToTranslate = [];
-                    const textIndex = {};
-                    const addText = (t) => {
-                        const s = String(t || '').trim();
-                        if (!s || s in textIndex) return;
-                        textIndex[s] = textsToTranslate.length;
-                        textsToTranslate.push(s);
-                    };
-
-                    if (boardMeta.llm_prompt) addText(boardMeta.llm_prompt);
-                    const buttons = Array.isArray(boardMeta.buttons) ? boardMeta.buttons.map(b => ({ ...b })) : [];
-                    buttons.forEach(b => {
-                        addText(b.label);
-                        if (b.speech_text && b.speech_text !== b.label) addText(b.speech_text);
-                        if (b.plural) addText(b.plural);
-                        if (b.past_tense) addText(b.past_tense);
-                    });
-
-                    if (textsToTranslate.length === 0) {
-                        resultsLog.push({ boardId, label: boardLabel, skipped: true });
-                        continue;
-                    }
-
-                    let translated;
-                    try {
-                        const resp = await fetch('/api/translate-lines', {
-                            method: 'POST',
-                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
-                        });
-                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                        const payload = await resp.json();
-                        translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
-                    } catch (e) {
-                        resultsLog.push({ boardId, label: boardLabel, error: `Translate failed: ${e.message}` });
-                        continue;
-                    }
-
-                    const tr = (original) => {
-                        const s = String(original || '').trim();
-                        if (!s || !(s in textIndex)) return original;
-                        return translated[textIndex[s]] || original;
-                    };
-
-                    const translatedLlmPrompt = boardMeta.llm_prompt ? tr(boardMeta.llm_prompt) : boardMeta.llm_prompt;
-                    let labelCount = 0;
-                    buttons.forEach(b => {
-                        if (b.label) { b.label = tr(b.label); labelCount++; }
-                        if (b.speech_text) b.speech_text = tr(b.speech_text);
-                        if (b.plural) b.plural = tr(b.plural);
-                        if (b.past_tense) b.past_tense = tr(b.past_tense);
-                    });
-
-                    try {
-                        const saveResp = await fetch(`/api/tap-interface/boards/${boardId}`, {
-                            method: 'PUT',
-                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ label: boardMeta.label, buttons, llm_prompt: translatedLlmPrompt })
-                        });
-                        if (!saveResp.ok) throw new Error(`HTTP ${saveResp.status}`);
-                        resultsLog.push({ boardId, label: boardLabel, count: labelCount });
-                        successCount++;
-                    } catch (e) {
-                        resultsLog.push({ boardId, label: boardLabel, error: `Save failed: ${e.message}` });
-                    }
-                }
-
-                let html = `<div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm mb-3">
-                    <p class="font-semibold text-green-900">${successCount} of ${allBoards.length} boards translated and saved to <span>${escapeHtml(targetLanguage)}</span></p>
-                </div>`;
-                resultsLog.forEach(r => {
-                    if (r.error) {
-                        html += `<div class="text-xs text-red-600 mb-1"><b>${escapeHtml(r.label)}:</b> ${escapeHtml(r.error)}</div>`;
-                    } else if (r.skipped) {
-                        html += `<div class="text-xs text-gray-500 mb-1"><b>${escapeHtml(r.label)}:</b> skipped (no text)</div>`;
-                    } else {
-                        html += `<div class="text-xs text-green-700 mb-1"><b>${escapeHtml(r.label)}:</b> ${r.count} button${r.count !== 1 ? 's' : ''} translated</div>`;
-                    }
-                });
-                document.getElementById('translateResults').innerHTML = html;
-                document.getElementById('translateResultsContainer').classList.remove('hidden');
-                showNotification(`${successCount} board(s) translated and saved`, 'success');
-
-                // Reload boards so current board reflects any translations
-                await loadBoards();
-                if (currentBoardData) {
-                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
-                    if (refreshed) { currentBoardData = refreshed; renderButtonGrid(); }
-                }
-            } catch (error) {
-                console.error(error);
-                showNotification('Translation error: ' + error.message, 'error');
-            } finally {
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
-                allBtn.disabled = false;
-                singleBtn.disabled = false;
-            }
-        }
 
         async function uploadButtonAudioFile(e) {
             const file = e.target.files[0];
@@ -2406,51 +2524,192 @@
 
         // ── Reassign Images ────────────────────────────────────────────────────
         function openReassignImagesModal() {
-            document.getElementById('reassignImagesModal').classList.remove('hidden');
+            const navItem = document.querySelector('[data-ts-target="tap-section-reassign"]');
+            if (navItem) navItem.click();
         }
 
-        function closeReassignImagesModal() {
-            document.getElementById('reassignImagesModal').classList.add('hidden');
+        function closeReassignImagesModal() { /* no-op: section-based */ }
+
+        function populateTbBoardList() {
+            _populateBoardCheckList('tbBoardList', 'tbSelectAllBtn');
         }
 
-        async function reassignImages(scope) {
-            const isAll = scope === 'all';
-            const clickedBtn = document.getElementById(isAll ? 'reassignAllBoardsBtn' : 'reassignThisBoardBtn');
-            const originalText = clickedBtn.textContent;
-            clickedBtn.disabled = true;
-            clickedBtn.textContent = 'Assigning…';
-            closeReassignImagesModal();
-            showNotification('Reassigning images — this may take a moment…', 'info');
+        function populateRiBoardList() {
+            _populateBoardCheckList('riBoardList', 'riSelectAllBtn');
+        }
 
+        function _populateBoardCheckList(listId, selectAllId) {
+            const list = document.getElementById(listId);
+            if (!list) return;
+            list.innerHTML = '';
+            const sorted = getBoardsSortedByLabel(allBoards);
+            if (sorted.length === 0) {
+                list.innerHTML = '<div class="text-sm text-gray-400 p-2">No boards loaded.</div>';
+                return;
+            }
+            sorted.forEach(board => {
+                const label = document.createElement('label');
+                label.className = 'flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer text-sm text-gray-700';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = board.id;
+                cb.name = listId + '-board';
+                cb.className = 'flex-shrink-0';
+                label.appendChild(cb);
+                const span = document.createElement('span');
+                span.textContent = board.label || board.id;
+                label.appendChild(span);
+                list.appendChild(label);
+            });
+            const btn = document.getElementById(selectAllId);
+            if (btn) btn.textContent = 'Select All';
+        }
+
+        function setInlineStatus(elId, msg, tone) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            if (!msg) { el.textContent = ''; el.className = 'hidden text-sm rounded-md px-3 py-2'; return; }
+            el.classList.remove('hidden');
+            el.textContent = msg;
+            if (tone === 'success') el.className = 'text-sm rounded-md px-3 py-2 bg-green-100 text-green-800';
+            else if (tone === 'error') el.className = 'text-sm rounded-md px-3 py-2 bg-red-100 text-red-800';
+            else el.className = 'text-sm rounded-md px-3 py-2 bg-blue-100 text-blue-800';
+        }
+
+        function getBoardTranslateLocale(langCode) {
+            const localeMap = { es:'es-US', fr:'fr-FR', de:'de-DE', it:'it-IT', pt:'pt-BR', ar:'ar-XA', ja:'ja-JP', zh:'zh-CN', ko:'ko-KR', ru:'ru-RU', en:'en-US' };
+            return localeMap[langCode] || langCode;
+        }
+
+        async function performInlineTranslation() {
+            const target = (document.getElementById('tbTargetLanguage')?.value || '').trim();
+            if (!target) { setInlineStatus('tbTranslateStatus', 'Select a target language.', 'error'); return; }
+            const checkedBoxes = Array.from(document.querySelectorAll('#tbBoardList input[type="checkbox"]:checked'));
+            if (checkedBoxes.length === 0) { setInlineStatus('tbTranslateStatus', 'Select at least one board.', 'error'); return; }
+
+            const sourceRaw = (document.getElementById('tbSourceLanguage')?.value || '').trim();
+            const targetLocale = getBoardTranslateLocale(target);
+            const sourceLocale = sourceRaw ? getBoardTranslateLocale(sourceRaw) : null;
+            const btn = document.getElementById('tbTranslateNowBtn');
+            btn.disabled = true;
+            setInlineStatus('tbTranslateStatus', 'Translating… this may take a moment.', 'info');
+
+            let totalButtons = 0;
+            let errors = [];
+            try {
+                for (const cb of checkedBoxes) {
+                    const boardMeta = allBoards.find(b => b.id === cb.value);
+                    if (!boardMeta) continue;
+                    const textsToTranslate = [];
+                    const textIndex = {};
+                    const addText = (t) => { const s = String(t||'').trim(); if (!s || s in textIndex) return; textIndex[s] = textsToTranslate.length; textsToTranslate.push(s); };
+                    if (boardMeta.llm_prompt) addText(boardMeta.llm_prompt);
+                    const buttons = Array.isArray(boardMeta.buttons) ? boardMeta.buttons.map(b => ({...b})) : [];
+                    buttons.forEach(b => { addText(b.label); if (b.speech_text && b.speech_text !== b.label) addText(b.speech_text); if (b.plural) addText(b.plural); if (b.past_tense) addText(b.past_tense); });
+                    if (textsToTranslate.length === 0) continue;
+                    try {
+                        const resp = await fetch('/api/translate-lines', {
+                            method: 'POST',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lines: textsToTranslate, source_locale: sourceLocale, target_locale: targetLocale })
+                        });
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        const payload = await resp.json();
+                        const translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+                        const tr = (orig) => { const s = String(orig||'').trim(); return (!s || !(s in textIndex)) ? orig : (translated[textIndex[s]] || orig); };
+                        const patchedButtons = buttons.map(b => ({ ...b, label: tr(b.label), speech_text: b.speech_text ? tr(b.speech_text) : b.speech_text, plural: b.plural ? tr(b.plural) : b.plural, past_tense: b.past_tense ? tr(b.past_tense) : b.past_tense }));
+                        const patchedBoard = { ...boardMeta, buttons: patchedButtons, llm_prompt: boardMeta.llm_prompt ? tr(boardMeta.llm_prompt) : boardMeta.llm_prompt };
+                        const saveResp = await fetch(`/api/tap-interface/boards/${boardMeta.id}`, {
+                            method: 'PUT',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify(patchedBoard)
+                        });
+                        if (!saveResp.ok) throw new Error(`Save failed HTTP ${saveResp.status}`);
+                        totalButtons += patchedButtons.filter(b => b.label).length;
+                    } catch (err) { errors.push(`${boardMeta.label || boardMeta.id}: ${err.message}`); }
+                }
+                // Translate menus if checkbox is checked
+                const translateMenus = document.getElementById('tbTranslateMenus')?.checked;
+                if (translateMenus) {
+                    try {
+                        const menuResp = await fetch('/api/tap-interface/boards-menu', { headers: getAuthHeaders() });
+                        if (menuResp.ok) {
+                            const menuPayload = await menuResp.json();
+                            const menuTree = Array.isArray(menuPayload.boards_menu) ? menuPayload.boards_menu : [];
+                            const menuTexts = [];
+                            const menuEntries = [];
+                            const collectLabels = (nodes) => {
+                                nodes.forEach(node => {
+                                    if (node.id && node.label) { menuTexts.push(node.label); menuEntries.push({ nodeId: node.id, original: node.label }); }
+                                    if (Array.isArray(node.children)) collectLabels(node.children);
+                                });
+                            };
+                            collectLabels(menuTree);
+                            if (menuTexts.length > 0) {
+                                const trResp = await fetch('/api/translate-lines', {
+                                    method: 'POST',
+                                    headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ lines: menuTexts, source_locale: sourceLocale, target_locale: targetLocale })
+                                });
+                                if (trResp.ok) {
+                                    const trPayload = await trResp.json();
+                                    const translations = Array.isArray(trPayload?.translated_lines) ? trPayload.translated_lines : [];
+                                    const entriesByNodeId = {};
+                                    menuEntries.forEach((e, i) => { entriesByNodeId[e.nodeId] = String(translations[i] || e.original).trim(); });
+                                    const applyToTree = (nodes) => {
+                                        nodes.forEach(node => {
+                                            if (node.id && entriesByNodeId[node.id]) node.label = entriesByNodeId[node.id];
+                                            if (Array.isArray(node.children)) applyToTree(node.children);
+                                        });
+                                    };
+                                    applyToTree(menuTree);
+                                    await fetch('/api/tap-interface/boards-menu', {
+                                        method: 'PUT',
+                                        headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ boards_menu: menuTree })
+                                    });
+                                }
+                            }
+                        }
+                    } catch (menuErr) { errors.push(`Menu: ${menuErr.message}`); }
+                }
+
+                await loadBoards();
+                if (currentBoardData) { const refreshed = allBoards.find(b => b.id === currentBoardData.id); if (refreshed) { currentBoardData = JSON.parse(JSON.stringify(refreshed)); renderButtonGrid(); } }
+                const menuNote = translateMenus ? ' Menu items translated.' : '';
+                if (errors.length) setInlineStatus('tbTranslateStatus', `Done with errors: ${errors.join('; ')}`, 'error');
+                else setInlineStatus('tbTranslateStatus', `Translation complete. ${totalButtons} button label(s) updated across ${checkedBoxes.length} board(s).${menuNote}`, 'success');
+            } catch (err) {
+                setInlineStatus('tbTranslateStatus', 'Translation failed: ' + err.message, 'error');
+            } finally { btn.disabled = false; }
+        }
+
+        async function performInlineReassign() {
+            const checkedBoxes = Array.from(document.querySelectorAll('#riBoardList input[type="checkbox"]:checked'));
+            if (checkedBoxes.length === 0) { setInlineStatus('riStatus', 'Select at least one board.', 'error'); return; }
+            const isAll = checkedBoxes.length === allBoards.length;
+            const btn = document.getElementById('riReassignNowBtn');
+            btn.disabled = true;
+            setInlineStatus('riStatus', 'Reassigning images — this may take a moment…', 'info');
             try {
                 const resp = await fetch('/api/tap-interface/boards/assign-all-images', {
                     method: 'POST',
-                    headers: getAuthHeaders(),
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 });
                 const respData = await resp.json().catch(() => ({}));
-                console.log('[reassignImages] response', resp.status, respData);
-                if (!resp.ok) {
-                    throw new Error(respData.detail || `Server error ${resp.status}`);
-                }
-
-                // Reload the current board so the grid reflects the newly saved image_urls
+                if (!resp.ok) throw new Error(respData.detail || `Server error ${resp.status}`);
                 await loadBoards();
-                if (currentBoardData) {
-                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
-                    if (refreshed) {
-                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
-                        renderButtonGrid();
-                    }
-                }
-                showNotification('Images reassigned successfully', 'success');
+                if (currentBoardData) { const refreshed = allBoards.find(b => b.id === currentBoardData.id); if (refreshed) { currentBoardData = JSON.parse(JSON.stringify(refreshed)); renderButtonGrid(); } }
+                setInlineStatus('riStatus', 'Images reassigned successfully.', 'success');
             } catch (err) {
-                console.error('Reassign images failed:', err);
-                showNotification('Failed to reassign images: ' + err.message, 'error');
-            } finally {
-                clickedBtn.disabled = false;
-                clickedBtn.textContent = originalText;
-            }
+                setInlineStatus('riStatus', 'Failed to reassign images: ' + err.message, 'error');
+            } finally { btn.disabled = false; }
+        }
+
+        async function reassignImages(scope) {
+            // Legacy: redirect to inline section
+            openReassignImagesModal();
         }
         // ── Create Next Boards ──────────────────────────────────────────────
         let _cnbButtonData = [];  // [{button_id, label, has_existing, existing_board_id, existing_board_label}]
@@ -2611,21 +2870,24 @@
             <div id="help-modal-content" class="overflow-y-auto flex-1 px-0 py-0">
                 <div id="help-loading" class="text-center text-gray-400">Loading help...</div>
             </div>
-            <div class="mt-4 text-center">
-                <button onclick="openBoardBuilderContactModal()" class="inline-block text-green-700 font-semibold underline hover:text-green-900">Contact Support</button>
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <button onclick="openBoardBuilderContactModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
+                <button onclick="document.getElementById('help-modal').classList.add('hidden')" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors text-sm">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Contact Support Modal -->
-    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden" style="z-index: 9999;">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
             <form id="contact-support-form" class="space-y-2">
-                <input type="text" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
-                <input type="email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
-                <textarea name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
+                <input type="text" id="support-name" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                <input type="email" id="support-email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                <textarea id="support-message" name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
                 <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">Send to Support</button>
             </form>
             <div id="bb-support-success" class="hidden text-green-600 mt-2">Thank you! Your message has been sent.</div>
@@ -2678,7 +2940,7 @@
 
         function closeHelpModal() { helpModal.classList.add('hidden'); }
 
-        window.openBoardBuilderContactModal = function () { closeHelpModal(); contactModal.classList.remove('hidden'); };
+        window.openBoardBuilderContactModal = function () { contactModal.classList.remove('hidden'); };
 
         window.toggleBBGuideDetails = function (element) {
             const details = element.querySelector('.guide-details');
@@ -2718,140 +2980,182 @@
                         <i class="fas fa-table-cells-large text-indigo-600 mr-2"></i>Board Builder Guide
                     </h3>
                     <p class="text-sm text-gray-700">
-                        The Board Builder lets you create and manage static or AI-powered communication boards.
-                        Click any section below to learn more.
+                        The Board Builder is where you configure the Tap Interface — grid layout, boards, buttons, navigation menus, translations, and data migration.
+                        Use the left navigation to move between sections. Click any topic below to expand it.
                     </p>
                 </div>
 
                 <div class="space-y-3">
 
-                    ${guideItem('fas fa-list', 'text-indigo-600', 'Selecting &amp; Creating Boards', `
-                        <p><strong>Purpose:</strong> Choose an existing board to edit, or create a brand-new one.</p>
+                    ${guideItem('fas fa-sliders-h', 'text-indigo-600', 'Global Settings', `
+                        <p><strong>Purpose:</strong> Control how the Tap Interface grid looks and behaves for this user. Changes here affect all boards.</p>
                         <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
-                            <p class="text-sm font-semibold text-indigo-900 mb-1">What You Can Do:</p>
+                            <p class="text-sm font-semibold text-indigo-900 mb-1">Grid Layout</p>
                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                <li>• <strong>Select Board:</strong> Use the dropdown to switch between existing boards</li>
-                                <li>• <strong>Create New Board:</strong> Click <em>Create New Board</em> to start fresh</li>
-                                <li>• <strong>Migrate User Data:</strong> Import boards from TouchChat or other AAC devices</li>
-                                <li>• <strong>Set as Home Board:</strong> Mark the board that appears first in Tap Interface</li>
+                                <li>• <strong>Buttons per Row:</strong> How many columns appear in the word grid (2–18). Fewer columns means larger buttons.</li>
+                                <li>• <strong>Word Rows:</strong> Total number of rows shown in the Tap Interface word grid (static + dynamic combined).</li>
+                                <li>• <strong>Include Dynamic Row:</strong> When enabled, the bottom row of the word grid is AI-generated and updates based on context. The remaining rows above it stay as static pool buttons.</li>
+                            </ul>
+                        </div>
+                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-blue-900 mb-1">Sight Words &amp; Pictograms</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• <strong>Enable Sight Word Logic:</strong> Dolch sight words are displayed as text-only (no image) based on grade level.</li>
+                                <li>• <strong>Sight Words Grade Level:</strong> Pre-K, Kindergarten, 1st–3rd grade word lists.</li>
+                                <li>• <strong>Disable Pictograms:</strong> Turn off all symbol images across the Tap Interface.</li>
                             </ul>
                         </div>
                         <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
-                            <p class="text-xs text-gray-700"><strong>Tip:</strong> Migration boards appear with a purple "Show Migration Boards" filter button after importing from TouchChat.</p>
+                            <p class="text-xs text-gray-700"><strong>Tip:</strong> After saving Global Settings the board grid in Board Settings will refresh automatically to show the updated layout.</p>
                         </div>
                     `)}
 
-                    ${guideItem('fas fa-sliders-h', 'text-blue-600', 'Board Details &amp; Mode', `
-                        <p><strong>Purpose:</strong> Set the board's display name and choose how it generates content.</p>
-                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
-                            <p class="text-sm font-semibold text-blue-900 mb-1">Board Modes:</p>
+                    ${guideItem('fas fa-th', 'text-green-600', 'Board Settings — Overview', `
+                        <p><strong>Purpose:</strong> Create, select, and configure individual communication boards and their buttons.</p>
+                        <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-green-900 mb-1">Toolbar (always visible at top)</p>
                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                <li>• <strong>Static Board:</strong> All buttons are manually defined — labels, speech, and navigation are fixed</li>
-                                <li>• <strong>AI-defined Board:</strong> Buttons are generated dynamically by AI based on your prompt. Supports topic, examples and exclusions</li>
-                                <li>• <strong>System Board:</strong> Read-only legacy/system boards — cannot be edited</li>
+                                <li>• <strong>Save Board:</strong> Saves all unsaved changes to the current board. Changes are <em>not</em> saved automatically.</li>
+                                <li>• <strong>Delete Board:</strong> Permanently removes the current board.</li>
+                                <li>• <strong>Create New Board:</strong> Opens a prompt to name and create a new blank board.</li>
                             </ul>
                         </div>
-                        <div class="bg-gray-100 p-3 rounded">
-                            <p class="text-xs text-gray-700"><strong>Recommended:</strong> Use <em>Static</em> boards for core vocabulary. Use <em>AI-defined</em> boards for dynamic category browsing.</p>
+                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                            <p class="text-sm font-semibold text-gray-800 mb-1">Board Selector</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• Use the <strong>Select Board</strong> dropdown to switch between existing boards.</li>
+                                <li>• <strong>Set as Home Board:</strong> Marks this board as the one that opens first when the user launches the Tap Interface.</li>
+                                <li>• Migration boards imported from TouchChat appear in the list after import; use <em>Show Migration Boards</em> to filter them.</li>
+                            </ul>
+                        </div>
+                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-blue-900 mb-1">Board Mode</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• <strong>Static Board:</strong> All buttons are manually defined — labels, speech text, and navigation targets are fixed.</li>
+                                <li>• <strong>AI-defined Board:</strong> Buttons are generated dynamically by AI based on an LLM prompt you provide. Supports topic, example phrases, and exclusion words.</li>
+                                <li>• <strong>System Board:</strong> Read-only boards built into the system — cannot be edited.</li>
+                            </ul>
                         </div>
                     `)}
 
-                    ${guideItem('fas fa-th', 'text-purple-600', 'Button Grid (7 × 12)', `
-                        <p><strong>Purpose:</strong> The grid shows every button slot on the board. Click any slot to edit it.</p>
+                    ${guideItem('fas fa-plus-square', 'text-green-600', 'Board Settings — Board Buttons', `
+                        <p><strong>Purpose:</strong> View and edit every button slot on the current board. The grid reflects the Word Rows and column count from Global Settings.</p>
                         <div class="space-y-2">
                             <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-l-4 border-orange-500 p-3 rounded">
-                                <span class="font-semibold text-orange-900">🧭 Navigation buttons (amber/orange)</span>
-                                <p class="text-xs text-gray-700 mt-1">Navigates to another board when tapped.</p>
+                                <span class="font-semibold text-orange-900">🧭 Navigation buttons (amber border)</span>
+                                <p class="text-xs text-gray-700 mt-1">Tapping navigates the user to another board.</p>
                             </div>
                             <div class="bg-gradient-to-r from-green-100 to-green-50 border-l-4 border-green-500 p-3 rounded">
                                 <span class="font-semibold text-green-900">💬 Speech buttons (green border)</span>
-                                <p class="text-xs text-gray-700 mt-1">Speaks a configured phrase or label text.</p>
+                                <p class="text-xs text-gray-700 mt-1">Tapping speaks the configured phrase or label.</p>
+                            </div>
+                            <div class="bg-purple-50 border-l-4 border-purple-400 p-3 rounded">
+                                <span class="font-semibold text-purple-900">✦ Dynamic AI Slot (purple)</span>
+                                <p class="text-xs text-gray-700 mt-1">Rows reserved for AI-generated words when Include Dynamic Row is on.</p>
                             </div>
                             <div class="bg-gray-100 border-l-4 border-gray-400 p-3 rounded">
-                                <span class="font-semibold text-gray-700">🫥 Empty / dashed slots</span>
-                                <p class="text-xs text-gray-600 mt-1">Unoccupied positions. Click to add a new button there.</p>
+                                <span class="font-semibold text-gray-700">⬜ Empty / dashed slots</span>
+                                <p class="text-xs text-gray-600 mt-1">Unoccupied positions. Click to add a new button here.</p>
                             </div>
                         </div>
-                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
-                            <p class="text-xs text-gray-700"><strong>Drag &amp; Drop:</strong> Drag any button to a new position to rearrange the layout.</p>
-                        </div>
-                    `)}
-
-                    ${guideItem('fas fa-edit', 'text-blue-600', 'Button Editor (side panel)', `
-                        <p><strong>Purpose:</strong> Click any grid slot to open the button editor on the right and configure all its properties.</p>
-                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
-                            <p class="text-sm font-semibold text-blue-900 mb-1">Button Properties:</p>
+                        <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded mt-2">
+                            <p class="text-sm font-semibold text-green-900 mb-1">Board Button Toolbar</p>
                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                <li>• <strong>Label Text:</strong> What appears on the button face</li>
-                                <li>• <strong>Speech Text:</strong> What Bravo speaks (defaults to label if blank)</li>
-                                <li>• <strong>Action Type:</strong> Announce, Navigate, or special function</li>
-                                <li>• <strong>Target Board:</strong> For navigation buttons — which board to open</li>
-                                <li>• <strong>Temporary Navigation:</strong> Return to current board after one selection on the target board</li>
-                                <li>• <strong>Image:</strong> Optional symbol or photo for the button</li>
-                                <li>• <strong>Background/Text Color:</strong> Custom button styling</li>
-                                <li>• <strong>Hidden:</strong> Hide from the user while keeping the button configured</li>
+                                <li>• <strong>Insert Button:</strong> Click this to enter Insert Mode. Click any existing button in the grid to mark the insertion point (it highlights green). Click <em>Confirm</em> to insert a new blank button before it — existing buttons shift right and down. The new button opens immediately for editing.</li>
+                                <li>• <strong>Let Bravo Create Buttons:</strong> AI auto-populates the full board based on the board's topic prompt.</li>
+                                <li>• <strong>Dynamic Prompt:</strong> Configure the AI prompt and row count for AI-generated (dynamic) rows on this board.</li>
+                                <li>• <strong>Mass Update Action:</strong> Bulk-set the after-selection action for all buttons from a chosen position onward.</li>
+                                <li>• <strong>Let Bravo Create Next Board:</strong> AI bulk-creates destination boards for buttons that don't have one yet.</li>
                             </ul>
                         </div>
+                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                            <p class="text-xs text-gray-700"><strong>Drag &amp; Drop:</strong> Drag any button to a different slot to rearrange the layout. Save Board afterward to keep the change.</p>
+                        </div>
                     `)}
 
-                    ${guideItem('fas fa-wand-magic-sparkles', 'text-violet-600', 'AI Build Options', `
-                        <p><strong>Purpose:</strong> Automatically populate an entire board's button grid using AI, based on the board's topic.</p>
-                        <div class="bg-violet-50 border-l-4 border-violet-500 p-3 rounded">
-                            <p class="text-sm font-semibold text-violet-900 mb-1">How it Works:</p>
+                    ${guideItem('fas fa-edit', 'text-blue-600', 'Board Settings — Button Editor', `
+                        <p><strong>Purpose:</strong> Click any grid slot to open the button editor panel and configure its properties.</p>
+                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-blue-900 mb-1">Button Properties</p>
                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                <li>• Click <em>AI Build Options</em> on a static board</li>
-                                <li>• Describe the vocabulary topic (e.g., "morning routine", "emotions")</li>
-                                <li>• AI generates a full set of relevant button labels and speech text</li>
-                                <li>• Review and accept or refine the suggestions before saving</li>
+                                <li>• <strong>Label Text:</strong> What appears on the button face in the Tap Interface.</li>
+                                <li>• <strong>Speech Text:</strong> What Bravo speaks aloud. Defaults to the label if left blank.</li>
+                                <li>• <strong>Action Type:</strong> <em>Announce</em> (speak only) or <em>Navigate</em> (open another board).</li>
+                                <li>• <strong>Target Board:</strong> For Navigate buttons — which board opens when tapped.</li>
+                                <li>• <strong>Temporary Navigation:</strong> After one selection on the target board, the user is automatically returned here.</li>
+                                <li>• <strong>After Selection:</strong> What happens after this button is tapped (do nothing, clear sentence, use AI, etc.).</li>
+                                <li>• <strong>Image:</strong> Assign a symbol image or photo to the button.</li>
+                                <li>• <strong>Background / Text Color:</strong> Custom button styling.</li>
+                                <li>• <strong>Hidden:</strong> Hides the button from the user while keeping it configured.</li>
                             </ul>
                         </div>
                         <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
-                            <p class="text-xs text-gray-700"><strong>Note:</strong> AI Build replaces the current grid contents. Save any important work first.</p>
+                            <p class="text-xs text-gray-700"><strong>Remember:</strong> Click <em>Save Board</em> in the toolbar after editing buttons — changes are not saved automatically.</p>
                         </div>
                     `)}
 
-                    ${guideItem('fas fa-file-import', 'text-indigo-600', 'Migrate User Data (TouchChat)', `
-                        <p><strong>Purpose:</strong> Import boards and buttons from a TouchChat .ce export file.</p>
-                        <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
-                            <p class="text-sm font-semibold text-indigo-900 mb-1">Steps:</p>
+                    ${guideItem('fas fa-sitemap', 'text-amber-600', 'Menu Settings', `
+                        <p><strong>Purpose:</strong> Manage how boards are organized in the Tap Interface navigation menu — the list of categories and boards the user can browse.</p>
+                        <div class="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-amber-900 mb-1">What You Can Do</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• Add and remove boards from the navigation menu.</li>
+                                <li>• Reorder menu items by dragging them.</li>
+                                <li>• Set a board as the home/default board the user lands on.</li>
+                                <li>• View which boards are currently active in the menu.</li>
+                            </ul>
+                        </div>
+                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                            <p class="text-xs text-gray-700"><strong>Tip:</strong> After importing boards via Migrate User Data, use Menu Settings to add them to the navigation so the user can find them.</p>
+                        </div>
+                    `)}
+
+                    ${guideItem('fas fa-language', 'text-blue-600', 'Translate', `
+                        <p><strong>Purpose:</strong> Translate button labels and speech text across all buttons on a board into another language.</p>
+                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-blue-900 mb-1">How it Works</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• Select a board and a target language.</li>
+                                <li>• All button labels and speech text are translated at once.</li>
+                                <li>• Review the translated results before saving.</li>
+                            </ul>
+                        </div>
+                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                            <p class="text-xs text-gray-700"><strong>Note:</strong> Translation creates a new version of the board — the original board is not modified unless you explicitly save the translated version back.</p>
+                        </div>
+                    `)}
+
+                    ${guideItem('fas fa-images', 'text-violet-600', 'Reassign Images', `
+                        <p><strong>Purpose:</strong> Bulk-reassign symbol images across buttons on a board — useful after translation or when updating pictogram sets.</p>
+                        <div class="bg-violet-50 border-l-4 border-violet-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-violet-900 mb-1">How it Works</p>
+                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                <li>• Select a board to review its current image assignments.</li>
+                                <li>• Replace individual images or let Bravo suggest better matches.</li>
+                                <li>• Save when satisfied — changes update the board immediately.</li>
+                            </ul>
+                        </div>
+                    `)}
+
+                    ${guideItem('fas fa-file-import', 'text-green-600', 'Migrate User Data', `
+                        <p><strong>Purpose:</strong> Import boards and buttons from a TouchChat export file to recreate an existing AAC setup in Bravo.</p>
+                        <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                            <p class="text-sm font-semibold text-green-900 mb-1">Steps</p>
                             <ol class="text-xs text-gray-700 ml-4 space-y-1 list-decimal">
-                                <li>Click <em>Migrate User Data</em> in the board selector toolbar</li>
-                                <li>Upload your TouchChat <code>.ce</code> or <code>.ce.zip</code> file</li>
-                                <li>Browse parsed boards and select which ones to import</li>
-                                <li>Choose <em>Full Cascade</em> to import an entire board tree at once</li>
-                                <li>After import, open <em>Boards Menu</em> to add imported boards to the navigation</li>
+                                <li>Click <em>Migrate User Data</em> in the left navigation.</li>
+                                <li>Upload your TouchChat <code>.ce</code> or <code>.ce.zip</code> file.</li>
+                                <li>Browse the parsed board list and select which boards to import.</li>
+                                <li>Choose <em>Full Cascade</em> to import an entire board tree at once, preserving navigation links.</li>
+                                <li>After import, go to <em>Menu Settings</em> to add the imported boards to the navigation menu.</li>
                             </ol>
                         </div>
                         <div class="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
-                            <p class="text-xs text-gray-700"><strong>⚠️ Note:</strong> Temporary navigation, modifier variants, and board-link structure are all preserved during import.</p>
-                        </div>
-                    `)}
-
-                    ${guideItem('fas fa-save', 'text-red-600', 'Saving Your Work', `
-                        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                            <p class="text-sm font-bold text-red-900 mb-2">💾 Changes are NOT saved automatically!</p>
-                            <p class="text-xs text-gray-700 mb-2">Click <strong>Save Board</strong> in the top toolbar after making any changes to the grid or board details.</p>
-                            <div class="bg-white p-2 rounded mt-2">
-                                <p class="text-xs text-gray-700"><strong>What gets saved:</strong></p>
-                                <ul class="text-xs text-gray-600 ml-4 mt-1">
-                                    <li>• Board display name and mode</li>
-                                    <li>• All button labels, speech text, and targets</li>
-                                    <li>• Button positions (drag &amp; drop changes)</li>
-                                    <li>• AI prompt settings</li>
-                                    <li>• Hidden/visible status</li>
-                                </ul>
-                            </div>
+                            <p class="text-xs text-gray-700"><strong>⚠️ Note:</strong> Temporary navigation, modifier variants, and board-link structure are all preserved during import. Button images are matched automatically where possible.</p>
                         </div>
                     `)}
 
                 </div>
 
-                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
-                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
-                    <button onclick="openBoardBuilderContactModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                        <i class="fas fa-envelope mr-2"></i>Contact Support
-                    </button>
-                </div>
             </div>`;
         }
     })();
@@ -3182,6 +3486,140 @@
             });
         });
 
+    })();
+    </script>
+
+    <script>
+    // ── Tap Interface Settings Panel ──────────────────────────────
+    (function() {
+        const layout   = document.getElementById('tap-layout');
+        const saveBtn  = document.getElementById('ts-save-btn');
+        const saveStatus = document.getElementById('ts-save-status');
+
+        // Nav switching
+        layout.querySelectorAll('.ts-nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const target = item.dataset.tsTarget;
+                layout.querySelectorAll('.ts-nav-item').forEach(i => i.classList.remove('active'));
+                layout.querySelectorAll('.ts-section').forEach(s => { s.classList.remove('active'); s.style.display = ''; });
+                item.classList.add('active');
+                const targetEl = document.getElementById(target);
+                if (target === 'tap-section-migrate') {
+                    targetEl.style.display = 'block';
+                    const iframe = document.getElementById('touchchatMigrationFrameInline');
+                    if (iframe && iframe.src === 'about:blank') {
+                        iframe.src = 'touchchat_migration.html?v=' + Date.now();
+                    }
+                } else {
+                    targetEl.classList.add('active');
+                }
+                if (target === 'tap-section-translate') populateTbBoardList();
+                if (target === 'tap-section-reassign') populateRiBoardList();
+            });
+        });
+
+        async function loadTapSettings() {
+            try {
+                const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
+                if (!resp.ok) return;
+                const s = await resp.json();
+                const el = id => document.getElementById(id);
+                if (el('ts-gridColumnsSlider')) el('ts-gridColumnsSlider').value = s.gridColumns !== undefined ? s.gridColumns : 6;
+                if (el('ts-tapWordsRows'))      el('ts-tapWordsRows').value      = s.tapWordsRows !== undefined ? s.tapWordsRows : 4;
+                if (el('ts-tapDynamicRows'))    el('ts-tapDynamicRows').checked  = parseInt(s.tapDynamicRows) === 1;
+                if (el('ts-enableSightWords'))  el('ts-enableSightWords').checked = s.enableSightWords !== false;
+                if (el('ts-sightWordGradeLevel')) el('ts-sightWordGradeLevel').value = s.sightWordGradeLevel || 'pre_k';
+                if (el('ts-disableTapPictograms')) el('ts-disableTapPictograms').checked = s.disableTapPictograms || false;
+            } catch (err) {
+                console.error('Failed to load tap settings:', err);
+            }
+        }
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                const el = id => document.getElementById(id);
+                const newGridColumns        = parseInt(el('ts-gridColumnsSlider')?.value) || 6;
+                const newTapWordsRows       = parseInt(el('ts-tapWordsRows')?.value) || 4;
+                const newTapDynamicRows     = el('ts-tapDynamicRows')?.checked ? 1 : 0;
+                const newUseHybridPages     = newTapDynamicRows > 0;
+                const enableSightWords      = el('ts-enableSightWords')?.checked !== false;
+                const sightWordGradeLevel   = el('ts-sightWordGradeLevel')?.value || 'pre_k';
+                const disableTapPictograms  = el('ts-disableTapPictograms')?.checked || false;
+                try {
+                    saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving…';
+                    const resp = await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({ gridColumns: newGridColumns, tapWordsRows: newTapWordsRows, tapDynamicRows: newTapDynamicRows, useHybridPages: newUseHybridPages, enableSightWords, sightWordGradeLevel, disableTapPictograms }),
+                    });
+                    if (resp.ok) {
+                        // Update module-level grid variables
+                        GRID_COLS = newGridColumns;
+                        GRID_ROWS = newTapWordsRows;
+                        tapWordsRows = newTapWordsRows;
+                        tapDynamicRows = newTapDynamicRows;
+                        useHybridPages = newUseHybridPages;
+                        // Immediately update currentBoardData in memory so the grid re-renders
+                        // without waiting for a server round-trip. Firestore may have a brief
+                        // consistency window after POST /api/settings, so we cannot rely on a
+                        // synchronous loadBoards() to pick up the new tapDynamicRows right away.
+                        const newStaticRows = Math.max(0, newTapWordsRows - newTapDynamicRows);
+                        const newMaxOnPage = newStaticRows * newGridColumns;
+                        if (currentBoardData && Array.isArray(currentBoardData.buttons)) {
+                            currentBoardData.buttons.forEach(btn => {
+                                if (btn.pool_index == null) return;
+                                const idx = Number(btn.pool_index);
+                                if (idx < newMaxOnPage) {
+                                    // On-page slot — assign position from pool_index if not set
+                                    if (btn.row == null) {
+                                        btn.row = Math.floor(idx / newGridColumns);
+                                        btn.col = idx % newGridColumns;
+                                    }
+                                } else {
+                                    // Now overflow — clear position so it no longer renders
+                                    btn.row = null;
+                                    btn.col = null;
+                                }
+                            });
+                            currentBoardData.dynamic_rows = newTapDynamicRows;
+                        }
+                        if (currentBoardData) renderButtonGrid();
+                        // Reload from server in background to sync with the server-side re-backfill
+                        const prevBoardId = currentBoardData ? currentBoardData.id : null;
+                        loadBoards().then(() => {
+                            if (prevBoardId) {
+                                document.getElementById('selectBoard').value = prevBoardId;
+                                handleBoardSelected();
+                            }
+                        }).catch(() => {});
+                        showTsSaveStatus('Settings saved.', 'green');
+                    } else {
+                        showTsSaveStatus('Save failed. Please try again.', 'red');
+                    }
+                } catch (err) {
+                    showTsSaveStatus('Error saving settings.', 'red');
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Save Settings';
+                }
+            });
+        }
+
+        function showTsSaveStatus(msg, color) {
+            if (!saveStatus) return;
+            saveStatus.textContent = msg;
+            saveStatus.className = `mt-2 text-sm text-${color}-600`;
+            saveStatus.classList.remove('hidden');
+            setTimeout(() => saveStatus.classList.add('hidden'), 3000);
+        }
+
+        // Auto-load settings once auth is ready
+        if (window.adminContextInitializedByInlineScript) {
+            loadTapSettings();
+        } else {
+            document.addEventListener('adminUserContextReady', loadTapSettings, { once: true });
+        }
     })();
     </script>
 </body>

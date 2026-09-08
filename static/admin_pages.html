@@ -204,6 +204,38 @@
         outline: none;
         box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.3);
     }
+    /* ── Page banner sticky ──────────────────────────── */
+    .page-banner { position: sticky; top: 0; z-index: 50; }
+    /* ── Settings layout ──────────────────────────── */
+    .ss-layout { display: flex; min-height: calc(100vh - 56px); }
+    .ss-nav { width: 220px; flex-shrink: 0; background: white; border-right: 1px solid #e5e7eb; box-shadow: 2px 0 8px rgba(0,0,0,0.06); padding: 0.75rem 0; position: sticky; top: 56px; align-self: flex-start; height: calc(100vh - 56px); overflow-y: auto; z-index: 10; }
+    .ss-nav-label { padding: 0.4rem 1.25rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; }
+    .ss-nav-item { display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 1.25rem; cursor: pointer; border-left: 3px solid transparent; transition: background 0.12s, border-color 0.12s, color 0.12s; color: #4b5563; font-size: 0.82rem; font-weight: 500; line-height: 1.3; user-select: none; }
+    .ss-nav-item:hover { background: #f9fafb; color: #111827; }
+    .ss-nav-item.active { background: #fff7ed; border-left-color: #ea580c; color: #c2410c; font-weight: 600; }
+    .ss-nav-icon { width: 1.25rem; text-align: center; flex-shrink: 0; font-size: 0.9rem; }
+    .ss-content { flex: 1; min-width: 0; background: #f3f4f6; }
+    .ss-section { display: none; }
+    .ss-section.active { display: block; }
+    .ss-save-bar { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid #e5e7eb; text-align: center; }
+    .sgroup { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.625rem; overflow: hidden; margin-bottom: 1rem; }
+    .sgroup-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1rem; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; }
+    .srow { display: flex; align-items: center; gap: 1.5rem; padding: 0.8rem 1rem; border-bottom: 1px solid #f3f4f6; min-height: 58px; background: white; }
+    .srow:last-child { border-bottom: none; }
+    .srow-meta { flex: 1; min-width: 0; }
+    .srow-label { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; display: block; }
+    .srow-desc { font-size: 0.72rem; color: #6b7280; margin-top: 0.15rem; line-height: 1.4; display: block; }
+    .srow-ctrl { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; }
+    .tog { position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer; flex-shrink: 0; }
+    .tog input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .tog-slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 12px; transition: background 0.18s; }
+    .tog-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.18); transition: transform 0.18s; }
+    .tog input:checked + .tog-slider { background: #3b82f6; }
+    .tog input:checked + .tog-slider::before { transform: translateX(20px); }
+    .sinput { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; }
+    .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+    .sselect { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 2rem 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background-color: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; min-width: 180px; }
+    .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
   </style>
 </head>
 <body>
@@ -375,10 +407,12 @@
                 <div id="help-loading" class="text-center text-gray-400">Loading help...</div>
             </div>
             <div class="mt-4 text-center">
-                <a href="#" id="open-contact-modal" class="inline-block text-green-700 font-semibold underline hover:text-green-900">Contact Support</a>
+                <button onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
             </div>
     <!-- Contact Support Modal -->
-    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden" style="z-index: 9999;">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
@@ -415,48 +449,96 @@
         helpModal.classList.remove('hidden');
         helpLoading.style.display = 'none';
         
-        // Create Admin Pages Guide similar to New User Setup Guide
+        // Build the Admin Pages Guide matching the 4-section left nav
         helpModalContent.innerHTML = `
             <div class="p-6">
                 <div class="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg border-l-4 border-indigo-500">
                     <h3 class="text-lg font-bold text-indigo-900 mb-2">
-                        <i class="fas fa-th text-indigo-600 mr-2"></i>Page & Button Administration Guide
+                        <i class="fas fa-th text-indigo-600 mr-2"></i>Page &amp; Button Administration Guide
                     </h3>
                     <p class="text-sm text-gray-700">
-                        This guide will help you understand and use all the features of the Page & Button Administration interface.
-                        Click on any section below to learn more, then use the "Guide Me" button for step-by-step instructions.
+                        This page manages the Auditory Scanning interface — the pages and buttons the user navigates with their switch or touch.
+                        Use the left navigation to move between sections. Click any topic below to learn more.
                     </p>
                 </div>
 
-                <!-- Guide Sections -->
                 <div class="space-y-3">
-                    
-                    <!-- Page Selection & Management -->
+
+                    <!-- Global Settings -->
                     <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-file-alt text-indigo-600 text-lg"></i>
+                                <i class="fas fa-sliders-h text-indigo-600 text-lg"></i>
                             </div>
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Page Selection & Management</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startAdminGuide('page-management');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    <div class="font-semibold text-gray-900">Global Settings</div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-3">
+                                        <p><strong>Purpose:</strong> Control how the Auditory Scanning interface behaves for this user. Settings here apply to all pages.</p>
+                                        <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-indigo-900 mb-1">AI Generation</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Number of AI Options:</strong> How many AI-generated phrase choices appear on each Auditory Scanning page.</li>
+                                                <li>• <strong>Freestyle Word Options:</strong> Number of AI word suggestions shown on the Freestyle page.</li>
+                                                <li>• <strong>Auto Clean in Freestyle:</strong> Automatically polish text before speaking in Freestyle mode.</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-blue-900 mb-1">Scanning Behavior</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Scanning Mode:</strong> <em>Auto</em> advances on a timer; <em>Step</em> requires a switch press to move to the next option.</li>
+                                                <li>• <strong>Scan Speed:</strong> Milliseconds between button highlights during Auto scanning (e.g., 3500 = 3.5 seconds).</li>
+                                                <li>• <strong>Scan Loop Limit:</strong> Number of complete cycles before pausing — 0 means unlimited.</li>
+                                                <li>• <strong>Wait for Switch to Start Scanning:</strong> Scanning does not begin automatically — user must press their switch first.</li>
+                                                <li>• <strong>Page Ready Chime:</strong> Plays a chime when a page has loaded and is waiting for the switch.</li>
+                                                <li>• <strong>Disable Auditory Scanning:</strong> Turns off automatic scanning entirely — user navigates buttons manually.</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                                            <p class="text-sm font-semibold text-gray-800 mb-1">Display</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Show Full Speech Text on Buttons:</strong> Displays the full phrase on the button face instead of a short label.</li>
+                                                <li>• <strong>Enable Scanning Pictograms:</strong> Show symbol images on buttons in the Auditory Scanning interface.</li>
+                                                <li>• <strong>Display Splash Screen:</strong> Shows a large speech-bubble overlay with the text being announced.</li>
+                                                <li>• <strong>Splash Screen Duration:</strong> How long the splash overlay is visible (500–10,000 ms).</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> Click <em>Save Settings</em> at the bottom of Global Settings after making any changes — they do not save automatically.</p>
+                                        </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Page & Button Settings — Pages -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-file-alt text-purple-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Page &amp; Button Settings — Managing Pages</div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Purpose:</strong> Select which page to view and edit, create new pages, or manage existing pages.</p>
-                                        <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-indigo-900 mb-1">What You Can Do:</p>
+                                        <p><strong>Purpose:</strong> Select, create, rename, and delete the communication pages the user sees in the Auditory Scanning interface.</p>
+                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-purple-900 mb-1">What You Can Do</p>
                                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• <strong>Select Page:</strong> Choose from the dropdown to view different pages</li>
-                                                <li>• <strong>Create New Page:</strong> Add a new communication page to your grid</li>
-                                                <li>• <strong>Update Page:</strong> Change the display name of the current page</li>
-                                                <li>• <strong>Delete Page:</strong> Remove pages you no longer need</li>
+                                                <li>• <strong>Select Page:</strong> Use the dropdown to switch between existing pages and view their buttons.</li>
+                                                <li>• <strong>Create New Page:</strong> Add a blank communication page to the user's profile.</li>
+                                                <li>• <strong>Display Name:</strong> The label shown in the menu and page banner. Rename the current page here.</li>
+                                                <li>• <strong>Scanning Pattern:</strong> <em>Column-First</em> (default) scans left-to-right, top-to-bottom. <em>Row-First</em> announces each row first, then scans buttons within the selected row.</li>
+                                                <li>• <strong>Save Page Settings:</strong> Saves the display name and scanning pattern for the current page.</li>
+                                                <li>• <strong>Delete Page:</strong> Permanently removes the page and all its buttons.</li>
+                                                <li>• <strong>Revert Changes:</strong> Discards unsaved edits and reloads the saved page details.</li>
                                             </ul>
                                         </div>
                                     </div>
@@ -465,7 +547,7 @@
                         </div>
                     </div>
 
-                    <!-- Button Grid -->
+                    <!-- Page & Button Settings — Button Grid -->
                     <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
@@ -473,82 +555,45 @@
                             </div>
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Button Grid Overview</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startAdminGuide('button-grid');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
-                                </div>
-                                <div class="guide-details hidden mt-2">
-                                    <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Purpose:</strong> The 10x10 grid displays all communication buttons for the selected page.</p>
-                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-purple-900 mb-2">💡 Pro Tip:</p>
-                                            <p class="text-xs text-gray-700">Organize frequently used buttons in easily accessible positions. Users will find it easier to navigate if related concepts are grouped together.</p>
-                                        </div>
-                                        <div class="bg-gray-100 p-3 rounded">
-                                            <p class="text-sm font-semibold text-gray-900 mb-1">Grid Features:</p>
-                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• Click any button to edit its configuration</li>
-                                                <li>• Drag and drop buttons to rearrange them</li>
-                                                <li>• Color indicators show button types (see Button Types below)</li>
-                                                <li>• Empty cells can be filled with new buttons</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Button Types & Colors -->
-                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
-                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                            <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-palette text-pink-600 text-lg"></i>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Understanding Button Types & Colors</div>
+                                    <div class="font-semibold text-gray-900">Page &amp; Button Settings — Button Grid</div>
                                     <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-3">
-                                        <p><strong>Purpose:</strong> Buttons are automatically color-coded to help you quickly identify their function.</p>
-                                        
+                                        <p><strong>Purpose:</strong> View and manage all 100 button slots on the selected page (10 columns × 10 rows).</p>
                                         <div class="space-y-2">
                                             <div class="bg-gradient-to-r from-purple-100 to-purple-50 border-l-4 border-purple-500 p-3 rounded">
-                                                <div class="flex items-center gap-2 mb-1">
-                                                    <div class="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs">AI</div>
-                                                    <span class="font-semibold text-purple-900">🤖 AI Buttons (Purple)</span>
-                                                </div>
-                                                <p class="text-xs text-gray-700 ml-6">Contains AI Query for dynamic, context-aware responses. These buttons generate different outputs based on the situation.</p>
+                                                <span class="font-semibold text-purple-900">🤖 AI Buttons (purple)</span>
+                                                <p class="text-xs text-gray-700 mt-1">Contains an AI Query — generates context-aware responses each time the button is tapped.</p>
                                             </div>
-                                            
                                             <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-l-4 border-orange-500 p-3 rounded">
-                                                <div class="flex items-center gap-2 mb-1">
-                                                    <div class="w-4 h-4 rounded-full bg-orange-600 text-white flex items-center justify-center text-xs">→</div>
-                                                    <span class="font-semibold text-orange-900">🧭 Navigation Buttons (Orange)</span>
-                                                </div>
-                                                <p class="text-xs text-gray-700 ml-6">Links to another page. Clicking this button takes the user to a different communication grid.</p>
+                                                <span class="font-semibold text-orange-900">🧭 Navigation Buttons (orange)</span>
+                                                <p class="text-xs text-gray-700 mt-1">Tapping moves the user to a different page in the Auditory Scanning interface.</p>
                                             </div>
-                                            
                                             <div class="bg-gradient-to-r from-green-100 to-green-50 border-l-4 border-green-500 p-3 rounded">
-                                                <div class="flex items-center gap-2 mb-1">
-                                                    <div class="w-4 h-4 rounded-full bg-green-600 text-white flex items-center justify-center text-xs">♪</div>
-                                                    <span class="font-semibold text-green-900">💬 Speech Buttons (Green)</span>
-                                                </div>
-                                                <p class="text-xs text-gray-700 ml-6">Has a custom speech phrase. Says exactly what you configure every time.</p>
+                                                <span class="font-semibold text-green-900">💬 Speech Buttons (green)</span>
+                                                <p class="text-xs text-gray-700 mt-1">Has a custom announcement phrase — says exactly the same thing every time.</p>
                                             </div>
-                                            
-                                            <div class="bg-gray-100 border-l-4 border-gray-400 p-3 rounded opacity-70">
-                                                <div class="flex items-center gap-2 mb-1">
-                                                    <span class="font-semibold text-gray-700">🫥 Hidden Buttons (Faded)</span>
-                                                </div>
-                                                <p class="text-xs text-gray-600 ml-6">Not visible to users - admin only. Appears faded with reduced opacity in the grid.</p>
+                                            <div class="bg-gray-100 border-l-4 border-gray-400 p-3 rounded opacity-75">
+                                                <span class="font-semibold text-gray-700">🫥 Hidden Buttons (faded)</span>
+                                                <p class="text-xs text-gray-600 mt-1">Not visible to users — admin-only. Shown with reduced opacity in the grid.</p>
                                             </div>
+                                            <div class="bg-white border border-dashed border-gray-400 p-3 rounded">
+                                                <span class="font-semibold text-gray-500">⬜ Empty slots</span>
+                                                <p class="text-xs text-gray-500 mt-1">Unoccupied positions. Click to create a new button here.</p>
+                                            </div>
+                                        </div>
+                                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                                            <p class="text-sm font-semibold text-gray-800 mb-1">Grid Actions</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Click any button</strong> to open the Button Editor panel and modify its properties.</li>
+                                                <li>• <strong>Drag and drop</strong> buttons to rearrange them within the grid.</li>
+                                                <li>• <strong>New Button Wizard:</strong> Guided step-by-step creation for new buttons — useful when adding AI query buttons or standard phrases.</li>
+                                                <li>• <strong>Save Button Changes:</strong> Saves all button edits and position changes. Changes are <em>not</em> saved automatically.</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> Group related buttons together and place the most frequently used options near the top — users reach them first during scanning.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -565,86 +610,72 @@
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
                                     <div class="font-semibold text-gray-900">Button Editor</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startAdminGuide('button-editor');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Purpose:</strong> Configure all aspects of a button including its label, speech output, navigation target, and AI behavior.</p>
-                                        
+                                        <p><strong>Purpose:</strong> Click any grid slot to open the Button Editor and configure all of its properties.</p>
                                         <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-blue-900 mb-2">Button Properties:</p>
-                                            <ul class="text-xs text-gray-700 space-y-1">
-                                                <li>• <strong>Label Text:</strong> What appears on the button</li>
-                                                <li>• <strong>Speech Output:</strong> What Bravo says when pressed (optional - defaults to label)</li>
-                                                <li>• <strong>Target Page:</strong> Which page to navigate to (for navigation buttons)</li>
-                                                <li>• <strong>AI Query:</strong> Prompt for dynamic content generation (for AI buttons)</li>
-                                                <li>• <strong>Image:</strong> Optional visual icon or picture for the button</li>
-                                                <li>• <strong>Hidden:</strong> Make button invisible to users (admin only)</li>
+                                            <p class="text-sm font-semibold text-blue-900 mb-1">Button Properties</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Label:</strong> Text shown on the button face and read aloud during Auditory Scanning to prompt the user.</li>
+                                                <li>• <strong>Image:</strong> Optional symbol from BravoImages. If not set, Bravo auto-searches by label.</li>
+                                                <li>• <strong>Announcement:</strong> The phrase Bravo speaks when the button is selected. Defaults to the label if blank.</li>
+                                                <li>• <strong>Custom Audio File:</strong> Optional MP3/WAV/M4A that plays after the announcement.</li>
+                                                <li>• <strong>Target Page:</strong> For navigation buttons — which page opens after this button is pressed.</li>
+                                                <li>• <strong>Temporary Navigation:</strong> When on, a single selection on the target page automatically returns the user to the current page.</li>
+                                                <li>• <strong>AI Query:</strong> A prompt for dynamic AI-generated content. Setting this turns the button purple (AI type).</li>
+                                                <li>• <strong>Hidden:</strong> Hides the button from the user while keeping it configured — visible to admins only.</li>
                                             </ul>
                                         </div>
-
                                         <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-yellow-900 mb-1">🔒 Static vs 🤖 Dynamic Buttons:</p>
-                                            <div class="text-xs text-gray-700 space-y-2 mt-2">
-                                                <div class="bg-white p-2 rounded">
-                                                    <p class="font-semibold">Static Buttons:</p>
-                                                    <p>Always say the same predefined message. Perfect for routine phrases like "I need help" or "Thank you".</p>
+                                            <p class="text-sm font-semibold text-yellow-900 mb-1">Static vs. Dynamic (AI) Buttons</p>
+                                            <div class="text-xs text-gray-700 space-y-2 mt-1">
+                                                <div class="bg-white p-2 rounded border border-gray-200">
+                                                    <p class="font-semibold">Static:</p>
+                                                    <p>Always says the same predefined phrase. Best for routine communication like "I need help" or "Thank you."</p>
                                                 </div>
-                                                <div class="bg-white p-2 rounded">
-                                                    <p class="font-semibold">Dynamic (AI) Buttons:</p>
-                                                    <p>Use AI to generate contextual responses. Great for "Tell me about..." or situation-specific communication.</p>
+                                                <div class="bg-white p-2 rounded border border-purple-200">
+                                                    <p class="font-semibold text-purple-800">Dynamic (AI Query):</p>
+                                                    <p>AI generates a contextual response each time. Great for "Tell me something about..." or situation-specific phrasing.</p>
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>Remember:</strong> Click <em>Save Button Changes</em> above the grid after editing — changes are not saved automatically.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Button Wizard -->
+                    <!-- Translate Pages -->
                     <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-magic text-green-600 text-lg"></i>
+                                <i class="fas fa-language text-blue-600 text-lg"></i>
                             </div>
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">New Button Wizard</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startAdminGuide('button-wizard');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
+                                    <div class="font-semibold text-gray-900">Translate Pages</div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Purpose:</strong> Guided step-by-step process for creating new buttons quickly and easily.</p>
-                                        <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-green-900 mb-1">When to Use the Wizard:</p>
-                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• Creating multiple similar buttons</li>
-                                                <li>• Quick setup for standard communication phrases</li>
-                                                <li>• When you want guided prompts for each field</li>
-                                            </ul>
-                                        </div>
+                                        <p><strong>Purpose:</strong> Translate page labels and button content into another language. Internal page names and navigation links are never changed.</p>
                                         <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-blue-900 mb-1">🤖 AI Query Help:</p>
-                                            <p class="text-xs text-gray-700 mb-2">The wizard helps you create effective AI queries by translating simple requests into optimized prompts.</p>
-                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• Translates simple requests into AI-ready queries</li>
-                                                <li>• Shows data previews for quick testing</li>
-                                                <li>• Allows quick adjustments to fine-tune responses</li>
-                                            </ul>
+                                            <p class="text-sm font-semibold text-blue-900 mb-1">How to Use</p>
+                                            <ol class="text-xs text-gray-700 ml-4 space-y-1 list-decimal">
+                                                <li>Check the pages you want to translate from the <em>Translate Scope</em> list (or click Select All).</li>
+                                                <li>Choose the <em>Translate From</em> language (the current language of the content).</li>
+                                                <li>Choose the <em>Translate To</em> language (the target language).</li>
+                                                <li>Select which fields to translate: page display names, button labels, button announcements, and/or AI query prompts.</li>
+                                                <li>Click <em>Translate Now</em> to apply.</li>
+                                            </ol>
                                         </div>
-                                        <div class="bg-gray-100 p-3 rounded">
-                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> The wizard creates buttons faster, but manual editing gives you more control over advanced features.</p>
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>Note:</strong> AI query prompts are not translated by default — enable that option only if the target language AI model should receive prompts in the translated language.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -652,7 +683,7 @@
                         </div>
                     </div>
 
-                    <!-- Import/Migration -->
+                    <!-- Migrate User Data -->
                     <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
@@ -661,58 +692,28 @@
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
                                     <div class="font-semibold text-gray-900">Migrate User Data</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startAdminGuide('migration');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
-                                </div>
-                                <div class="guide-details hidden mt-2">
-                                    <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Purpose:</strong> Import pages and buttons from other AAC devices or previous Bravo configurations.</p>
-                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
-                                            <p class="text-sm font-semibold text-purple-900 mb-1">Supported Import Sources:</p>
-                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• Accent devices (MTI export files)</li>
-                                                <li>• Bravo backup files (coming soon)</li>
-                                                <li>• Other AAC device exports (coming soon)</li>
-                                            </ul>
-                                        </div>
-                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded mt-2">
-                                            <p class="text-xs text-gray-700"><strong>⚠️ Note:</strong> Importing data will add to your existing pages. Review imported content before making it visible to users.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Save Changes -->
-                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
-                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                            <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-save text-red-600 text-lg"></i>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Saving Your Changes</div>
                                     <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                                            <p class="text-sm font-bold text-red-900 mb-2">💾 IMPORTANT: Always Save Your Work!</p>
-                                            <p class="text-xs text-gray-700 mb-2">Changes to buttons are NOT saved automatically. You must click the <strong>"Save Button Changes"</strong> button after making any modifications.</p>
-                                            <div class="bg-white p-2 rounded mt-2">
-                                                <p class="text-xs text-gray-700"><strong>What gets saved:</strong></p>
-                                                <ul class="text-xs text-gray-600 ml-4 mt-1">
-                                                    <li>• Button labels and speech output</li>
-                                                    <li>• Button positions (drag & drop changes)</li>
-                                                    <li>• AI queries and navigation targets</li>
-                                                    <li>• Hidden/visible status</li>
-                                                </ul>
-                                            </div>
+                                        <p><strong>Purpose:</strong> Import pages and buttons from another AAC device to recreate an existing communication setup in Bravo.</p>
+                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-purple-900 mb-1">Supported Sources</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Accent Device:</strong> Upload an <code>.mti</code> export file from an Accent device. Pages and buttons are parsed and imported into the user's profile.</li>
+                                                <li>• Other sources — coming soon.</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                                            <p class="text-sm font-semibold text-gray-800 mb-1">After Importing</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• Imported pages appear alongside existing pages in the <em>Page &amp; Button Settings</em> page selector.</li>
+                                                <li>• Review imported content and update any button properties that didn't transfer correctly.</li>
+                                                <li>• Button images are matched automatically where possible.</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>⚠️ Note:</strong> Migration adds to your existing pages — it does not replace them. Duplicate pages may need to be cleaned up after import.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -722,13 +723,6 @@
 
                 </div>
 
-                <!-- Help Footer -->
-                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
-                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
-                    <button onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                        <i class="fas fa-envelope mr-2"></i>Contact Support
-                    </button>
-                </div>
             </div>
         `;
     }
@@ -765,6 +759,8 @@
             startButtonWizardGuide();
         } else if (guideId === 'migration') {
             startMigrationGuide();
+        } else if (guideId === 'translate-pages') {
+            startTranslatePagesGuide();
         } else {
             // Other guides to be implemented
             alert('Interactive guide for ' + guideId + ' will be available soon. For now, please refer to the section details in the help guide.');
@@ -842,8 +838,8 @@
                 }
             },
             {
-                title: 'Update Page Name',
-                content: 'Enter a new display name in this field, then click "Update Page" to save the change. The new name will appear in the page selector and navigation.',
+                title: 'Update Display Name',
+                content: 'Enter a new display name in this field, then click "Save Page Settings" to save the change. The new name will appear in the page selector and navigation.',
                 highlight: '#newPageDisplayName',
                 action: function() {
                     const nameInput = document.getElementById('newPageDisplayName');
@@ -858,8 +854,24 @@
                 }
             },
             {
-                title: 'Update Page Button',
-                content: 'After changing the page name, click this button to save your changes. The updated name will be reflected throughout the system.',
+                title: 'Scanning Pattern',
+                content: 'Choose how buttons are scanned on this page. Column-First scans each column left-to-right. Row-First announces each row first, then scans buttons within the selected row — useful for denser pages.',
+                highlight: '#scanPattern',
+                action: function() {
+                    const scanPattern = document.getElementById('scanPattern');
+                    if (scanPattern) {
+                        scanPattern.classList.add('guide-highlight-target');
+                        scanPattern.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const scanPattern = document.getElementById('scanPattern');
+                    if (scanPattern) scanPattern.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Save Page Settings',
+                content: 'After updating the display name or scanning pattern, click "Save Page Settings" to save your changes.',
                 highlight: '#updatePageBtn',
                 action: function() {
                     const updateBtn = document.getElementById('updatePageBtn');
@@ -1124,8 +1136,8 @@
                 }
             },
             {
-                title: 'Speech Phrase',
-                content: 'Set a custom phrase that Bravo will say when this button is pressed.',
+                title: 'Announcement',
+                content: 'Set a custom phrase that Bravo will announce out loud when this button is pressed. Leave blank to use the button label as the announcement.',
                 highlight: '#speechPhrase',
                 action: function() {
                     const speechPhrase = document.getElementById('speechPhrase');
@@ -1140,8 +1152,24 @@
                 }
             },
             {
+                title: 'Custom Audio File (Optional)',
+                content: 'Upload an MP3, WAV, or M4A file (max 10 MB) to play after the announcement. Useful for sound effects, recorded voices, or music cues attached to a button press.',
+                highlight: '#customAudioFile',
+                action: function() {
+                    const audioFile = document.getElementById('customAudioFile');
+                    if (audioFile) {
+                        audioFile.classList.add('guide-highlight-target');
+                        audioFile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const audioFile = document.getElementById('customAudioFile');
+                    if (audioFile) audioFile.classList.remove('guide-highlight-target');
+                }
+            },
+            {
                 title: 'Target Page (Navigation)',
-                content: 'Select a page to navigate to when this button is pressed. This creates an orange navigation button. If a Speech Phrase is set, Bravo will announce it first, then navigate to the selected page.',
+                content: 'Select a page to navigate to when this button is pressed. This creates an orange navigation button. If an Announcement is set, Bravo will speak it first, then navigate.',
                 highlight: '#targetPage',
                 action: function() {
                     const targetPage = document.getElementById('targetPage');
@@ -1153,6 +1181,28 @@
                 cleanup: function() {
                     const targetPage = document.getElementById('targetPage');
                     if (targetPage) targetPage.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Temporary Navigation',
+                content: 'When checked, pressing any button on the target page automatically returns the user to this page. Great for category pages where the user picks one item and comes straight back.',
+                highlight: '#temporaryNavigation',
+                action: function() {
+                    const tempNav = document.getElementById('temporaryNavigation');
+                    if (tempNav) {
+                        const parent = tempNav.closest('label') || tempNav.parentElement;
+                        if (parent) {
+                            parent.classList.add('guide-highlight-target');
+                            parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                },
+                cleanup: function() {
+                    const tempNav = document.getElementById('temporaryNavigation');
+                    if (tempNav) {
+                        const parent = tempNav.closest('label') || tempNav.parentElement;
+                        if (parent) parent.classList.remove('guide-highlight-target');
+                    }
                 }
             },
             {
@@ -1404,6 +1454,115 @@
         showAdminGuideWindow();
     }
     
+    // Translate Pages Guide
+    const translatePagesGuide = {
+        id: 'translate-pages',
+        steps: [
+            {
+                title: 'Opening Translate Pages',
+                content: 'Click the "Translate Pages" button at the top of the Page Management interface to open the translation dialog.',
+                highlight: '#translatePagesBtn',
+                action: function() {
+                    const btn = document.getElementById('translatePagesBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('translatePagesBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Choose a Translate Scope',
+                content: 'Select what to translate: the current page only, all pages in the profile, or just the AI prompts on tap boards.',
+                highlight: '#translateScope',
+                action: function() {
+                    const modal = document.getElementById('translatePagesModal');
+                    if (modal && modal.classList.contains('hidden')) modal.classList.remove('hidden');
+                    const el = document.getElementById('translateScope');
+                    if (el) {
+                        setTimeout(() => {
+                            el.classList.add('guide-highlight-target');
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const el = document.getElementById('translateScope');
+                    if (el) el.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Select Source and Target Languages',
+                content: 'Choose the language to translate FROM (usually the current language of your buttons) and the language to translate TO.',
+                highlight: '#translateTargetLocale',
+                action: function() {
+                    const el = document.getElementById('translateTargetLocale');
+                    if (el) {
+                        el.classList.add('guide-highlight-target');
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const el = document.getElementById('translateTargetLocale');
+                    if (el) el.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Choose Fields to Translate',
+                content: 'Check the fields you want translated: page display names, button labels, button announcements, and optionally button AI query prompts. Navigation links and internal page IDs are never changed.',
+                highlight: '#translateIncludeButtonText',
+                action: function() {
+                    const el = document.getElementById('translateIncludeButtonText');
+                    if (el) {
+                        const parent = el.closest('div') || el.parentElement;
+                        if (parent) {
+                            parent.classList.add('guide-highlight-target');
+                            parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                },
+                cleanup: function() {
+                    const el = document.getElementById('translateIncludeButtonText');
+                    if (el) {
+                        const parent = el.closest('div') || el.parentElement;
+                        if (parent) parent.classList.remove('guide-highlight-target');
+                    }
+                }
+            },
+            {
+                title: 'Run Translation',
+                content: 'Click "Translate Now" to start the translation. A status message will appear when complete. Review the translated buttons on the grid and save if everything looks correct.',
+                highlight: '#runTranslatePagesBtn',
+                action: function() {
+                    const btn = document.getElementById('runTranslatePagesBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('runTranslatePagesBtn');
+                    if (btn) {
+                        btn.classList.remove('guide-highlight-target');
+                        const modal = document.getElementById('translatePagesModal');
+                        if (modal) modal.classList.add('hidden');
+                    }
+                }
+            }
+        ]
+    };
+
+    function startTranslatePagesGuide() {
+        currentAdminGuide = {
+            guide: translatePagesGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+
     // Migration Guide
     const migrationGuide = {
         id: 'migration',
@@ -1752,12 +1911,7 @@
     const supportError = document.getElementById('support-error');
     
     function openContactSupportModal() {
-        console.log('Opening Contact Support modal');
         contactModal.classList.remove('hidden');
-        // Close help modal if open
-        if (helpModal && !helpModal.classList.contains('hidden')) {
-            closeHelpModal();
-        }
     }
     
     function closeContactModal() {
@@ -1803,19 +1957,176 @@
     </script>
 
     <!-- --- Page Management Form --- -->
-    <main class="container mx-auto p-4 mt-8 bg-white rounded-lg shadow-md text-gray-800">
+    <div id="scan-layout" class="ss-layout">
+        <nav class="ss-nav">
+            <div class="ss-nav-label">Settings</div>
+            <div class="ss-nav-item active" data-ss-target="scan-section-scan">
+                <i class="fas fa-sliders-h ss-nav-icon" style="color:#4f46e5"></i>
+                <span>Global Settings</span>
+            </div>
+            <div class="ss-nav-item" data-ss-target="scan-section-pagebutton">
+                <i class="fas fa-th-large ss-nav-icon" style="color:#4f46e5"></i>
+                <span>Page &amp; Button Settings</span>
+            </div>
+            <div class="ss-nav-item" data-ss-target="scan-section-translate">
+                <i class="fas fa-language ss-nav-icon" style="color:#2563eb"></i>
+                <span>Translate Pages</span>
+            </div>
+            <div class="ss-nav-item" data-ss-target="scan-section-migrate">
+                <i class="fas fa-exchange-alt ss-nav-icon" style="color:#7c3aed"></i>
+                <span>Migrate User Data</span>
+            </div>
+        </nav>
+        <div class="ss-content">
+            <!-- Global Settings (Scan Interface) -->
+            <div id="scan-section-scan" class="ss-section active" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-search mr-2 text-orange-600"></i>Scan Interface Settings
+                </h2>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-robot"></i> AI Generation</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Number of AI Options</span>
+                            <span class="srow-desc">AI-generated phrase options shown on each Auditory Scanning page</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ss-LLMOptions" min="0" max="50" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="10">
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Freestyle Word Options</span>
+                            <span class="srow-desc">Number of AI word suggestions shown on the Freestyle page</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ss-FreestyleOptions" min="1" max="50" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="20">
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Auto Clean in Freestyle</span>
+                            <span class="srow-desc">Automatically clean up and polish text before speaking in Freestyle mode</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-autoClean"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-arrows-alt-h"></i> Scanning Behavior</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Scanning Mode</span>
+                            <span class="srow-desc">Auto advances on a timer; Step requires a switch press to move to the next option</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <select id="ss-scanMode" class="sselect">
+                                <option value="auto">Auto Scanning (timer)</option>
+                                <option value="step">Step Scanning (switch)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Scan Speed</span>
+                            <span class="srow-desc">Milliseconds between button highlights during auto scanning (e.g., 3500 = 3.5 seconds)</span>
+                        </div>
+                        <div class="srow-ctrl flex items-center gap-2">
+                            <input type="number" id="ss-scanDelay" min="100" step="100" class="sinput" style="width:90px; text-align:center;" placeholder="3500">
+                            <span class="text-xs text-gray-500">ms</span>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Scan Loop Limit</span>
+                            <span class="srow-desc">Number of complete scan cycles before pausing — 0 means unlimited</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ss-scanLoopLimit" min="0" max="10" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="0">
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Wait for Switch to Start Scanning</span>
+                            <span class="srow-desc">When on, scanning does not begin automatically — user must press their switch first</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-waitForSwitchToScan"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Page Ready Chime</span>
+                            <span class="srow-desc">Play a chime when a page has loaded and is waiting for the switch to begin scanning</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-playWaitForSwitchChime"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Disable Auditory Scanning</span>
+                            <span class="srow-desc">Turn off automatic scanning entirely — user navigates buttons manually</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-ScanningOff"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-eye"></i> Display</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Show Full Speech Text on Buttons</span>
+                            <span class="srow-desc">When on, buttons display the full speech phrase instead of a short summary label</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-SummaryOff"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Enable Scanning Pictograms</span>
+                            <span class="srow-desc">Show pictogram images on buttons in the Auditory Scanning interface</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-enablePictograms"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Display Splash Screen</span>
+                            <span class="srow-desc">Show a large speech-bubble overlay displaying the text being announced</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog"><input type="checkbox" id="ss-displaySplash"><span class="tog-slider"></span></label>
+                        </div>
+                    </div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Splash Screen Duration</span>
+                            <span class="srow-desc">How long the splash screen is visible (500–10,000 ms; default 3,000)</span>
+                        </div>
+                        <div class="srow-ctrl flex items-center gap-2">
+                            <input type="number" id="ss-displaySplashTime" min="500" max="10000" step="100" class="sinput" style="width:90px; text-align:center;" placeholder="3000">
+                            <span class="text-xs text-gray-500">ms</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="ss-save-bar">
+                    <button id="ss-save-btn" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">
+                        <i class="fas fa-save mr-2"></i>Save Settings
+                    </button>
+                    <div id="ss-save-status" class="mt-2 text-sm hidden"></div>
+                </div>
+            </div>
+
+            <!-- Page & Button Settings -->
+            <div id="scan-section-pagebutton" class="ss-section">
+                <div class="p-4 bg-white min-h-screen">
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-2xl font-bold">Manage Pages & Buttons</h2>
-            <div class="flex items-center gap-3">
-                <button id="translatePagesBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    <i class="fas fa-language"></i>
-                    Translate Pages
-                </button>
-                <button id="openMigrationBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
-                    <i class="fas fa-exchange-alt"></i>
-                    Migrate User Data
-                </button>
-            </div>
         </div>
 
         <div class="mb-6 flex items-center space-x-4">
@@ -1866,77 +2177,144 @@
         <div id="buttonGrid" class="grid grid-cols-10 auto-rows-auto gap-2 p-2 border border-gray-300 rounded-md bg-gray-100 overflow-x-auto min-h-[500px]">
             <!-- Visual buttons will be rendered here by JavaScript -->
         </div>
-    </main>
+                </div><!-- end pagebutton inner -->
+            </div><!-- end scan-section-pagebutton -->
 
-    <div id="translatePagesModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5100;">
-        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Translate Page Content</h3>
-                <button id="closeTranslatePagesModal" class="text-gray-400 hover:text-gray-600">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-
-            <div class="space-y-4">
-                <p class="text-sm text-gray-600">
+            <!-- Translate Pages Section -->
+            <div id="scan-section-translate" class="ss-section" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-language mr-2 text-blue-600"></i>Translate Pages
+                </h2>
+                <p class="text-sm text-gray-600 mb-6">
                     Translate page labels and button content while keeping internal page names and navigation links unchanged.
                 </p>
 
-                <div>
-                    <label for="translateScope" class="block text-sm font-medium text-gray-700">Translate Scope</label>
-                    <select id="translateScope" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                        <option value="current">Current page only</option>
-                        <option value="all">All pages</option>
-                        <option value="tap_boards">Tap boards only (AI prompts)</option>
-                    </select>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="translateSourceLocale" class="block text-sm font-medium text-gray-700">Translate From</label>
-                        <select id="translateSourceLocale" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></select>
+                <div class="max-w-2xl space-y-6">
+                    <!-- Translate Scope -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-list-check"></i> Translate Scope</div>
+                        <div class="srow" style="flex-direction:column; align-items:flex-start; gap:0.75rem;">
+                            <div style="width:100%; display:flex; justify-content:flex-end;">
+                                <button id="selectAllPagesBtn" type="button" class="px-3 py-1.5 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
+                                    Select All
+                                </button>
+                            </div>
+                            <div id="translateScopeList" class="w-full border border-gray-300 rounded-md bg-white overflow-y-auto" style="max-height:260px; min-height:120px; padding:0.5rem;">
+                                <!-- Page checkboxes populated by JS -->
+                                <div class="text-sm text-gray-400 p-2">Loading pages...</div>
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <label for="translateTargetLocale" class="block text-sm font-medium text-gray-700">Translate To</label>
-                        <select id="translateTargetLocale" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></select>
+
+                    <!-- Language -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-globe"></i> Language</div>
+                        <div class="srow">
+                            <div class="srow-meta">
+                                <span class="srow-label">Translate From</span>
+                            </div>
+                            <div class="srow-ctrl">
+                                <select id="translateSourceLocale" class="sselect"></select>
+                            </div>
+                        </div>
+                        <div class="srow">
+                            <div class="srow-meta">
+                                <span class="srow-label">Translate To</span>
+                            </div>
+                            <div class="srow-ctrl">
+                                <select id="translateTargetLocale" class="sselect"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fields -->
+                    <div class="sgroup">
+                        <div class="sgroup-header"><i class="fas fa-check-square"></i> Fields To Translate</div>
+                        <div class="srow">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input id="translateIncludeDisplayName" type="checkbox" checked>
+                                <span class="srow-label">Page display names</span>
+                            </label>
+                        </div>
+                        <div class="srow">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input id="translateIncludeButtonText" type="checkbox" checked>
+                                <span class="srow-label">Button labels</span>
+                            </label>
+                        </div>
+                        <div class="srow">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input id="translateIncludeSpeechPhrase" type="checkbox" checked>
+                                <span class="srow-label">Button announcements</span>
+                            </label>
+                        </div>
+                        <div class="srow">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input id="translateIncludeLlmQuery" type="checkbox">
+                                <span class="srow-label">Button AI query prompts</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="translatePagesStatus" class="hidden text-sm rounded-md px-3 py-2"></div>
+
+                    <div class="flex justify-end">
+                        <button id="runTranslatePagesBtn" type="button" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            Translate Now
+                        </button>
                     </div>
                 </div>
+            </div><!-- end scan-section-translate -->
 
-                <div>
-                    <span class="block text-sm font-medium text-gray-700 mb-2">Fields To Translate</span>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-700">
-                        <label class="flex items-center">
-                            <input id="translateIncludeDisplayName" type="checkbox" class="mr-2" checked>
-                            Page display names
-                        </label>
-                        <label class="flex items-center">
-                            <input id="translateIncludeButtonText" type="checkbox" class="mr-2" checked>
-                            Button labels
-                        </label>
-                        <label class="flex items-center">
-                            <input id="translateIncludeSpeechPhrase" type="checkbox" class="mr-2" checked>
-                            Button announcements
-                        </label>
-                        <label class="flex items-center">
-                            <input id="translateIncludeLlmQuery" type="checkbox" class="mr-2">
-                            Button AI query prompts
-                        </label>
+            <!-- Migrate User Data Section -->
+            <div id="scan-section-migrate" class="ss-section" style="padding:1.5rem 2rem 3rem;">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                    <i class="fas fa-exchange-alt mr-2 text-purple-600"></i>Migrate User Data
+                </h2>
+
+                <div id="migrationSectionContent">
+                    <!-- Source Selection -->
+                    <div id="migrationSourceSelection" class="max-w-2xl mx-auto">
+                        <h3 class="text-xl font-semibold mb-4">Select Migration Source</h3>
+                        <p class="text-gray-600 mb-6">Choose where you want to import user data from:</p>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button id="selectAccentSourceInline" class="p-6 border-2 border-gray-300 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all text-left">
+                                <div class="flex items-center gap-4 mb-3">
+                                    <div class="bg-purple-100 p-3 rounded-lg">
+                                        <i class="fas fa-file-import text-purple-600 text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold">Accent Device</h4>
+                                </div>
+                                <p class="text-sm text-gray-600">Import pages and buttons from an Accent .mti file</p>
+                            </button>
+
+                            <div class="p-6 border-2 border-gray-200 rounded-lg bg-gray-50 opacity-50 text-left">
+                                <div class="flex items-center gap-4 mb-3">
+                                    <div class="bg-gray-200 p-3 rounded-lg">
+                                        <i class="fas fa-ellipsis-h text-gray-400 text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold text-gray-400">Other Sources</h4>
+                                </div>
+                                <p class="text-sm text-gray-400">Coming soon...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Accent Migration Interface -->
+                    <div id="accentMigrationInterfaceInline" class="hidden" style="height:calc(100vh - 180px);">
+                        <div class="flex items-center mb-4">
+                            <button id="backToMigrationSourcesBtn" type="button" class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900">
+                                <i class="fas fa-arrow-left"></i> Back to source selection
+                            </button>
+                        </div>
+                        <iframe id="accentMigrationFrameInline" src="/accent_migration.html" class="w-full border-0 rounded-md" style="height:calc(100vh - 240px);"></iframe>
                     </div>
                 </div>
+            </div><!-- end scan-section-migrate -->
 
-                <div id="translatePagesStatus" class="hidden text-sm rounded-md px-3 py-2"></div>
-            </div>
-
-            <div class="mt-6 flex justify-end space-x-3">
-                <button id="cancelTranslatePagesBtn" type="button" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
-                    Cancel
-                </button>
-                <button id="runTranslatePagesBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    Translate Now
-                </button>
-            </div>
-        </div>
-    </div>
+        </div><!-- end ss-content -->
+    </div><!-- end scan-layout -->
 
     <!-- Button Editor Modal -->
     <div id="buttonEditorModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5000;">
@@ -2167,95 +2545,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Migration Modal -->
-    <div id="migrationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-2xl w-[95vw] h-[95vh] max-w-7xl flex flex-col">
-            <!-- Modal Header -->
-            <div class="flex justify-between items-center p-6 border-b">
-                <h2 class="text-2xl font-bold text-gray-800">Migrate User Data</h2>
-                <button id="closeMigrationModal" class="text-gray-500 hover:text-red-500 text-3xl font-bold">&times;</button>
-            </div>
-            
-            <!-- Modal Content -->
-            <div id="migrationContent" class="flex-1 overflow-y-auto p-6">
-                <!-- Source Selection Screen -->
-                <div id="sourceSelection" class="max-w-2xl mx-auto">
-                    <h3 class="text-xl font-semibold mb-4">Select Migration Source</h3>
-                    <p class="text-gray-600 mb-6">Choose where you want to import user data from:</p>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <!-- Accent Source -->
-                        <button id="selectAccentSource" class="p-6 border-2 border-gray-300 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all text-left">
-                            <div class="flex items-center gap-4 mb-3">
-                                <div class="bg-purple-100 p-3 rounded-lg">
-                                    <i class="fas fa-file-import text-purple-600 text-2xl"></i>
-                                </div>
-                                <h4 class="text-lg font-semibold">Accent Device</h4>
-                            </div>
-                            <p class="text-sm text-gray-600">Import pages and buttons from an Accent .mti file</p>
-                        </button>
-                        
-                        <!-- Future Sources (Disabled) -->
-                        <div class="p-6 border-2 border-gray-200 rounded-lg bg-gray-50 opacity-50 text-left">
-                            <div class="flex items-center gap-4 mb-3">
-                                <div class="bg-gray-200 p-3 rounded-lg">
-                                    <i class="fas fa-ellipsis-h text-gray-400 text-2xl"></i>
-                                </div>
-                                <h4 class="text-lg font-semibold text-gray-400">Other Sources</h4>
-                            </div>
-                            <p class="text-sm text-gray-400">Coming soon...</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Accent Migration Interface (Hidden by default) -->
-                <div id="accentMigrationInterface" class="hidden">
-                    <iframe id="accentMigrationFrame" src="/accent_migration.html" class="w-full h-full border-0" style="min-height: 70vh;"></iframe>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Migration Modal Logic
-        const migrationModal = document.getElementById('migrationModal');
-        const openMigrationBtn = document.getElementById('openMigrationBtn');
-        const closeMigrationModal = document.getElementById('closeMigrationModal');
-        const sourceSelection = document.getElementById('sourceSelection');
-        const accentMigrationInterface = document.getElementById('accentMigrationInterface');
-        const selectAccentSource = document.getElementById('selectAccentSource');
-        
-        openMigrationBtn.addEventListener('click', () => {
-            migrationModal.classList.remove('hidden');
-            // Reset to source selection
-            sourceSelection.classList.remove('hidden');
-            accentMigrationInterface.classList.add('hidden');
-        });
-        
-        closeMigrationModal.addEventListener('click', () => {
-            migrationModal.classList.add('hidden');
-        });
-        
-        selectAccentSource.addEventListener('click', () => {
-            sourceSelection.classList.add('hidden');
-            accentMigrationInterface.classList.remove('hidden');
-        });
-        
-        // Close on Escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !migrationModal.classList.contains('hidden')) {
-                migrationModal.classList.add('hidden');
-            }
-        });
-        
-        // Close on backdrop click
-        migrationModal.addEventListener('click', (e) => {
-            if (e.target === migrationModal) {
-                migrationModal.classList.add('hidden');
-            }
-        });
-    </script>
 
     <script>
         // Guide resumption logic for cross-page guides
@@ -2547,6 +2836,115 @@
                 }
             }, 500);
         });
+    </script>
+
+    <!-- settings panel now in scan-layout above -->
+    <script>
+    // ── Scan Interface Settings Panel ──────────────────────────────
+    (function() {
+        const layout   = document.getElementById('scan-layout');
+        const saveBtn  = document.getElementById('ss-save-btn');
+        const saveStatus = document.getElementById('ss-save-status');
+
+        layout.querySelectorAll('.ss-nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const target = item.dataset.ssTarget;
+                layout.querySelectorAll('.ss-nav-item').forEach(i => i.classList.remove('active'));
+                layout.querySelectorAll('.ss-section').forEach(s => s.classList.remove('active'));
+                item.classList.add('active');
+                document.getElementById(target).classList.add('active');
+                if (target === 'scan-section-translate' && typeof populateTranslateLocaleDropdowns === 'function') {
+                    populateTranslateLocaleDropdowns().catch(() => {});
+                }
+            });
+        });
+
+        async function getAuthHdrs() {
+            const token = sessionStorage.getItem('firebaseIdToken');
+            const userId = sessionStorage.getItem('currentAacUserId');
+            const adminTarget = sessionStorage.getItem('adminTargetAccountId');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            if (userId) headers['X-User-ID'] = userId;
+            if (adminTarget) headers['X-Admin-Target-Account'] = adminTarget;
+            return headers;
+        }
+
+        async function loadScanSettings() {
+            try {
+                const resp = await fetch('/api/settings', { headers: await getAuthHdrs() });
+                if (!resp.ok) return;
+                const s = await resp.json();
+                const el = id => document.getElementById(id);
+                if (el('ss-LLMOptions'))     el('ss-LLMOptions').value     = s.LLMOptions !== undefined ? s.LLMOptions : '';
+                if (el('ss-FreestyleOptions')) el('ss-FreestyleOptions').value = s.FreestyleOptions !== undefined ? s.FreestyleOptions : '';
+                if (el('ss-autoClean'))      el('ss-autoClean').checked    = s.autoClean || false;
+                if (el('ss-scanMode'))       el('ss-scanMode').value        = s.scanMode === 'step' ? 'step' : 'auto';
+                if (el('ss-scanDelay'))      el('ss-scanDelay').value       = s.scanDelay || '';
+                if (el('ss-scanLoopLimit'))  el('ss-scanLoopLimit').value   = s.scanLoopLimit !== undefined ? s.scanLoopLimit : 0;
+                if (el('ss-waitForSwitchToScan'))   el('ss-waitForSwitchToScan').checked   = s.waitForSwitchToScan || false;
+                if (el('ss-playWaitForSwitchChime')) el('ss-playWaitForSwitchChime').checked = s.playWaitForSwitchChime || false;
+                if (el('ss-ScanningOff'))    el('ss-ScanningOff').checked   = s.ScanningOff || false;
+                if (el('ss-SummaryOff'))     el('ss-SummaryOff').checked    = s.SummaryOff || false;
+                if (el('ss-enablePictograms')) el('ss-enablePictograms').checked = s.enablePictograms !== false;
+                if (el('ss-displaySplash'))  el('ss-displaySplash').checked  = s.displaySplash || false;
+                if (el('ss-displaySplashTime')) el('ss-displaySplashTime').value = s.displaySplashTime || 3000;
+            } catch (err) {
+                console.error('Failed to load scan settings:', err);
+            }
+        }
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                const el = id => document.getElementById(id);
+                const payload = {
+                    LLMOptions:           parseInt(el('ss-LLMOptions')?.value)     || 10,
+                    FreestyleOptions:     parseInt(el('ss-FreestyleOptions')?.value) || 20,
+                    autoClean:            el('ss-autoClean')?.checked || false,
+                    scanMode:             el('ss-scanMode')?.value || 'auto',
+                    scanDelay:            parseInt(el('ss-scanDelay')?.value) || 3500,
+                    scanLoopLimit:        parseInt(el('ss-scanLoopLimit')?.value) || 0,
+                    waitForSwitchToScan:  el('ss-waitForSwitchToScan')?.checked || false,
+                    playWaitForSwitchChime: el('ss-playWaitForSwitchChime')?.checked || false,
+                    ScanningOff:          el('ss-ScanningOff')?.checked || false,
+                    SummaryOff:           el('ss-SummaryOff')?.checked || false,
+                    enablePictograms:     el('ss-enablePictograms')?.checked !== false,
+                    displaySplash:        el('ss-displaySplash')?.checked || false,
+                    displaySplashTime:    parseInt(el('ss-displaySplashTime')?.value) || 3000,
+                };
+                try {
+                    saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving…';
+                    const resp = await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: await getAuthHdrs(),
+                        body: JSON.stringify(payload),
+                    });
+                    showSsSaveStatus(resp.ok ? 'Settings saved.' : 'Save failed. Please try again.', resp.ok ? 'green' : 'red');
+                } catch (err) {
+                    showSsSaveStatus('Error saving settings.', 'red');
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Save Settings';
+                }
+            });
+        }
+
+        function showSsSaveStatus(msg, color) {
+            if (!saveStatus) return;
+            saveStatus.textContent = msg;
+            saveStatus.className = `mt-2 text-sm text-${color}-600`;
+            saveStatus.classList.remove('hidden');
+            setTimeout(() => saveStatus.classList.add('hidden'), 3000);
+        }
+
+        // Auto-load settings once auth is ready
+        if (window.adminContextInitializedByInlineScript) {
+            loadScanSettings();
+        } else {
+            document.addEventListener('adminUserContextReady', loadScanSettings, { once: true });
+        }
+    })();
     </script>
 
 </body>

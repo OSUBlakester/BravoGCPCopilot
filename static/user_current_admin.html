@@ -458,6 +458,7 @@
                                                 <p class="text-sm font-semibold text-purple-900 mb-1">Features:</p>
                                                 <ul class="text-xs text-gray-700 ml-4 space-y-1">
                                                     <li>• <strong>Load Favorite:</strong> Instantly populate Location, People, Activity, and Discussion Context fields</li>
+                                                    <li>• <strong>Open Thread:</strong> Opens a linked discussion thread associated with the selected favorite (enabled only when the favorite has a thread)</li>
                                                     <li>• <strong>Add to Favorites:</strong> Save current form values and discussion context as a new favorite with optional scheduling</li>
                                                     <li>• <strong>Important:</strong> After loading a Favorite, update Focus Pages or Chapters and Discussion Narrative as needed for the current assignment</li>
                                                     <li>• <strong>Manage Favorites:</strong> Edit names, view/edit schedules, or delete saved favorites</li>
@@ -492,6 +493,7 @@
                                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
                                                 <ul class="text-xs text-gray-700 ml-4 space-y-1">
                                                     <li>• <strong>Location:</strong> Where the user is right now (e.g., "Home", "School", "Grandma's house")</li>
+                                                    <li>• <strong>Location Language Override:</strong> Override the default partner language for this location. Choose from languages configured in Admin Settings, or leave blank to use the default.</li>
                                                     <li>• <strong>People Present:</strong> Who is with the user (e.g., "Mom and Dad", "Teacher Ms. Smith", "Friends")</li>
                                                     <li>• <strong>Activity:</strong> What the user is doing (e.g., "Playing outside", "Eating lunch", "Doing homework")</li>
                                                     <li>• <strong>Book Title or Subject:</strong> What is being discussed (e.g., "A Forgery of Fate" or "Civil War")</li>
@@ -528,6 +530,7 @@
                                                 <p class="text-sm font-semibold text-green-900 mb-1">Actions:</p>
                                                 <ul class="text-xs text-gray-700 ml-4 space-y-1">
                                                     <li>• <strong>Start Dictation:</strong> Use voice input to fill Location, People, and Activity. Speak in format: "Location: [place], People: [names], Activity: [what doing]"</li>
+                                                    <li>• <strong>Clear:</strong> Clears all fields in the form, resetting Location, People, Activity, and all Discussion Context fields.</li>
                                                     <li>• <strong>Save:</strong> Save current location plus optional discussion context fields to update AI context.</li>
                                                 </ul>
                                             </div>
@@ -577,7 +580,7 @@
             </div>
             
             <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
-                <button id="contact-support-btn" class="text-sm text-[#FB4F14] hover:text-orange-600 transition-colors flex items-center">
+                <button id="contact-support-btn" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
                     <i class="fas fa-envelope mr-2"></i>Contact Support
                 </button>
                 <button id="close-help-modal-footer" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
@@ -599,6 +602,10 @@
             <div class="p-6">
                 <form id="contact-form">
                     <div class="space-y-4">
+                        <div>
+                            <label for="contact-name" class="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
+                            <input type="text" id="contact-name" name="name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                        </div>
                         <div>
                             <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-1">Your Email</label>
                             <input type="email" id="contact-email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
@@ -708,6 +715,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        name: document.getElementById('contact-name').value.trim(),
                         email: document.getElementById('contact-email').value.trim(),
                         message: document.getElementById('contact-message').value.trim(),
                     })
@@ -763,6 +771,22 @@
                     }
                 },
                 {
+                    title: 'Open Thread Button',
+                    content: 'Opens a discussion thread linked to the selected favorite. This button is only enabled when the chosen favorite has an associated thread. Use it to quickly jump into the relevant conversation context.',
+                    highlight: '#openThreadBtn',
+                    action: function() {
+                        const btn = document.getElementById('openThreadBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('openThreadBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
                     title: 'Add to Favorites',
                     content: 'Save current form values as a new favorite, including optional discussion context fields. You can also add an optional schedule.',
                     highlight: '#addToFavoritesBtn',
@@ -813,6 +837,22 @@
                     },
                     cleanup: function() {
                         const input = document.getElementById('location');
+                        if (input) input.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Location Language Override',
+                    content: 'Optionally override the partner language for this location. Select a language from the list (populated from your Admin Settings allowed override languages) to use a different language at this location. Leave blank to keep the default partner language.',
+                    highlight: '#locationLanguageOverride',
+                    action: function() {
+                        const input = document.getElementById('locationLanguageOverride');
+                        if (input) {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const input = document.getElementById('locationLanguageOverride');
                         if (input) input.classList.remove('guide-highlight-target');
                     }
                 },
@@ -899,6 +939,22 @@
                     },
                     cleanup: function() {
                         const btn = document.getElementById('dictationButton');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Clear Button',
+                    content: 'Resets all fields in the form — Location, People Present, Activity, and all Discussion Context fields — back to empty. Use this to start fresh without having to manually erase each field.',
+                    highlight: '#clearButton',
+                    action: function() {
+                        const btn = document.getElementById('clearButton');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('clearButton');
                         if (btn) btn.classList.remove('guide-highlight-target');
                     }
                 },
