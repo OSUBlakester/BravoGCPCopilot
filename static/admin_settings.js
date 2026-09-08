@@ -1245,20 +1245,19 @@ async function handleImportProfileSettingsFileSelection(event) {
  * Saves global settings to the backend.
  */
 async function saveSettings() {
-    const newDelay = scanDelayInput.value;
+    const newDelay = scanDelayInput ? scanDelayInput.value : '3500';
     const newInterjection = wakeWordInterjectionInput.value.trim();
     const newName = wakeWordNameInput.value.trim();
     const newCountryCode = CountryCodeInput.value.trim();
     const newSpeechRate = speechRateInput.value; // Get speech rate value
     const newApplicationVolume = applicationVolumeSlider ? parseInt(applicationVolumeSlider.value) : 8;
-    const newLLMOptions = LLMOptionsInput.value; 
-    const newFreestyleOptions = FreestyleOptionsInput.value;
-    console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
+    const newLLMOptions = LLMOptionsInput ? LLMOptionsInput.value : '10';
+    const newFreestyleOptions = FreestyleOptionsInput ? FreestyleOptionsInput.value : '20';
     const newTapWordsRows = tapWordsRowsInput ? tapWordsRowsInput.value : '';
     const newTapPhrasesRows = '0';
     const newTapDynamicRows = tapDynamicRowsInput ? (tapDynamicRowsInput.checked ? 1 : 0) : 0;
     const newUseHybridPages = newTapDynamicRows > 0;
-    const newScanLoopLimit = scanLoopLimitInput.value;
+    const newScanLoopLimit = scanLoopLimitInput ? scanLoopLimitInput.value : '0';
     const newScanMode = scanModeInput ? scanModeInput.value : 'auto';
     
     // Determine Interface Mode
@@ -1271,10 +1270,10 @@ async function saveSettings() {
     }
 
     // const newScanningOff = ScanningOffInput.checked; // Removed from UI
-    const newSummaryOff = SummaryOffInput.checked;
-    const newAutoClean = autoCleanInput.checked;
-    const newDisplaySplash = displaySplashInput.checked;
-    const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
+    const newSummaryOff = SummaryOffInput ? SummaryOffInput.checked : false;
+    const newAutoClean = autoCleanInput ? autoCleanInput.checked : false;
+    const newDisplaySplash = displaySplashInput ? displaySplashInput.checked : false;
+    const newDisplaySplashTime = (displaySplashTimeInput && displaySplashTimeInput.value) ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
     // const newUseTapInterface = useTapInterfaceInput.checked; // Removed from UI
     const newEnablePictograms = enablePictogramsInput ? enablePictogramsInput.checked : true;
@@ -1282,8 +1281,8 @@ async function saveSettings() {
     const newScanningOff = ScanningOffInput ? ScanningOffInput.checked : false;
     const newWaitForSwitchToScan = waitForSwitchToScanInput ? waitForSwitchToScanInput.checked : false;
     const newPlayWaitForSwitchChime = playWaitForSwitchChimeInput ? playWaitForSwitchChimeInput.checked : false;
-    const newEnableSightWords = enableSightWordsInput.checked;
-    const newSightWordGradeLevel = sightWordGradeLevelInput.value;
+    const newEnableSightWords = enableSightWordsInput ? enableSightWordsInput.checked : true;
+    const newSightWordGradeLevel = sightWordGradeLevelInput ? sightWordGradeLevelInput.value : 'pre_k';
     // Keep legacy selected_tts_voice_name aligned to the default partner voice.
     const newSelectedTtsVoice = defaultPartnerVoiceSelect
         ? defaultPartnerVoiceSelect.value
@@ -1318,7 +1317,7 @@ async function saveSettings() {
         - newGridColumns (parsed): ${newGridColumns}`);
 
     // Validation
-    if (!newDelay || isNaN(parseInt(newDelay)) || parseInt(newDelay) < 100) {
+    if (scanDelayInput && (!newDelay || isNaN(parseInt(newDelay)) || parseInt(newDelay) < 100)) {
          settingsStatus.textContent = 'Invalid delay value. Must be >= 100 ms.';
          settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
@@ -1338,28 +1337,28 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Speech Rate. Must be a number (e.g., 50-400).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-      if (newLLMOptions === '' || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 0 || parseInt(newLLMOptions) > 50) {
+    if (LLMOptionsInput && (newLLMOptions === '' || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 0 || parseInt(newLLMOptions) > 50)) {
           settingsStatus.textContent = 'Invalid LLM Options. Must be a number (e.g., 0-50).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-     if (newFreestyleOptions !== '' && (isNaN(parseInt(newFreestyleOptions)) || parseInt(newFreestyleOptions) < 1 || parseInt(newFreestyleOptions) > 50)) {
+    if (FreestyleOptionsInput && newFreestyleOptions !== '' && (isNaN(parseInt(newFreestyleOptions)) || parseInt(newFreestyleOptions) < 1 || parseInt(newFreestyleOptions) > 50)) {
         settingsStatus.textContent = 'Invalid Freestyle Options. Must be a number (e.g., 1-50).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (newTapWordsRows !== '' && (isNaN(parseInt(newTapWordsRows)) || parseInt(newTapWordsRows) < 1 || parseInt(newTapWordsRows) > 10)) {
+    if (tapWordsRowsInput && newTapWordsRows !== '' && (isNaN(parseInt(newTapWordsRows)) || parseInt(newTapWordsRows) < 1 || parseInt(newTapWordsRows) > 10)) {
         settingsStatus.textContent = 'Invalid Tap Words Rows. Must be a number between 1 and 10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (newScanLoopLimit !== '' && (isNaN(parseInt(newScanLoopLimit)) || parseInt(newScanLoopLimit) < 0 || parseInt(newScanLoopLimit) > 10)) {
+    if (scanLoopLimitInput && newScanLoopLimit !== '' && (isNaN(parseInt(newScanLoopLimit)) || parseInt(newScanLoopLimit) < 0 || parseInt(newScanLoopLimit) > 10)) {
         settingsStatus.textContent = 'Invalid Scan Loop Limit. Must be 0 (unlimited) or 1-10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (!['auto', 'step'].includes(newScanMode)) {
+    if (scanModeInput && !['auto', 'step'].includes(newScanMode)) {
         settingsStatus.textContent = 'Invalid Scanning Mode. Must be Auto or Step.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
     // Validate gridColumns
-    if (newGridColumns < 2 || newGridColumns > 18) {
+    if (gridColumnsSlider && (newGridColumns < 2 || newGridColumns > 18)) {
         settingsStatus.textContent = 'Invalid Button Size. Must be between 2 and 18.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
@@ -1385,33 +1384,13 @@ async function saveSettings() {
     // Remove the old LLM model validation
 
     const settingsToSave = {
-        scanDelay: parseInt(newDelay),
         wakeWordInterjection: newInterjection,
         wakeWordName: newName,
         CountryCode: newCountryCode,
         speech_rate: parseInt(newSpeechRate),
         applicationVolume: newApplicationVolume,
-        LLMOptions: parseInt(newLLMOptions),
-        FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
-        tapWordsRows: newTapWordsRows !== '' ? parseInt(newTapWordsRows) : 4,
-        tapPhrasesRows: newTapPhrasesRows !== '' ? parseInt(newTapPhrasesRows) : 0,
-        useHybridPages: newUseHybridPages,
-        tapDynamicRows: newTapDynamicRows,
-        scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
-        scanMode: newScanMode,
-        ScanningOff: newScanningOff,    
-        waitForSwitchToScan: newWaitForSwitchToScan,
-        playWaitForSwitchChime: newPlayWaitForSwitchChime,
-        SummaryOff: newSummaryOff,
-        autoClean: newAutoClean,
-        displaySplash: newDisplaySplash,
-        displaySplashTime: newDisplaySplashTime,
         enableMoodSelection: newEnableMoodSelection,
         useTapInterface: newUseTapInterface,
-        enablePictograms: newEnablePictograms,
-        disableTapPictograms: newDisableTapPictograms,
-        enableSightWords: newEnableSightWords,
-        sightWordGradeLevel: newSightWordGradeLevel,
         selected_tts_voice_name: newDefaultPartnerVoice,
         userLanguage: newUserLanguage,
         defaultPartnerLanguage: newDefaultPartnerLanguage,
@@ -1419,10 +1398,27 @@ async function saveSettings() {
         voice_style: newVoiceStyle,
         locationOverrideLanguages: newLocationOverrideLanguages,
         locationOverrideVoices: newLocationOverrideVoices,
-        gridColumns: newGridColumns, // Add gridColumns to save payload
-        spellLetterOrder: newSpellLetterOrder, // Add spell letter order setting
-        vocabularyLevel: newVocabularyLevel, // Add vocabulary level setting
-        mascot: newMascot
+        spellLetterOrder: newSpellLetterOrder,
+        vocabularyLevel: newVocabularyLevel,
+        mascot: newMascot,
+        // Only include tap settings when those elements exist in this page's UI
+        ...(scanDelayInput     ? { scanDelay: parseInt(newDelay) } : {}),
+        ...(LLMOptionsInput    ? { LLMOptions: parseInt(newLLMOptions) } : {}),
+        ...(FreestyleOptionsInput ? { FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null } : {}),
+        ...(tapWordsRowsInput  ? { tapWordsRows: newTapWordsRows !== '' ? parseInt(newTapWordsRows) : 4, tapPhrasesRows: 0, useHybridPages: newUseHybridPages, tapDynamicRows: newTapDynamicRows } : {}),
+        ...(scanLoopLimitInput ? { scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0 } : {}),
+        ...(scanModeInput      ? { scanMode: newScanMode } : {}),
+        ...(ScanningOffInput   ? { ScanningOff: newScanningOff } : {}),
+        ...(waitForSwitchToScanInput ? { waitForSwitchToScan: newWaitForSwitchToScan } : {}),
+        ...(playWaitForSwitchChimeInput ? { playWaitForSwitchChime: newPlayWaitForSwitchChime } : {}),
+        ...(SummaryOffInput    ? { SummaryOff: newSummaryOff } : {}),
+        ...(autoCleanInput     ? { autoClean: newAutoClean } : {}),
+        ...(displaySplashInput ? { displaySplash: newDisplaySplash, displaySplashTime: newDisplaySplashTime } : {}),
+        ...(enablePictogramsInput ? { enablePictograms: newEnablePictograms } : {}),
+        ...(disableTapPictogramsInput ? { disableTapPictograms: newDisableTapPictograms } : {}),
+        ...(enableSightWordsInput ? { enableSightWords: newEnableSightWords } : {}),
+        ...(sightWordGradeLevelInput ? { sightWordGradeLevel: newSightWordGradeLevel } : {}),
+        ...(gridColumnsSlider  ? { gridColumns: newGridColumns } : {}),
     };
     console.log('DEBUG FreestyleOptions - Payload value:', settingsToSave.FreestyleOptions);
     console.log('DEBUG enablePictograms - Payload value:', settingsToSave.enablePictograms);

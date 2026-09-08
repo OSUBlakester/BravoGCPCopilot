@@ -226,19 +226,58 @@
     
     @keyframes pulse-highlight {
         0%, 100% {
-            box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+            box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+            border-color: #FB4F14;
         }
         50% {
-            box-shadow: 0 0 0 15px rgba(102, 126, 234, 0);
+            box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+            border-color: #F97316;
         }
     }
-    
+
     .guide-highlight-target {
-        animation: pulse-highlight 2s infinite;
-        border-radius: 8px;
+        animation: pulse-highlight 2s ease-in-out infinite;
         position: relative;
         z-index: 1000;
+        border: 3px solid #FB4F14 !important;
+        border-radius: 8px !important;
     }
+
+    /* ── Sidebar nav layout ──────────────────────────────────── */
+    .settings-layout { display: flex; min-height: calc(100vh - 56px); }
+    .settings-nav {
+        width: 220px; flex-shrink: 0; position: sticky; top: 56px;
+        align-self: flex-start; height: calc(100vh - 56px); overflow-y: auto;
+        background: white; border-right: 1px solid #e5e7eb;
+        box-shadow: 2px 0 8px rgba(0,0,0,0.06); padding: 0.75rem 0; z-index: 10;
+    }
+    .settings-nav-label { padding: 0.4rem 1.25rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; }
+    .settings-nav-item { display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 1.25rem; cursor: pointer; border-left: 3px solid transparent; transition: all 0.15s; color: #4b5563; font-size: 0.82rem; font-weight: 500; }
+    .settings-nav-item:hover { background: #f9fafb; color: #111827; }
+    .settings-nav-item.active { background: #eff6ff; border-left-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+    .settings-nav-item .nav-icon { width: 1.25rem; text-align: center; flex-shrink: 0; font-size: 0.9rem; }
+    .settings-content { flex: 1; padding: 1.5rem 2rem 3rem; min-width: 0; }
+    .settings-section { display: none; }
+    .settings-section.active { display: block; }
+    /* ── Setting groups & rows ──────────────────────────────── */
+    .sgroup { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.625rem; overflow: hidden; margin-bottom: 1rem; }
+    .sgroup-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1rem; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; }
+    .srow { display: flex; align-items: center; gap: 1.5rem; padding: 0.8rem 1rem; border-bottom: 1px solid #f3f4f6; min-height: 58px; background: white; }
+    .srow:last-child { border-bottom: none; }
+    .srow-meta { flex: 1; min-width: 0; }
+    .srow-label { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; display: block; }
+    .srow-desc { font-size: 0.72rem; color: #6b7280; margin-top: 0.15rem; line-height: 1.4; display: block; }
+    .srow-ctrl { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; }
+    .tog { position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer; flex-shrink: 0; }
+    .tog input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .tog-slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 12px; transition: background 0.18s; }
+    .tog-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.18); transition: transform 0.18s; }
+    .tog input:checked + .tog-slider { background: #3b82f6; }
+    .tog input:checked + .tog-slider::before { transform: translateX(20px); }
+    .sinput { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; }
+    .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+    .sselect { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 2rem 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background-color: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; min-width: 180px; }
+    .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
 
     </style>
 </head>
@@ -364,135 +403,183 @@
         </div>
     </div>
 
-    <div class="container mx-auto mt-6 p-4 space-y-6">
-
-        <!-- COPPA Consent Banner -->
-        <div id="coppa-consent-banner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-5">
-            <div class="flex items-start gap-3">
-                <i class="fas fa-exclamation-triangle text-amber-600 mt-1 text-lg flex-shrink-0"></i>
-                <div class="flex-1">
-                    <p class="font-semibold text-amber-800 mb-1">Parental consent required</p>
-                    <p class="text-sm text-amber-700 mb-3">This profile is marked as under 13. Personalized learning and activity reporting are locked until a parent or guardian verifies consent by clicking the link in the email.</p>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <input type="email" id="coppa-consent-email" placeholder="parent@example.com"
-                               class="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400 w-64">
-                        <button type="button" id="coppa-send-consent-btn"
-                                class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
-                            Send Consent Email
-                        </button>
-                        <button type="button" id="coppa-check-consent-btn"
-                                class="bg-white border border-amber-400 hover:bg-amber-50 text-amber-800 text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
-                            Check for Consent
-                        </button>
-                    </div>
-                    <p id="coppa-consent-status" class="text-xs mt-2 hidden"></p>
-                </div>
+    <div class="settings-layout">
+        <nav class="settings-nav" id="settings-sidebar">
+            <div class="settings-nav-label">User Info</div>
+            <div class="settings-nav-item active" data-target="section-personalization">
+                <i class="fas fa-sliders-h nav-icon" style="color:#4f46e5"></i><span>Personalization</span>
             </div>
-        </div>
+            <div class="settings-nav-item" data-target="section-mood">
+                <i class="fas fa-smile nav-icon" style="color:#2563eb"></i><span>Current Mood</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-profile">
+                <i class="fas fa-user nav-icon" style="color:#16a34a"></i><span>User Profile</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-history">
+                <i class="fas fa-robot nav-icon" style="color:#9333ea"></i><span>Learning &amp; History</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-family">
+                <i class="fas fa-users nav-icon" style="color:#ea580c"></i><span>Family &amp; Friends</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-images">
+                <i class="fas fa-images nav-icon" style="color:#0891b2"></i><span>Custom Images</span>
+            </div>
+        </nav>
+        <div class="settings-content">
 
-        <!-- Feature Flags / Personalization Settings -->
-        <div id="feature-flags-panel" class="bg-indigo-50 p-6 rounded-lg shadow-lg border-l-4 border-indigo-500">
-            <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">
-                <i class="fas fa-sliders-h mr-3 text-indigo-600"></i>Personalization Settings
+        <!-- ── SECTION: Personalization ── -->
+        <div id="section-personalization" class="settings-section active">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-sliders-h text-indigo-600"></i>Personalization Settings
             </h2>
+
             <div id="flags-loading" class="text-gray-500 italic text-sm">Loading settings…</div>
-            <div id="flags-content" class="hidden space-y-5">
+            <div id="flags-content" class="hidden">
 
-                <!-- is_minor_under_13 -->
-                <div class="flex items-start gap-4">
-                    <div class="flex-1">
-                        <div class="font-semibold text-gray-800">Age Group</div>
-                        <p class="text-sm text-gray-600">Whether this user is under 13. Determines COPPA consent requirements for personalized learning.</p>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-child"></i> Privacy &amp; Compliance</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Age Group</span>
+                            <span class="srow-desc">Whether this user is under 13 — determines COPPA consent requirements for personalized learning</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <select id="flag-age-group" class="sselect">
+                                <option value="null">Not set / unknown</option>
+                                <option value="minor">Under 13</option>
+                                <option value="adult">13 or older</option>
+                            </select>
+                        </div>
                     </div>
-                    <select id="flag-age-group"
-                            class="mt-1 flex-shrink-0 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
-                        <option value="null">Not set / unknown</option>
-                        <option value="minor">Under 13</option>
-                        <option value="adult">13 or older</option>
-                    </select>
                 </div>
 
-                <!-- use_entered_details -->
-                <div class="flex items-start gap-4">
-                    <div class="flex-1">
-                        <div class="font-semibold text-gray-800">Use Entered Details</div>
-                        <p class="text-sm text-gray-600">When enabled, the profile narrative and People data are used to personalise AI responses.</p>
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-brain"></i> AI Personalization</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Use Entered Details</span>
+                            <span class="srow-desc">When enabled, the profile narrative and People data are used to personalise AI responses</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <label class="tog">
+                                <input type="checkbox" id="flag-use-entered-details" class="sr-only peer">
+                                <span class="tog-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="relative inline-flex items-center cursor-pointer mt-1 flex-shrink-0">
-                        <input type="checkbox" id="flag-use-entered-details" class="sr-only peer">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                    </label>
-                </div>
-
-                <!-- learn_from_history -->
-                <div class="flex items-start gap-4">
-                    <div class="flex-1">
-                        <div class="font-semibold text-gray-800">Learn from History</div>
-                        <p class="text-sm text-gray-600">When enabled, Bravo analyses conversations to learn and remember user preferences automatically.</p>
-                        <!-- auto_approve sub-option, visible only when learn_from_history is on -->
-                        <div id="flag-auto-approve-row" class="hidden mt-3 ml-4 pl-4 border-l-2 border-indigo-200">
-                            <div class="flex items-center gap-3">
-                                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                                    <input type="checkbox" id="flag-auto-approve" class="sr-only peer">
-                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
-                                </label>
-                                <div>
-                                    <div class="text-sm font-semibold text-gray-700">Auto-approve Learned Facts</div>
-                                    <p class="text-xs text-gray-500">Skip the approval queue — facts are applied to the profile immediately.</p>
+                    <div class="srow" style="align-items:flex-start; padding-top:0.9rem; padding-bottom:0.9rem;">
+                        <div class="srow-meta">
+                            <span class="srow-label">Learn from History</span>
+                            <span class="srow-desc">When enabled, Bravo analyses conversations to learn and remember user preferences automatically</span>
+                            <div id="flag-auto-approve-row" class="hidden mt-3 ml-0 pl-3 border-l-2 border-indigo-200">
+                                <div class="flex items-center gap-3">
+                                    <label class="tog" style="width:36px; height:20px;">
+                                        <input type="checkbox" id="flag-auto-approve" class="sr-only peer">
+                                        <span class="tog-slider" style="border-radius:10px;"></span>
+                                    </label>
+                                    <div>
+                                        <div class="text-sm font-semibold text-gray-700">Auto-approve Learned Facts</div>
+                                        <p class="text-xs text-gray-500">Skip the approval queue — facts are applied to the profile immediately.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                        <div class="srow-ctrl" style="margin-top:2px;">
+                            <label class="tog">
+                                <input type="checkbox" id="flag-learn-from-history" class="sr-only peer">
+                                <span class="tog-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="relative inline-flex items-center cursor-pointer mt-1 flex-shrink-0">
-                        <input type="checkbox" id="flag-learn-from-history" class="sr-only peer">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                    </label>
                 </div>
 
-                <div class="flex items-center gap-4 pt-1">
+                <div class="flex items-center gap-4 mt-2 mb-4">
                     <button type="button" id="flags-save-btn"
                             class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-5 py-2 rounded-md shadow-sm transition-colors duration-150">
-                        Save
+                        Save Personalization
                     </button>
                     <div id="flags-save-status" class="text-sm h-4"></div>
                 </div>
-                <div class="pt-3 border-t mt-2">
-                    <button type="button" id="download-my-data-btn"
-                            class="flex items-center gap-2 text-sm text-indigo-700 hover:text-indigo-900 font-medium underline underline-offset-2">
-                        <i class="fas fa-download text-xs"></i>Download a full copy of this user's data
-                    </button>
-                    <p class="text-xs text-gray-500 mt-1">Includes narrative, learned facts, interview answers, chat history, activity log, and consent record.</p>
-                </div>
-            </div>
-        </div>
 
-        <!-- Current Mood Section -->
-        <div class="bg-blue-50 p-6 rounded-lg shadow-lg border-l-4 border-blue-500">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2 flex items-center">
-                <i class="fas fa-smile mr-3 text-blue-600"></i>Current Mood
+                <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-download"></i> Data Export</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Download User Data</span>
+                            <span class="srow-desc">Includes narrative, learned facts, interview answers, chat history, activity log, and consent record</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <button type="button" id="download-my-data-btn"
+                                    class="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-700 text-sm font-semibold px-4 py-2 rounded-md transition-colors">
+                                <i class="fas fa-download text-xs"></i>Download
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div><!-- /#section-personalization -->
+
+        <!-- ── SECTION: Current Mood ── -->
+        <div id="section-mood" class="settings-section">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-smile text-blue-600"></i>Current Mood
             </h2>
-            <div class="space-y-4">
-                <div>
-                    <label for="currentMood" class="block text-lg font-medium text-gray-700 mb-2">Current Session Mood</label>
-                    <select id="currentMood" name="currentMood" class="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <option value="">No mood selected</option>
-                        <!-- Mood options will be populated dynamically -->
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Set the current mood to personalize AI responses. This affects how the assistant interacts with you.</p>
-                </div>
-                <div class="flex space-x-3">
-                    <button type="button" id="saveMoodBtn" class="button-primary">
-                        <i class="fas fa-save mr-2"></i>Save Mood
-                    </button>
-                    <button type="button" id="clearMoodBtn" class="button-secondary">
-                        <i class="fas fa-times mr-2"></i>Clear Mood
-                    </button>
-                    <span id="mood-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
+
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-heart"></i> Session Mood</div>
+                <div class="srow" style="align-items:flex-start; padding-top:0.9rem; padding-bottom:0.9rem;">
+                    <div class="srow-meta">
+                        <span class="srow-label">Current Session Mood</span>
+                        <span class="srow-desc">Set the current mood to personalize AI responses. This affects how Bravo interacts during this session.</span>
+                    </div>
+                    <div class="srow-ctrl" style="flex-direction:column; align-items:flex-end; gap:0.5rem;">
+                        <select id="currentMood" name="currentMood" class="sselect" style="min-width:200px;">
+                            <option value="">No mood selected</option>
+                        </select>
+                        <div class="flex gap-2 mt-1">
+                            <button type="button" id="saveMoodBtn" class="inline-flex items-center px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-md transition-colors">
+                                <i class="fas fa-save mr-1.5"></i>Save
+                            </button>
+                            <button type="button" id="clearMoodBtn" class="inline-flex items-center px-4 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-semibold rounded-md transition-colors">
+                                <i class="fas fa-times mr-1.5"></i>Clear
+                            </button>
+                        </div>
+                        <span id="mood-save-status" class="text-xs text-green-600 h-4 inline-block"></span>
+                    </div>
                 </div>
             </div>
-        </div>
+        </div><!-- /#section-mood -->
 
-        <div class="bg-white p-6 rounded-lg shadow-lg">
+        <!-- ── SECTION: User Profile ── -->
+        <div id="section-profile" class="settings-section">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-user text-green-600"></i>User Profile
+            </h2>
+
+            <!-- COPPA Consent Banner -->
+            <div id="coppa-consent-banner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-5 mb-6">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-exclamation-triangle text-amber-600 mt-1 text-lg flex-shrink-0"></i>
+                    <div class="flex-1">
+                        <p class="font-semibold text-amber-800 mb-1">Parental consent required</p>
+                        <p class="text-sm text-amber-700 mb-3">This profile is marked as under 13. Personalized learning and activity reporting are locked until a parent or guardian verifies consent by clicking the link in the email.</p>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <input type="email" id="coppa-consent-email" placeholder="parent@example.com"
+                                   class="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400 w-64">
+                            <button type="button" id="coppa-send-consent-btn"
+                                    class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                                Send Consent Email
+                            </button>
+                            <button type="button" id="coppa-check-consent-btn"
+                                    class="bg-white border border-amber-400 hover:bg-amber-50 text-amber-800 text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                                Check for Consent
+                            </button>
+                        </div>
+                        <p id="coppa-consent-status" class="text-xs mt-2 hidden"></p>
+                    </div>
+                </div>
+            </div>
 
             <!-- Gated by use_entered_details flag -->
             <div id="use-entered-content">
@@ -598,7 +685,15 @@
                         <span id="info-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
                     </div>
                 </form>
-            </div>
+            </div><!-- /use-entered-content -->
+
+        </div><!-- /#section-profile -->
+
+        <!-- ── SECTION: Learning & History ── -->
+        <div id="section-history" class="settings-section">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-robot text-purple-600"></i>Learning &amp; History
+            </h2>
 
             <!-- Gated by learn_from_history flag -->
             <div id="learn-history-content">
@@ -682,9 +777,15 @@
 
             </div><!-- /learn-history-content -->
 
-        </div>
+        </div><!-- /#section-history -->
 
-        <div id="friends-family-panel" class="bg-white p-6 rounded-lg shadow-lg">
+        <!-- ── SECTION: Family & Friends ── -->
+        <div id="section-family" class="settings-section">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-users text-orange-600"></i>Family &amp; Friends
+            </h2>
+
+        <div id="friends-family-panel">
             <div class="flex justify-between items-center mb-6 border-b pb-2">
                 <h2 class="text-2xl font-bold text-gray-800">Family & Friends</h2>
                 <button type="button" id="manageRelationshipsBtn" class="button-secondary">
@@ -752,14 +853,17 @@
                  </button>
                  <span id="friends-family-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
              </div>
-        </div>
+        </div><!-- /#friends-family-panel -->
 
-    </div>
+        </div><!-- /#section-family -->
 
-    <!-- Custom Images Section -->
-    <div class="bg-white p-6 rounded-lg shadow-lg mt-6">
+        <!-- ── SECTION: Custom Images ── -->
+        <div id="section-images" class="settings-section">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-images text-cyan-600"></i>Custom Images
+            </h2>
+
         <div class="flex justify-between items-center mb-6 border-b pb-2">
-            <h2 class="text-2xl font-bold text-gray-800">Custom Images</h2>
             <div class="flex space-x-2">
                 <button type="button" id="refreshCustomImagesBtn" class="button-secondary">
                     <i class="fas fa-sync mr-2"></i> Refresh
@@ -824,9 +928,11 @@
         <div class="mt-6">
             <span id="custom-images-status" class="text-sm text-green-600 h-4 inline-block"></span>
         </div>
-    </div>
 
-    </div> 
+        </div><!-- /#section-images -->
+
+        </div><!-- /.settings-content -->
+    </div><!-- /.settings-layout -->
 
     <!-- Relationship Management Modal -->
     <div id="relationshipModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
@@ -1135,6 +1241,41 @@
         document.addEventListener('DOMContentLoaded', function() {
             initializeFirebaseAndAuth();
         });
+    </script>
+
+    <!-- Sidebar Navigation -->
+    <script>
+    (function () {
+        var SECTIONS = ['section-personalization','section-mood','section-profile',
+            'section-history','section-family','section-images'];
+
+        function showSection(id) {
+            if (!SECTIONS.includes(id)) return;
+            SECTIONS.forEach(function(sid) {
+                var el = document.getElementById(sid);
+                if (el) el.classList.toggle('active', sid === id);
+            });
+            document.querySelectorAll('.settings-nav-item').forEach(function(item) {
+                item.classList.toggle('active', item.dataset.target === id);
+            });
+            var content = document.querySelector('.settings-content');
+            if (content) content.scrollTop = 0;
+            try { sessionStorage.setItem('activeUserInfoSection', id); } catch(e) {}
+        }
+
+        document.querySelectorAll('.settings-nav-item').forEach(function(item) {
+            item.addEventListener('click', function() { showSection(this.dataset.target); });
+        });
+
+        var stored = '';
+        try { stored = sessionStorage.getItem('activeUserInfoSection') || ''; } catch(e) {}
+        var hash = (window.location.hash || '').replace('#', '');
+        var initial = (SECTIONS.includes(stored) && stored)
+            || (SECTIONS.includes(hash) && hash) || 'section-personalization';
+        showSection(initial);
+
+        window.showUserInfoSection = showSection;
+    })();
     </script>
 
     <!-- Audio Interview System -->

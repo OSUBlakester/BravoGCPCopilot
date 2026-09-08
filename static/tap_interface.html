@@ -6658,7 +6658,13 @@
                 && _get_static_pool_for_category(catPromptCategory).length > 0;
             const isNoBackfillBoard = isStaticNoPromptBoard || categoryHasPool;
             if (boardHasNoPrompt && (allPoolBtns.length > 0 || isNoBackfillBoard)) {
-                numDynamic = 0;
+                // Respect an explicit dynamic_rows > 0 on the board — the admin intentionally
+                // added a dynamic row to this pool board (e.g. via Include Dynamic Row in settings).
+                // Only suppress when the board has not explicitly opted into dynamic rows.
+                const boardExplicitlyDynamic = boardDynamicRowsExplicit && Number(targetBoardObj.dynamic_rows) > 0;
+                if (!boardExplicitlyDynamic) {
+                    numDynamic = 0;
+                }
             }
 
             // 1. Build static (upper) row buttons

@@ -408,21 +408,14 @@
             </div>
             
             <!-- Help Topics Grid -->
-            <div id="help-topics-menu" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div id="help-topics-menu" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <!-- Bravo Guide -->
                 <button id="help-bravo-guide" class="help-topic-btn bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
                     <i class="fas fa-book-open text-4xl mb-3"></i>
                     <h3 class="text-xl font-bold mb-2">Bravo Guide</h3>
-                    <p class="text-sm opacity-90">Learn about Bravo's interface and features</p>
+                    <p class="text-sm opacity-90">Learn how the Grid Page works</p>
                 </button>
-                
-                <!-- New User Setup -->
-                <button id="help-user-setup" class="help-topic-btn bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
-                    <i class="fas fa-user-plus text-4xl mb-3"></i>
-                    <h3 class="text-xl font-bold mb-2">New User Setup</h3>
-                    <p class="text-sm opacity-90">Step-by-step guide to set up a new user</p>
-                </button>
-                
+
                 <!-- Contact Support -->
                 <button id="help-contact-support" class="help-topic-btn bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
                     <i class="fas fa-headset text-4xl mb-3"></i>
@@ -439,7 +432,7 @@
                 <div id="help-content-display"></div>
             </div>
     <!-- Contact Support Modal -->
-    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden" style="z-index: 9999;">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
@@ -561,77 +554,106 @@
             icon: 'fa-book-open',
             color: 'blue',
             content: `
-                <h3 class="text-2xl font-bold text-blue-700 mb-4">Welcome to Bravo AAC!</h3>
-                
+                <h3 class="text-2xl font-bold text-blue-700 mb-4">How the Grid Page Works</h3>
+
                 <div class="space-y-6">
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
-                            <i class="fas fa-info-circle mr-2 text-blue-600"></i>About Bravo
+                            <i class="fas fa-info-circle mr-2 text-blue-600"></i>Overview
                         </h4>
-                        <p class="text-gray-700 mb-3">Bravo is an Augmentative and Alternative Communication (AAC) application that uses artificial intelligence to help users communicate effectively. The AI generates personalized communication options based on context, user preferences, and conversational needs.</p>
-                        <p class="text-gray-700">Whether you're expressing basic needs, having conversations, or sharing complex thoughts, Bravo adapts to support your unique communication style.</p>
-                    </section>
-
-                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
-                            <i class="fas fa-th mr-2 text-blue-600"></i>Grid Interface
-                        </h4>
-                        <p class="text-gray-700 mb-3">The main screen displays buttons in a grid layout. The grid is primarily designed for <strong>Auditory Scanning</strong>, which highlights and prompts each option one at a time until you select an option. Once an option is selected, Bravo will either announce the options, move to another page, or both.</p>
-                        <p class="text-gray-700 mb-2">A <strong>Tap Interface</strong> is also available for users who prefer direct touch selection. To switch between interfaces:</p>
-                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
-                            <li>Access the Admin toolbar (lock icon in top-right)</li>
-                            <li>Go to User Settings</li>
-                            <li>Select your preferred interface mode</li>
-                        </ul>
+                        <p class="text-gray-700 mb-3">The Grid Page is Bravo's main communication screen. It displays buttons that let the user speak phrases, navigate to other pages, or trigger AI-generated communication options — all depending on how each button is configured.</p>
+                        <p class="text-gray-700">Bravo supports two interaction modes. <strong>Auditory Scanning</strong> highlights each button one at a time and announces it aloud; the user activates a switch when they hear the option they want. <strong>Tap Interface</strong> lets the user touch buttons directly on the screen. The interface mode is configured in User Settings.</p>
                     </section>
 
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
                             <i class="fas fa-history mr-2 text-blue-600"></i>Speech History
                         </h4>
-                        <p class="text-gray-700">Located at the top of the screen, the Speech History displays what you've communicated during your current session.</p>
+                        <p class="text-gray-700 mb-2">The Speech History area at the top of the screen logs everything communicated during the current session. From here you can:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Translate</strong> — translate the session log into another language</li>
+                            <li><strong>Copy</strong> — select specific lines to copy to the clipboard</li>
+                            <li><strong>Clear</strong> — reset the session log</li>
+                        </ul>
                     </section>
 
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
-                            <i class="fas fa-question-circle mr-2 text-blue-600"></i>Question Display
+                            <i class="fas fa-microphone mr-2 text-blue-600"></i>Wake Word &amp; Question Display
                         </h4>
-                        <p class="text-gray-700 mb-3">The Question box will highlight when Bravo hears the selected wake word (just like your smart device) to indicate that it is listening for a question.</p>
-                        <p class="text-gray-700">The Question box will then show the question it heard while Bravo generates options to respond, facilitating natural conversation flow and providing communication opportunities.</p>
+                        <p class="text-gray-700 mb-3">Bravo continuously listens for its configured <strong>wake word</strong> (similar to a smart speaker). When it hears the wake word, the Question Display box activates and Bravo listens for a question from someone nearby.</p>
+                        <p class="text-gray-700">The question heard is shown in the Question Display, and Bravo immediately generates a grid of contextual response options for the user to choose from. This supports natural, back-and-forth conversation. The wake word is configured in User Settings.</p>
                     </section>
 
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
-                            <i class="fas fa-th-large mr-2 text-blue-600"></i>Button Grid
+                            <i class="fas fa-th-large mr-2 text-blue-600"></i>How Pages Are Defined
                         </h4>
-                        <p class="text-gray-700 mb-2">The main grid displays communication buttons. Each button can:</p>
-                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
-                            <li><strong>Speak a word or phrase</strong> - Adds to your message</li>
-                            <li><strong>Navigate to another page</strong> - Access more specific vocabulary</li>
-                        </ul>
-                        <p class="text-gray-700 mt-3 mb-2">Buttons may include:</p>
-                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
-                            <li><strong>Images</strong> - Visual symbols representing the word/action</li>
-                            <li><strong>Text labels</strong> - Clear text descriptions</li>
-                            <li><strong>Colors</strong> - Category coding (e.g., green for actions, blue for people)</li>
-                        </ul>
-                        <p class="text-gray-700 mt-3">In Auditory Scanning mode, buttons are highlighted sequentially and spoken aloud until you activate your switch to make a selection.</p>
-                        <p class="text-gray-700 mt-2"><strong>Scanning Mode</strong> controls how scanning advances: <strong>Auto</strong> continuously moves highlight focus based on scan speed, while <strong>Step</strong> advances one item each time the switch is activated.</p>
+                        <p class="text-gray-700 mb-3">The grid is organized into pages. There are two ways a page's buttons can be defined:</p>
+                        <div class="space-y-3">
+                            <div class="bg-white border border-blue-200 rounded-lg p-3">
+                                <p class="font-semibold text-gray-800 mb-1"><i class="fas fa-lock text-blue-500 mr-2"></i>Static (Admin-Defined)</p>
+                                <p class="text-sm text-gray-700">The admin defines fixed buttons for the page using the <strong>Page &amp; Button Administration</strong> tool (accessible from the admin toolbar). Each button can speak a phrase, navigate to another page, or link to a special page. Static pages are consistent — the same buttons always appear.</p>
+                            </div>
+                            <div class="bg-white border border-blue-200 rounded-lg p-3">
+                                <p class="font-semibold text-gray-800 mb-1"><i class="fas fa-robot text-blue-500 mr-2"></i>Dynamic (AI-Generated)</p>
+                                <p class="text-sm text-gray-700">A button can be configured with an <strong>AI Prompt</strong> (LLM Query). When the user selects that button, Bravo sends the prompt to its AI and generates a fresh set of contextual communication options on the spot. The AI takes into account the user's narrative, current context, and the specific prompt to produce relevant, personalized options. This is how the home page and most topic pages work.</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-700 mt-3 text-sm"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i>Both types can exist on the same page — for example, a static "Home" button alongside AI-generated topic options.</p>
                     </section>
 
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
-                            <i class="fas fa-lock mr-2 text-blue-600"></i>Admin Toolbar & Lock
+                            <i class="fas fa-keyboard mr-2 text-blue-600"></i>Freestyle Page
                         </h4>
-                        <p class="text-gray-700 mb-2">Located in the top-right corner, the Admin toolbar provides access to settings and customization:</p>
+                        <p class="text-gray-700 mb-3">The <strong>Freestyle</strong> page is a composition tool for building longer, freeform messages. It can be linked from any button and is also always available as a button on AI-generated grids.</p>
+                        <p class="text-gray-700 mb-2">The Freestyle page includes:</p>
                         <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
-                            <li><strong>Lock Icon (🔒)</strong> - Tap to unlock and access admin features</li>
-                            <li><strong>PIN Protection</strong> - Requires admin PIN to prevent accidental changes</li>
-                            <li><strong>Settings Access</strong> - Configure voice, display, scanning, and user preferences</li>
-                            <li><strong>Page Management</strong> - Edit button layouts, add vocabulary, and organize pages</li>
-                            <li><strong>User Management</strong> - Switch between users or manage user profiles</li>
+                            <li><strong>Build Space</strong> — a text area where the message is assembled word by word</li>
+                            <li><strong>Suggested Words</strong> — AI-powered word predictions based on what's been typed and the current context</li>
+                            <li><strong>Word Categories</strong> — browse vocabulary by category to find the right word</li>
+                            <li><strong>Spelling</strong> — letter-by-letter input for words not available as suggestions</li>
+                            <li><strong>Numbers</strong> — quick access to number input</li>
+                            <li><strong>Clean Up</strong> — AI rewrites the draft to make it more natural and conversational</li>
+                            <li><strong>Speak Display</strong> — reads the current Build Space aloud</li>
+                            <li><strong>Backspace / Clear</strong> — edit the message in progress</li>
                         </ul>
-                        <p class="text-gray-700 mt-3">When locked, the admin features are hidden to keep the interface clean and prevent unintended modifications during communication.</p>
+                        <p class="text-gray-700 mt-3 text-sm">Selecting a word in Freestyle adds it to the Build Space. When ready, Speak Display announces the complete message.</p>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-puzzle-piece mr-2 text-blue-600"></i>Special Pages
+                        </h4>
+                        <p class="text-gray-700 mb-2">Bravo includes a set of built-in special pages that any button can link to. These are defined by the system (not by the admin) and provide specific functionality. Examples include:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Spelling</strong> — full letter-by-letter input page</li>
+                            <li><strong>Numbers</strong> — numeric input</li>
+                            <li><strong>Mood</strong> — mood selection interface</li>
+                            <li><strong>Favorites</strong> — user's saved topic shortcuts</li>
+                            <li><strong>Jokes, Music, Guess Who</strong> — entertainment pages</li>
+                            <li><strong>Text Message / Email / Compose</strong> — communication tools</li>
+                        </ul>
+                        <p class="text-gray-700 mt-3 text-sm">Special pages are linked from buttons in the Page &amp; Button Administration tool. Each special page handles its own behavior independently of the grid.</p>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-lock mr-2 text-blue-600"></i>Admin Toolbar
+                        </h4>
+                        <p class="text-gray-700 mb-2">The admin toolbar is hidden behind the lock icon in the top-right corner. Unlocking it with the admin PIN reveals icons for all Bravo administration pages:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Page &amp; Button Administration</strong> — define and edit static buttons and pages</li>
+                            <li><strong>User Settings</strong> — configure interface mode, scanning, voice, wake word, and more</li>
+                            <li><strong>User Info</strong> — manage the user's narrative, profile, family, and history</li>
+                            <li><strong>User Current Location</strong> — set the current location for context-aware responses</li>
+                            <li><strong>User Diary</strong> — review and manage the user's diary entries</li>
+                            <li><strong>Audio Devices</strong> — configure speaker and microphone settings</li>
+                            <li><strong>Favorites / Event Sources</strong> — manage topic shortcuts</li>
+                            <li><strong>Activity Reports</strong> — view button click and page usage analytics</li>
+                        </ul>
+                        <p class="text-gray-700 mt-3 text-sm">To set up a new user profile, use the <strong>Add New Profile</strong> button on the profile selection screen (before logging in).</p>
                     </section>
                 </div>
             `
@@ -1290,10 +1312,6 @@
     // Topic button handlers
     document.getElementById('help-bravo-guide').addEventListener('click', () => {
         showHelpTopic('bravo-guide');
-    });
-
-    document.getElementById('help-user-setup').addEventListener('click', () => {
-        showHelpTopic('user-setup');
     });
 
     document.getElementById('help-contact-support').addEventListener('click', (e) => {

@@ -206,6 +206,175 @@
             border: none;
         }
 
+        /* ── Settings sidebar layout ────────────────────── */
+        .settings-layout {
+            display: flex;
+            min-height: calc(100vh - 56px);
+        }
+        .settings-nav {
+            width: 220px;
+            flex-shrink: 0;
+            position: sticky;
+            top: 56px;
+            align-self: flex-start;
+            height: calc(100vh - 56px);
+            overflow-y: auto;
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.06);
+            padding: 0.75rem 0;
+            z-index: 10;
+        }
+        .settings-nav-label {
+            padding: 0.4rem 1.25rem;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #9ca3af;
+        }
+        .settings-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.65rem 1.25rem;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+            color: #4b5563;
+            font-size: 0.82rem;
+            font-weight: 500;
+            line-height: 1.3;
+            user-select: none;
+        }
+        .settings-nav-item:hover {
+            background: #f9fafb;
+            color: #111827;
+        }
+        .settings-nav-item.active {
+            background: #eff6ff;
+            border-left-color: #2563eb;
+            color: #1d4ed8;
+            font-weight: 600;
+        }
+        .settings-nav-item .nav-icon {
+            width: 1.25rem;
+            text-align: center;
+            flex-shrink: 0;
+            font-size: 0.9rem;
+        }
+        .settings-content {
+            flex: 1;
+            padding: 1.5rem 2rem 3rem;
+            min-width: 0;
+        }
+        .settings-section {
+            display: none;
+        }
+        .settings-section.active {
+            display: block;
+        }
+        .settings-save-bar {
+            margin-top: 2rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid #e5e7eb;
+            text-align: center;
+        }
+        .settings-nav-item.nav-disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* ── Setting groups & rows ──────────────────────────────── */
+        .sgroup {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.625rem;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .sgroup-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.55rem 1rem;
+            background: #f3f4f6;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: #6b7280;
+        }
+        .srow {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid #f3f4f6;
+            min-height: 58px;
+            background: white;
+        }
+        .srow:last-child { border-bottom: none; }
+        .srow-meta { flex: 1; min-width: 0; }
+        .srow-label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #111827;
+            line-height: 1.3;
+            display: block;
+        }
+        .srow-desc {
+            font-size: 0.72rem;
+            color: #6b7280;
+            margin-top: 0.15rem;
+            line-height: 1.4;
+            display: block;
+        }
+        .srow-ctrl {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        /* Toggle switch */
+        .tog { position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer; flex-shrink: 0; }
+        .tog input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .tog-slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 12px; transition: background 0.18s; }
+        .tog-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.18); transition: transform 0.18s; }
+        .tog input:checked + .tog-slider { background: #3b82f6; }
+        .tog input:checked + .tog-slider::before { transform: translateX(20px); }
+        .tog input:focus-visible + .tog-slider { outline: 2px solid #3b82f6; outline-offset: 2px; }
+        /* Compact inputs inside rows */
+        .sinput {
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.375rem !important;
+            padding: 0.35rem 0.6rem !important;
+            font-size: 0.875rem !important;
+            color: #111827 !important;
+            background: white !important;
+            box-shadow: none !important;
+            width: auto !important;
+            margin-top: 0 !important;
+            display: inline-block !important;
+        }
+        .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+        .sselect {
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.375rem !important;
+            padding: 0.35rem 2rem 0.35rem 0.6rem !important;
+            font-size: 0.875rem !important;
+            color: #111827 !important;
+            background-color: white !important;
+            box-shadow: none !important;
+            width: auto !important;
+            margin-top: 0 !important;
+            display: inline-block !important;
+            min-width: 180px;
+        }
+        .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+
     </style>
 </head>
 <body class="bg-gray-100">
@@ -331,316 +500,243 @@
         </div>
     </div>
 
-    <div class="container mx-auto mt-6 p-4">
+    <div class="settings-layout">
+
+        <!-- ── Left sidebar navigation ──────────────────── -->
+        <nav class="settings-nav" id="settings-sidebar" aria-label="Settings sections">
+            <div class="settings-nav-label">Settings</div>
+
+            <div class="settings-nav-item active" data-target="section-ui">
+                <i class="fas fa-sliders-h nav-icon" style="color:#4f46e5"></i>
+                <span>Global Settings</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-language">
+                <i class="fas fa-globe nav-icon" style="color:#0891b2"></i>
+                <span>Language &amp; Voices</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-audio">
+                <i class="fas fa-volume-up nav-icon" style="color:#16a34a"></i>
+                <span>Audio Settings</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-email">
+                <i class="fas fa-envelope nav-icon" style="color:#2563eb"></i>
+                <span>Email Settings</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-profile-transfer">
+                <i class="fas fa-file-export nav-icon" style="color:#4f46e5"></i>
+                <span>Profile Transfer</span>
+            </div>
+            <div class="settings-nav-item" data-target="section-security">
+                <i class="fas fa-shield-alt nav-icon" style="color:#dc2626"></i>
+                <span>Security</span>
+            </div>
+        </nav>
+
+        <!-- ── Main content area ─────────────────────────── -->
+        <div class="settings-content">
+
         <!-- Security Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-security" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
                 <i class="fas fa-shield-alt mr-2 text-red-600"></i>Security
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="toolbarPIN" class="block text-lg font-medium text-gray-700 mb-2">Admin Toolbar PIN:</label>
-                    <input type="text" id="toolbarPIN" name="toolbarPIN" maxlength="10" class="w-full max-w-xs" placeholder="Enter 4-digit PIN">
-                    <p class="text-xs text-gray-500 mt-1">PIN required to access admin toolbar (4-10 digits recommended).</p>
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-key"></i> Admin Access</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Admin Toolbar PIN</span>
+                        <span class="srow-desc">PIN required to access the admin toolbar (4–10 digits recommended)</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <input type="text" id="toolbarPIN" name="toolbarPIN" maxlength="10" class="sinput" style="width:120px; text-align:center; letter-spacing:0.15em;" placeholder="e.g., 1234">
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- User Interface Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-ui" class="settings-section active bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-user-cog mr-2 text-indigo-600"></i>User Interface
+                <i class="fas fa-sliders-h mr-2 text-indigo-600"></i>Global Settings
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="md:col-span-2">
-                    <label class="block text-lg font-medium text-gray-700 mb-2">Interface Mode:</label>
-                    <div class="flex items-center space-x-6 mt-2">
-                        <div class="flex items-center">
-                            <input type="radio" id="interfaceAuditory" name="interfaceMode" value="auditory" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <label for="interfaceAuditory" class="ml-2 block text-sm font-medium text-gray-700">
-                                Auditory Scanning
+            <input type="hidden" id="CountryCode" name="CountryCode">
+
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-mouse-pointer"></i> Interface &amp; Communication</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Interface Mode</span>
+                        <span class="srow-desc">Auditory Scanning uses the grid with audio cues; Tap Screen uses the direct touch interface</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" id="interfaceAuditory" name="interfaceMode" value="auditory" class="h-4 w-4 text-indigo-600 border-gray-300">
+                                <span class="text-sm font-medium text-gray-700">Auditory Scanning</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" id="interfaceTap" name="interfaceMode" value="tap" class="h-4 w-4 text-indigo-600 border-gray-300">
+                                <span class="text-sm font-medium text-gray-700">Tap Screen</span>
                             </label>
                         </div>
-                        <div class="flex items-center">
-                            <input type="radio" id="interfaceTap" name="interfaceMode" value="tap" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <label for="interfaceTap" class="ml-2 block text-sm font-medium text-gray-700">
-                                Tap Screen
-                            </label>
-                        </div>
                     </div>
-                    <p class="text-xs text-gray-500 mt-2">
-                        <strong>Auditory Scanning:</strong> Uses the grid interface with auditory scanning enabled.<br>
-                        <strong>Tap Screen:</strong> Uses the direct touch interface (Tap Interface).
-                    </p>
                 </div>
-                <div>
-                    <label class="block text-lg font-medium text-gray-700 mb-2">Wake Word:</label>
-                    <div class="flex space-x-2 items-center">
-                        <input type="text" id="wakeWordInterjection" name="wakeWordInterjection" placeholder="Interjection (e.g., Hey)" class="flex-1">
-                        <input type="text" id="wakeWordName" name="wakeWordName" placeholder="Name (e.g., Bravo)" class="flex-1">
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Wake Word</span>
+                        <span class="srow-desc">The phrase used to activate voice commands (e.g., "Hey Brady")</span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">The phrase used to activate voice commands (e.g., "Hey Brady").</p>
-                </div>
-                <div>
-                    <label for="enableMoodSelection" class="block text-lg font-medium text-gray-700 mb-2">Enable Mood Selection</label>
-                    <input type="checkbox" id="enableMoodSelection" name="enableMoodSelection" class="enablemoodselection-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Show mood selection screen at session start to provide personalized AI responses.</p>
-                </div>
-                <div>
-                    <label class="block text-lg font-medium text-gray-700 mb-2">Location:</label>
-                    <div class="flex space-x-2 items-center">
-                        <input type="text" id="CountryCode" name="CountryCode" placeholder="2 Letter Country Code" class="flex-1">
+                    <div class="srow-ctrl flex gap-2">
+                        <input type="text" id="wakeWordInterjection" name="wakeWordInterjection" class="sinput" style="width:130px;" placeholder="Hey">
+                        <input type="text" id="wakeWordName" name="wakeWordName" class="sinput" style="width:130px;" placeholder="Bravo">
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">Location Country to determine local info. Use 2-letter codes.</p>
                 </div>
-                <div>
-                    <label for="vocabularyLevel" class="block text-lg font-medium text-gray-700 mb-2">Vocabulary Level:</label>
-                    <select id="vocabularyLevel" name="vocabularyLevel" class="w-full max-w-xs">
-                        <option value="emergent">Emergent - Basic everyday words (e.g., want, help, happy)</option>
-                        <option value="functional" selected>Functional - Practical daily living vocabulary (e.g., tired, wonderful, choose)</option>
-                        <option value="developing">Developing - Expanded academic vocabulary (e.g., anxious, fascinating, investigate)</option>
-                        <option value="proficient">Proficient - Sophisticated specialized vocabulary (e.g., lethargic, magnificent, articulate)</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Controls the complexity of AI-generated vocabulary to match the user's communication level. Higher levels use more advanced words.</p>
-                </div>
-                <div>
-                    <label for="spellLetterOrder" class="block text-lg font-medium text-gray-700 mb-2">Spell Page Letter Order:</label>
-                    <select id="spellLetterOrder" name="spellLetterOrder" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="alphabetical">Alphabetical (A-Z)</option>
-                        <option value="qwerty">QWERTY Keyboard</option>
-                        <option value="frequency">Frequency-Based</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Letter arrangement for the Spell page in Tap Interface.</p>
-                </div>
-                <div>
-                    <label class="block text-lg font-medium text-gray-700 mb-3">Mascot:</label>
-                    <input type="hidden" id="mascot" name="mascot" value="buddy">
-                    <div class="flex gap-4 flex-wrap" id="mascot-picker">
-                        <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="bobby" style="width:120px;">
-                            <img src="/static/images/mascot_bobby.png" alt="Bobby" class="w-20 h-20 object-cover rounded-lg mx-auto mb-1">
-                            <div class="text-sm font-semibold text-gray-700">Bobby</div>
-                            <div class="text-xs text-gray-400">Boy</div>
-                        </div>
-                        <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="bonnie" style="width:120px;">
-                            <img src="/static/images/mascot_bonnie.png" alt="Bonnie" class="w-20 h-20 object-cover rounded-lg mx-auto mb-1">
-                            <div class="text-sm font-semibold text-gray-700">Bonnie</div>
-                            <div class="text-xs text-gray-400">Girl</div>
-                        </div>
-                        <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="buddy" style="width:120px;">
-                            <img src="/static/images/mascot_buddy.png" alt="Buddy" class="w-20 h-20 object-cover rounded-lg mx-auto mb-1">
-                            <div class="text-sm font-semibold text-gray-700">Buddy</div>
-                            <div class="text-xs text-gray-400">Dog</div>
-                        </div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Vocabulary Level</span>
+                        <span class="srow-desc">Controls the complexity of AI-generated vocabulary to match the user's communication level</span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-2">The mascot character shown in button images throughout the app.</p>
+                    <div class="srow-ctrl">
+                        <select id="vocabularyLevel" name="vocabularyLevel" class="sselect" style="min-width:220px;">
+                            <option value="emergent">Emergent — Basic everyday words</option>
+                            <option value="functional" selected>Functional — Practical daily vocabulary</option>
+                            <option value="developing">Developing — Expanded academic vocabulary</option>
+                            <option value="proficient">Proficient — Sophisticated vocabulary</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Tap Interface Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-hand-pointer mr-2 text-indigo-600"></i>Tap Interface Settings
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="gridColumnsSlider" class="block text-lg font-medium text-gray-700 mb-2">Buttons per Row:</label>
-                    <input type="number" id="gridColumnsSlider" name="gridColumnsSlider" min="2" max="18" step="1" value="6" class="w-24 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <p class="text-xs text-gray-500 mt-1">Number of buttons per row (2–18). Fewer = larger buttons.</p>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-lg font-medium text-gray-700 mb-1">Rows:</label>
-                    <p class="text-xs text-gray-500 mb-3">Total number of word rows. Optionally add one AI-generated dynamic row at the bottom (like predictive text on a keyboard).</p>
-                    <div class="flex gap-6 items-center flex-wrap">
-                        <div>
-                            <label for="tapWordsRows" class="block text-xs font-medium text-gray-600 mb-1 text-center">Words Rows (1–7)</label>
-                            <input type="number" id="tapWordsRows" name="tapWordsRows" min="1" max="7" step="1" class="w-20 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="3">
-                        </div>
-                        <div class="flex flex-col items-center">
-                            <label for="tapDynamicRows" class="block text-xs font-medium text-gray-600 mb-2 text-center">Include Dynamic Row</label>
-                            <input type="checkbox" id="tapDynamicRows" name="tapDynamicRows" class="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                        </div>
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-palette"></i> Display &amp; Experience</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Enable Mood Selection</span>
+                        <span class="srow-desc">Show mood selection screen at session start to provide personalized AI responses</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <label class="tog">
+                            <input type="checkbox" id="enableMoodSelection" name="enableMoodSelection" class="enablemoodselection-checkbox">
+                            <span class="tog-slider"></span>
+                        </label>
                     </div>
                 </div>
-                <!-- Sight Words Subsection -->
-                <div class="md:col-span-2 mt-2 mb-2">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                        <i class="fas fa-spell-check mr-2 text-indigo-500"></i>Sight Words
-                    </h3>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Spell Page Letter Order</span>
+                        <span class="srow-desc">Letter arrangement for the Spell page in the Tap Interface</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <select id="spellLetterOrder" name="spellLetterOrder" class="sselect">
+                            <option value="alphabetical">Alphabetical (A–Z)</option>
+                            <option value="qwerty">QWERTY Keyboard</option>
+                            <option value="frequency">Frequency-Based</option>
+                        </select>
+                    </div>
                 </div>
-                <div>
-                    <label for="enableSightWords" class="block text-lg font-medium text-gray-700 mb-2">Enable Sight Word Logic</label>
-                    <input type="checkbox" id="enableSightWords" name="enableSightWords" class="enablesightwords-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Use Dolch sight word logic to show sight words as text-only (no pictograms). When disabled, all words will show pictograms if pictograms are enabled.</p>
-                </div>
-                <div>
-                    <label for="sightWordGradeLevel" class="block text-lg font-medium text-gray-700 mb-2">Sight Words Grade Level:</label>
-                    <select id="sightWordGradeLevel" name="sightWordGradeLevel" class="w-full max-w-xs">
-                        <option value="pre_k">Pre-Kindergarten</option>
-                        <option value="kindergarten">Kindergarten (includes Pre-K)</option>
-                        <option value="first_grade">First Grade (includes Pre-K + K)</option>
-                        <option value="second_grade">Second Grade (includes Pre-K + K + 1st)</option>
-                        <option value="third_grade">Third Grade (includes Pre-K + K + 1st + 2nd)</option>
-                        <option value="third_grade_with_nouns">Third Grade + Nouns (complete list)</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Dolch sight words at or below this level will show as text-only buttons (no pictograms) even when pictograms are enabled. Selection is cumulative - higher grades include all lower grade words.</p>
-                </div>
-                <div>
-                    <label for="disableTapPictograms" class="block text-lg font-medium text-gray-700 mb-2">Disable Tap Interface Pictograms</label>
-                    <input type="checkbox" id="disableTapPictograms" name="disableTapPictograms" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">When enabled, the <strong>Tap Interface</strong> will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
-                </div>
-                <input type="hidden" id="useHybridPages" name="useHybridPages">
-            </div>
-        </div>
-
-        <!-- Scan Interface Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-search mr-2 text-orange-600"></i>Scan Interface Settings
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="LLMOptions" class="block text-lg font-medium text-gray-700 mb-2">Number of AI Options:</label>
-                    <input type="number" id="LLMOptions" name="LLMOptions" min="0" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 10">
-                    <p class="text-xs text-gray-500 mt-1">Number of AI-generated options for Auditory Scanning pages.</p>
-                </div>
-                <div>
-                    <label for="FreestyleOptions" class="block text-lg font-medium text-gray-700 mb-2">Freestyle Word Options:</label>
-                    <input type="number" id="FreestyleOptions" name="FreestyleOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 20">
-                    <p class="text-xs text-gray-500 mt-1">Number of AI word suggestions for the Freestyle page.</p>
-                </div>
-                <div>
-                    <label for="autoClean" class="block text-lg font-medium text-gray-700 mb-2">Auto Clean in Freestyle</label>
-                    <input type="checkbox" id="autoClean" name="autoClean" class="autoclean-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Automatically clean up text before speaking in Freestyle mode.</p>
-                </div>
-                <div>
-                    <label for="scanMode" class="block text-lg font-medium text-gray-700 mb-2">Scanning Mode:</label>
-                    <select id="scanMode" name="scanMode" class="w-full max-w-xs">
-                        <option value="auto">Auto Scanning (timer)</option>
-                        <option value="step">Step Scanning (Tab = Next, Space = Select)</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Use Auto for timer-based scanning, or Step for two-switch scanning.</p>
-                </div>
-                <div>
-                    <label for="scanDelay" class="block text-lg font-medium text-gray-700 mb-2">Auditory Scan Speed (ms):</label>
-                    <input type="number" id="scanDelay" name="scanDelay" min="100" step="100" class="w-full max-w-xs" placeholder="e.g., 3500">
-                    <p class="text-xs text-gray-500 mt-1">Delay between highlighting buttons (milliseconds).</p>
-                </div>
-                <div>
-                    <label for="scanLoopLimit" class="block text-lg font-medium text-gray-700 mb-2">Scan Loop Limit:</label>
-                    <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
-                    <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="waitForSwitchToScan" name="waitForSwitchToScan" class="mr-2 w-5 h-5">
-                    <label for="waitForSwitchToScan" class="text-lg font-medium text-gray-700">Wait For Switch to Start Scanning</label>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="playWaitForSwitchChime" name="playWaitForSwitchChime" class="mr-2 w-5 h-5">
-                    <label for="playWaitForSwitchChime" class="text-lg font-medium text-gray-700">Page Ready Chime</label>
-                </div>
-                <div>
-                    <label for="SummaryOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Button Summary</label>
-                    <input type="checkbox" id="SummaryOff" name="SummaryOff" class="summaryoff-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Turn off Button Summary. Buttons will show full speech option.</p>
-                </div>
-                <div>
-                    <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable Scanning Pictograms</label>
-                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Show pictogram images on buttons for the <strong>Auditory Scanning</strong> interface.</p>
-                </div>
-                <!-- Splash Screen Subsection -->
-                <div class="md:col-span-2 mt-4 mb-2">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                        <i class="fas fa-comment-dots mr-2 text-orange-500"></i>Splash Screen
-                    </h3>
-                </div>
-                <div>
-                    <label for="displaySplash" class="block text-lg font-medium text-gray-700 mb-2">Display Splash Screen</label>
-                    <input type="checkbox" id="displaySplash" name="displaySplash" class="displaysplash-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Show a speech bubble splash screen displaying the text being announced.</p>
-                </div>
-                <div>
-                    <label for="displaySplashTime" class="block text-lg font-medium text-gray-700 mb-2">Splash Screen Duration (ms)</label>
-                    <input type="number" id="displaySplashTime" name="displaySplashTime" min="500" max="10000" step="100" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="3000">
-                    <p class="text-xs text-gray-500 mt-1">Duration to display the speech bubble (500-10000 milliseconds, default 3000).</p>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
-                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
+                <div class="srow" style="align-items:flex-start; padding-top:1rem; padding-bottom:1rem;">
+                    <div class="srow-meta">
+                        <span class="srow-label">Mascot</span>
+                        <span class="srow-desc">The mascot character shown in button images throughout the app</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <input type="hidden" id="mascot" name="mascot" value="buddy">
+                        <div class="flex gap-3" id="mascot-picker">
+                            <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="bobby" style="width:100px;">
+                                <img src="/static/images/mascot_bobby.png" alt="Bobby" class="w-16 h-16 object-cover rounded-lg mx-auto mb-1">
+                                <div class="text-xs font-semibold text-gray-700">Bobby</div>
+                                <div class="text-xs text-gray-400">Boy</div>
+                            </div>
+                            <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="bonnie" style="width:100px;">
+                                <img src="/static/images/mascot_bonnie.png" alt="Bonnie" class="w-16 h-16 object-cover rounded-lg mx-auto mb-1">
+                                <div class="text-xs font-semibold text-gray-700">Bonnie</div>
+                                <div class="text-xs text-gray-400">Girl</div>
+                            </div>
+                            <div class="mascot-card cursor-pointer rounded-xl border-2 border-transparent p-2 text-center transition-all hover:shadow-md" data-mascot="buddy" style="width:100px;">
+                                <img src="/static/images/mascot_buddy.png" alt="Buddy" class="w-16 h-16 object-cover rounded-lg mx-auto mb-1">
+                                <div class="text-xs font-semibold text-gray-700">Buddy</div>
+                                <div class="text-xs text-gray-400">Dog</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Language and Voices Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-language" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
                 <i class="fas fa-globe mr-2 text-cyan-600"></i>Language and Voices
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- User Language -->
-                <div class="md:col-span-2">
-                    <label for="userLanguage" class="block text-lg font-medium text-gray-700 mb-2">User Language:</label>
-                    <select id="userLanguage" name="userLanguage" class="w-full max-w-xs"></select>
-                    <p class="text-xs text-gray-500 mt-1">Primary language for user-facing AI generation and on-screen content.</p>
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-language"></i> Languages</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">User Language</span>
+                        <span class="srow-desc">Primary language for AI generation and on-screen content</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <select id="userLanguage" name="userLanguage" class="sselect" style="min-width:200px;"></select>
+                    </div>
                 </div>
-
-                <!-- Default Partner Language & Voice (Side-by-side) -->
-                <div>
-                    <label for="defaultPartnerLanguage" class="block text-lg font-medium text-gray-700 mb-2">Default Partner Language:</label>
-                    <select id="defaultPartnerLanguage" name="defaultPartnerLanguage" class="w-full"></select>
-                    <p class="text-xs text-gray-500 mt-1">Default language for wake word, questions, and spoken announcements.</p>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Partner Language</span>
+                        <span class="srow-desc">Language used for wake word, questions, and spoken announcements</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <select id="defaultPartnerLanguage" name="defaultPartnerLanguage" class="sselect" style="min-width:200px;"></select>
+                    </div>
                 </div>
-                <div>
-                    <label for="defaultPartnerVoiceSelect" class="block text-lg font-medium text-gray-700 mb-2">Voice:</label>
-                    <div class="flex gap-2">
-                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="flex-1"></select>
-                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Partner Voice</span>
+                        <span class="srow-desc">Voice used for announcements — options update based on selected partner language</span>
+                    </div>
+                    <div class="srow-ctrl flex items-center gap-2">
+                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="sselect" style="min-width:180px;"></select>
+                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors" title="Preview voice">
                             <i class="fas fa-volume-up"></i>
                         </button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">Voice options update based on selected language.</p>
                 </div>
-
-                <!-- Voice Style Selector -->
-                <div>
-                    <label for="voiceStyle" class="block text-lg font-medium text-gray-700 mb-2">Voice Age/Style:</label>
-                    <div class="flex gap-3">
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Voice Age / Style</span>
+                        <span class="srow-desc">Higher pitch and rate for younger-sounding voices — test to find the best fit</span>
+                    </div>
+                    <div class="srow-ctrl flex gap-4">
                         <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="voiceStyle" value="child" class="w-4 h-4"> 
+                            <input type="radio" name="voiceStyle" value="child" class="w-4 h-4">
                             <span class="text-sm">👧 Child</span>
                         </label>
                         <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="voiceStyle" value="adult" class="w-4 h-4" checked> 
+                            <input type="radio" name="voiceStyle" value="adult" class="w-4 h-4" checked>
                             <span class="text-sm">🧑 Adult</span>
                         </label>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">Higher pitch and rate for younger voices. Test to find the best fit for your user.</p>
                 </div>
+            </div>
 
-                <!-- Location Override Languages Table -->
-                <div class="md:col-span-2">
-                    <div class="flex justify-between items-center mb-3">
-                        <label class="block text-lg font-medium text-gray-700">Location Override Languages:</label>
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-map-marker-alt"></i> Location Override Languages</div>
+                <div class="srow" style="flex-direction:column; align-items:stretch; gap:0.75rem;">
+                    <p class="text-xs text-gray-500">Each row specifies a language available for per-location override selection in Location Features.</p>
+                    <div class="flex justify-end">
                         <button type="button" id="addLocationOverrideRowButton" class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
-                            <i class="fas fa-plus"></i> Add Row
+                            <i class="fas fa-plus"></i> Add Language
                         </button>
                     </div>
-                    <p class="text-xs text-gray-500 mb-3">Each row specifies a language available for per-location override selection in Location Features.</p>
                     <div class="overflow-x-auto">
-                        <table class="min-w-full border-collapse border border-gray-300 rounded">
+                        <table class="min-w-full border-collapse border border-gray-200 rounded text-sm">
                             <thead>
-                                <tr class="bg-gray-100">
-                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Language</th>
-                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Voice</th>
-                                    <th class="border border-gray-300 px-4 py-2 text-center font-semibold text-gray-700" style="width: 140px;">Test / Delete</th>
+                                <tr class="bg-gray-50">
+                                    <th class="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-600">Language</th>
+                                    <th class="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-600">Voice</th>
+                                    <th class="border border-gray-200 px-4 py-2 text-center font-semibold text-gray-600" style="width:130px;">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="locationOverrideLanguagesTable">
-                                <!-- Table rows will be dynamically populated here -->
-                            </tbody>
+                            <tbody id="locationOverrideLanguagesTable"></tbody>
                         </table>
                     </div>
                 </div>
@@ -649,30 +745,38 @@
 
 
         <!-- Audio Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-audio" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
                 <i class="fas fa-volume-up mr-2 text-green-600"></i>Audio Settings
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="speechRate" class="block text-lg font-medium text-gray-700 mb-2">Announcement Speech Rate (WPM):</label>
-                    <input type="number" id="speechRate" name="speechRate" min="100" max="300" step="10" class="w-full max-w-xs" placeholder="e.g., 180">
-                    <p class="text-xs text-gray-500 mt-1">Words Per Minute for server-side announcements (e.g., 100-300, default ~180).</p>
-                </div>
-                <div>
-                    <label for="applicationVolume" class="block text-lg font-medium text-gray-700 mb-2">Application Volume:</label>
-                    <div class="flex items-center space-x-4">
-                        <input type="range" id="applicationVolume" name="applicationVolume" min="0" max="10" step="1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider" value="8">
-                        <span id="volumeDisplay" class="text-lg font-semibold text-gray-700 min-w-[3rem]">8/10</span>
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-sliders-h"></i> Playback</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Announcement Speech Rate</span>
+                        <span class="srow-desc">Words per minute for server-side announcements (100–300; default ~180)</span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">Volume level the app will set when loaded (0-10, where 10 is maximum volume).</p>
+                    <div class="srow-ctrl flex items-center gap-2">
+                        <input type="number" id="speechRate" name="speechRate" min="100" max="300" step="10" class="sinput" style="width:90px; text-align:center;" placeholder="180">
+                        <span class="text-xs text-gray-500">WPM</span>
+                    </div>
+                </div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Application Volume</span>
+                        <span class="srow-desc">Volume level the app sets on load (0 = silent, 10 = maximum)</span>
+                    </div>
+                    <div class="srow-ctrl flex items-center gap-3" style="min-width:200px;">
+                        <input type="range" id="applicationVolume" name="applicationVolume" min="0" max="10" step="1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider" value="8" style="width:140px; margin-top:0;">
+                        <span id="volumeDisplay" class="text-sm font-semibold text-gray-700 min-w-[3rem] text-right">8/10</span>
+                    </div>
                 </div>
             </div>
         </div>
 
 
         <!-- Email Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-email" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
                 <i class="fas fa-envelope mr-2 text-blue-500"></i>Email Settings
             </h2>
@@ -716,7 +820,7 @@
         </div>
 
         <!-- Profile Transfer -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <div id="section-profile-transfer" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b border-gray-200 pb-3">
                 <i class="fas fa-file-export mr-2 text-indigo-600"></i>Profile Settings Transfer
             </h2>
@@ -747,13 +851,15 @@
         </div>
 
         <!-- Save Button -->
-        <div class="text-center">
+        <div class="settings-save-bar">
             <button type="button" id="saveSettingsButton" class="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transform transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-purple-300">
                 <i class="fas fa-save mr-2"></i> Save Global Settings
             </button>
             <p id="settings-status" class="text-sm text-green-600 mt-2 h-4"></p>
         </div>
-    </div>
+
+        </div><!-- /.settings-content -->
+    </div><!-- /.settings-layout -->
 
     <!-- Export Options Modal -->
     <div id="export-options-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[900] flex items-center justify-center p-4">
@@ -852,11 +958,19 @@
             <div id="help-modal-content" class="flex-1 overflow-y-auto p-6">
                 <!-- Content will be dynamically inserted here -->
             </div>
+            <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <button id="contact-support-btn" onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
+                <button onclick="closeHelpModal()" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors text-sm">
+                    Close
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- Contact Support Modal -->
-    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden" style="z-index: 9999;">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
@@ -1085,66 +1199,31 @@
                         </div>
                     </div>
 
-                    <!-- Tap Interface Settings -->
-                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
-                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                            <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-hand-pointer text-indigo-600 text-lg"></i>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Tap Interface Settings</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startSettingsGuide('tap-settings');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
-                                </div>
-                                <div class="guide-details hidden mt-2">
-                                    <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Tap Words Rows:</strong> Number of rows in the Tap Interface grid (default 4).</p>
-                                        <p><strong>Tap Phrases Rows:</strong> Number of Phrases rows in the Tap Interface (default 1).</p>
-                                        <p><strong>Vocabulary Level:</strong> Controls the complexity of AI-generated vocabulary to match the user's communication level.</p>
-                                        <p><strong>Disable Tap Interface Pictograms:</strong> When enabled, the Tap Interface will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
-                                    </div>
-                                </div>
-                            </div>
+                    <!-- Tap Interface Settings (moved) -->
+                    <div class="flex items-start p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                        <div class="flex-shrink-0 mt-1">
+                            <i class="fas fa-hand-pointer text-indigo-500 text-lg"></i>
+                        </div>
+                        <div class="ml-3 flex-1">
+                            <div class="font-semibold text-gray-900 mb-1">Tap Interface Settings</div>
+                            <p class="text-sm text-gray-600">Tap Interface Settings have moved to the <strong>Board Builder</strong> page. Open Board Builder and click the <strong>Settings</strong> button in the toolbar.</p>
+                            <a href="tap_board_builder.html" class="inline-flex items-center mt-2 px-3 py-1 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 transition">
+                                <i class="fas fa-external-link-alt mr-1"></i>Go to Board Builder
+                            </a>
                         </div>
                     </div>
 
-                    <!-- Scan Interface Settings -->
-                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
-                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                            <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-search text-orange-600 text-lg"></i>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Scan Interface Settings</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startSettingsGuide('scanning');" class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
-                                </div>
-                                <div class="guide-details hidden mt-2">
-                                    <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Scanning Mode:</strong> Choose how scanning advances. Auto moves through options automatically based on scan speed. Step advances one option per switch activation.</p>
-                                        <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
-                                        <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
-                                        <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
-                                        <p><strong>Wait For Switch to Start Scanning:</strong> When enabled, scanning will not begin automatically. User must press their switch to start scanning on initial page load.</p>
-                                        <p><strong>Page Ready Chime:</strong> When enabled, a chime will play after a page has been loaded and is waiting for the switch to begin scanning.</p>
-                                        <p><strong>Number of AI Options:</strong> Number of AI-generated options for Auditory Scanning pages and Quick Talk.</p>
-                                        <p><strong>Freestyle Word Options:</strong> Number of AI word suggestions for the Freestyle page.</p>
-                                        <p><strong>Turn off Button Summary:</strong> When enabled, buttons show full speech text instead of summarized versions.</p>
-                                        <p><strong>Auto Clean in Freestyle:</strong> Automatically formats and cleans text before speaking in freestyle mode.</p>
-                                        <p><strong>Enable Scanning Pictograms:</strong> Show pictogram images on buttons for the Auditory Scanning interface.</p>
-                                    </div>
-                                </div>
-                            </div>
+                    <!-- Scan Interface Settings (moved) -->
+                    <div class="flex items-start p-3 bg-orange-50 rounded-lg border border-orange-200">
+                        <div class="flex-shrink-0 mt-1">
+                            <i class="fas fa-search text-orange-500 text-lg"></i>
+                        </div>
+                        <div class="ml-3 flex-1">
+                            <div class="font-semibold text-gray-900 mb-1">Scan Interface Settings</div>
+                            <p class="text-sm text-gray-600">Scan Interface Settings have moved to the <strong>Pages &amp; Buttons</strong> page. Open Pages &amp; Buttons and click the <strong>Settings</strong> button.</p>
+                            <a href="admin_pages.html" class="inline-flex items-center mt-2 px-3 py-1 bg-orange-600 text-white text-xs rounded-lg hover:bg-orange-700 transition">
+                                <i class="fas fa-external-link-alt mr-1"></i>Go to Pages &amp; Buttons
+                            </a>
                         </div>
                     </div>
 
@@ -1205,48 +1284,22 @@
                         </div>
                     </div>
 
-                    <!-- Auditory Scanning Settings -->
-                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
-                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                            <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-search text-orange-600 text-lg"></i>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Auditory Scanning Settings</div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startSettingsGuide('scanning');" class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition flex items-center">
-                                            <i class="fas fa-route mr-1"></i>Guide Me
-                                        </button>
-                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                    </div>
-                                </div>
-                                <div class="guide-details hidden mt-2">
-                                    <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Scanning Mode:</strong> Choose how scanning advances. <strong>Auto</strong> moves through options automatically based on scan speed. <strong>Step</strong> advances one option per switch activation.</p>
-                                        <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
-                                        <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
-                                        <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
-                                        <p><strong>Wait For Switch to Start Scanning:</strong> When enabled, scanning will not begin automatically. User must press their switch to start scanning on initial page load. After first press, scanning continues normally.</p>
-                                        <p><strong>Page Ready Chime:</strong> When enabled, a chime will play after a page has been loaded and is waiting for the switch to begin scanning.</p>
-                                        <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
-                                            <p class="text-xs text-gray-700"><strong>💡 Tip:</strong> Start with slower scan speeds and gradually increase as the user becomes more comfortable with the interface.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                    <!-- Auditory Scanning Settings (moved) -->
+                    <div class="flex items-start p-3 bg-orange-50 rounded-lg border border-orange-200">
+                        <div class="flex-shrink-0 mt-1">
+                            <i class="fas fa-search text-orange-500 text-lg"></i>
+                        </div>
+                        <div class="ml-3 flex-1">
+                            <div class="font-semibold text-gray-900 mb-1">Auditory Scanning Settings</div>
+                            <p class="text-sm text-gray-600">Scan Interface Settings have moved to the <strong>Pages &amp; Buttons</strong> page. Open Pages &amp; Buttons and click the <strong>Settings</strong> button.</p>
+                            <a href="admin_pages.html" class="inline-flex items-center mt-2 px-3 py-1 bg-orange-600 text-white text-xs rounded-lg hover:bg-orange-700 transition">
+                                <i class="fas fa-external-link-alt mr-1"></i>Go to Pages &amp; Buttons
+                            </a>
                         </div>
                     </div>
 
                 </div>
 
-                <!-- Help Footer -->
-                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
-                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
-                    <button onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                        <i class="fas fa-envelope mr-2"></i>Contact Support
-                    </button>
-                </div>
             </div>
         `;
     }
@@ -1267,10 +1320,23 @@
     // Start settings guide function
     function startSettingsGuide(guideId) {
         console.log('Starting settings guide for:', guideId);
-        
+
         // Close help modal
         closeHelpModal();
-        
+
+        // Navigate to the relevant section before starting the guide
+        const guideToSection = {
+            'security':     'section-security',
+            'interface':    'section-ui',
+            'tap-settings': 'section-tap',
+            'scanning':     'section-scan',
+            'audio':        'section-audio',
+            'display':      'section-scan'
+        };
+        if (window.showSettingsSection && guideToSection[guideId]) {
+            window.showSettingsSection(guideToSection[guideId]);
+        }
+
         // Map guide IDs to guide objects
         const guides = {
             'security': securityGuide,
@@ -1280,7 +1346,7 @@
             'display': displayGuide,
             'scanning': scanningGuide
         };
-        
+
         const guide = guides[guideId];
         if (guide) {
             currentSettingsGuide = {
@@ -1371,22 +1437,6 @@
                     const checkbox = document.getElementById('enableMoodSelection');
                     const container = checkbox?.closest('div');
                     if (container) container.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Location Country Code',
-                content: 'Enter your 2-letter country code (e.g., US, UK, CA) to provide location context for AI responses. This helps the AI provide locally relevant information.',
-                highlight: '#CountryCode',
-                action: function() {
-                    const input = document.getElementById('CountryCode');
-                    if (input) {
-                        input.classList.add('guide-highlight-target');
-                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const input = document.getElementById('CountryCode');
-                    if (input) input.classList.remove('guide-highlight-target');
                 }
             },
             {
@@ -4317,6 +4367,116 @@
                 await window.updatePageTitleWithProfile('Global Settings Administration');
             }
         });
+    </script>
+
+    <!-- ── Settings sidebar navigation ────────────────── -->
+    <script>
+    (function () {
+        const VALID_SECTIONS = [
+            'section-security', 'section-ui', 'section-tap', 'section-scan',
+            'section-language', 'section-audio', 'section-email', 'section-profile-transfer'
+        ];
+
+        function showSection(id) {
+            if (!VALID_SECTIONS.includes(id)) return;
+            VALID_SECTIONS.forEach(function (sid) {
+                const el = document.getElementById(sid);
+                if (el) el.classList.toggle('active', sid === id);
+            });
+            document.querySelectorAll('.settings-nav-item').forEach(function (item) {
+                item.classList.toggle('active', item.dataset.target === id);
+            });
+            // Scroll content area to top
+            const content = document.querySelector('.settings-content');
+            if (content) content.scrollTop = 0;
+            // Save in session so the same section reopens after save/reload
+            try { sessionStorage.setItem('activeSettingsSection', id); } catch (e) {}
+        }
+
+        document.querySelectorAll('.settings-nav-item').forEach(function (item) {
+            item.addEventListener('click', function () {
+                showSection(this.dataset.target);
+            });
+        });
+
+        // Restore last-viewed section (sessionStorage > hash > default)
+        var stored = '';
+        try { stored = sessionStorage.getItem('activeSettingsSection') || ''; } catch (e) {}
+        var hash = (window.location.hash || '').replace('#', '');
+        var initial = (VALID_SECTIONS.includes(stored) && stored)
+            || (VALID_SECTIONS.includes(hash) && hash)
+            || 'section-ui';
+        showSection(initial);
+
+        // Expose so interactive guides can navigate to a section
+        window.showSettingsSection = showSection;
+
+        // ── Interface-mode nav gating ─────────────────────
+        var tapNavItem  = document.querySelector('.settings-nav-item[data-target="section-tap"]');
+        var scanNavItem = document.querySelector('.settings-nav-item[data-target="section-scan"]');
+
+        function applyInterfaceModeGating(mode) {
+            if (!tapNavItem || !scanNavItem) return;
+            if (mode === 'tap') {
+                tapNavItem.classList.remove('nav-disabled');
+                scanNavItem.classList.add('nav-disabled');
+                // If scan section is currently shown, switch away
+                if (document.getElementById('section-scan') &&
+                    document.getElementById('section-scan').classList.contains('active')) {
+                    showSection('section-ui');
+                }
+            } else if (mode === 'auditory') {
+                scanNavItem.classList.remove('nav-disabled');
+                tapNavItem.classList.add('nav-disabled');
+                // If tap section is currently shown, switch away
+                if (document.getElementById('section-tap') &&
+                    document.getElementById('section-tap').classList.contains('active')) {
+                    showSection('section-ui');
+                }
+            } else {
+                // Both enabled when no mode selected
+                tapNavItem.classList.remove('nav-disabled');
+                scanNavItem.classList.remove('nav-disabled');
+            }
+        }
+
+        function readInterfaceMode() {
+            var tap = document.getElementById('interfaceTap');
+            var aud = document.getElementById('interfaceAuditory');
+            if (tap && tap.checked) return 'tap';
+            if (aud && aud.checked) return 'auditory';
+            return null;
+        }
+
+        // Live updates when the admin changes the radio
+        document.addEventListener('change', function (e) {
+            if (e.target && e.target.name === 'interfaceMode') {
+                applyInterfaceModeGating(e.target.value);
+            }
+        });
+
+        // Apply once the settings are loaded (admin_settings.js fires after auth)
+        document.addEventListener('adminUserContextReady', function () {
+            // Settings are fetched asynchronously; poll briefly until the radio is set
+            var attempts = 0;
+            var poll = setInterval(function () {
+                var mode = readInterfaceMode();
+                if (mode || ++attempts > 20) {
+                    clearInterval(poll);
+                    applyInterfaceModeGating(mode);
+                }
+            }, 150);
+        });
+
+        // Fallback: also apply on DOMContentLoaded in case the event already fired
+        if (document.readyState !== 'loading') {
+            setTimeout(function () { applyInterfaceModeGating(readInterfaceMode()); }, 500);
+        } else {
+            document.addEventListener('DOMContentLoaded', function () {
+                setTimeout(function () { applyInterfaceModeGating(readInterfaceMode()); }, 500);
+            });
+        }
+    })();
     </script>
 
 </body>

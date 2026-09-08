@@ -14,12 +14,7 @@ let updatePageBtn = null;
 let revertPageBtn = null;
 let saveButtonsBtn = null; // New button for saving changes
 let helpWizardBtn = null;
-let translatePagesBtn = null;
-
-let translatePagesModal = null;
 let runTranslatePagesBtn = null;
-let closeTranslatePagesModalBtn = null;
-let cancelTranslatePagesBtn = null;
 
 // Modal Elements
 let buttonEditorModal = null;
@@ -127,16 +122,12 @@ function assignDOMElements() {
     revertPageBtn = document.getElementById('revertPageBtn');
     saveButtonsBtn = document.getElementById('saveButtonsBtn');
     helpWizardBtn = document.getElementById('helpWizardBtn');
-    translatePagesBtn = document.getElementById('translatePagesBtn');
+    runTranslatePagesBtn = document.getElementById('runTranslatePagesBtn');
 
     // Modal elements
     buttonEditorModal = document.getElementById('buttonEditorModal');
     helpWizardModal = document.getElementById('helpWizardModal');
     imagePickerModal = document.getElementById('imagePickerModal');
-    translatePagesModal = document.getElementById('translatePagesModal');
-    runTranslatePagesBtn = document.getElementById('runTranslatePagesBtn');
-    closeTranslatePagesModalBtn = document.getElementById('closeTranslatePagesModal');
-    cancelTranslatePagesBtn = document.getElementById('cancelTranslatePagesBtn');
 
     if (pageForm) {
         pageForm.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_PAGE_SETTINGS);
@@ -177,17 +168,37 @@ function setupEventListeners() {
     // Button grid controls
     saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
     helpWizardBtn.addEventListener('click', startComprehensiveGuide);
-    if (translatePagesBtn) {
-        translatePagesBtn.addEventListener('click', openTranslatePagesModal);
-    }
-    if (closeTranslatePagesModalBtn) {
-        closeTranslatePagesModalBtn.addEventListener('click', closeTranslatePagesModal);
-    }
-    if (cancelTranslatePagesBtn) {
-        cancelTranslatePagesBtn.addEventListener('click', closeTranslatePagesModal);
-    }
     if (runTranslatePagesBtn) {
         runTranslatePagesBtn.addEventListener('click', runPageTranslation);
+    }
+
+    const selectAllPagesBtn = document.getElementById('selectAllPagesBtn');
+    if (selectAllPagesBtn) {
+        selectAllPagesBtn.addEventListener('click', () => {
+            const list = document.getElementById('translateScopeList');
+            if (!list) return;
+            const allChecked = list.querySelectorAll('input[type="checkbox"]');
+            const anyUnchecked = Array.from(allChecked).some(cb => !cb.checked);
+            allChecked.forEach(cb => { cb.checked = anyUnchecked; });
+            selectAllPagesBtn.textContent = anyUnchecked ? 'Deselect All' : 'Select All';
+        });
+    }
+
+    const selectAccentSourceInline = document.getElementById('selectAccentSourceInline');
+    const backToMigrationSourcesBtn = document.getElementById('backToMigrationSourcesBtn');
+    const migrationSourceSelection = document.getElementById('migrationSourceSelection');
+    const accentMigrationInterfaceInline = document.getElementById('accentMigrationInterfaceInline');
+    if (selectAccentSourceInline) {
+        selectAccentSourceInline.addEventListener('click', () => {
+            migrationSourceSelection.classList.add('hidden');
+            accentMigrationInterfaceInline.classList.remove('hidden');
+        });
+    }
+    if (backToMigrationSourcesBtn) {
+        backToMigrationSourcesBtn.addEventListener('click', () => {
+            accentMigrationInterfaceInline.classList.add('hidden');
+            migrationSourceSelection.classList.remove('hidden');
+        });
     }
     
     // Button Editor Modal
@@ -1192,6 +1203,32 @@ function populatePageSelect() {
         option.textContent = page.displayName || page.name;
         selectPage.appendChild(option);
     });
+    populateTranslateScopeList();
+}
+
+function populateTranslateScopeList() {
+    const list = document.getElementById('translateScopeList');
+    if (!list) return;
+    list.innerHTML = '';
+    allUserPages.forEach(page => {
+        const label = document.createElement('label');
+        label.className = 'flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer text-sm text-gray-700';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = page.name;
+        cb.name = 'translateScopePage';
+        cb.className = 'flex-shrink-0';
+        label.appendChild(cb);
+        const span = document.createElement('span');
+        span.textContent = page.displayName || page.name;
+        label.appendChild(span);
+        list.appendChild(label);
+    });
+    if (allUserPages.length === 0) {
+        list.innerHTML = '<div class="text-sm text-gray-400 p-2">No pages found.</div>';
+    }
+    const selectAllBtn = document.getElementById('selectAllPagesBtn');
+    if (selectAllBtn) selectAllBtn.textContent = 'Select All';
 }
 
 // Function to collect any unsaved changes from the modal editor
@@ -1371,16 +1408,10 @@ function revertPage() {
 }
 
 function openTranslatePagesModal() {
-    if (!translatePagesModal) return;
-    const scopeSelect = document.getElementById('translateScope');
-    if (scopeSelect) {
-        scopeSelect.value = 'current';
-    }
     populateTranslateLocaleDropdowns().catch(error => {
         console.warn('Failed to initialize translate locale dropdowns:', error);
     });
     setTranslateStatus('', 'hidden');
-    translatePagesModal.classList.remove('hidden');
 }
 
 async function populateTranslateLocaleDropdowns() {
@@ -1425,8 +1456,7 @@ async function populateTranslateLocaleDropdowns() {
 }
 
 function closeTranslatePagesModal() {
-    if (!translatePagesModal) return;
-    translatePagesModal.classList.add('hidden');
+    // No-op: translate is now a full page section, not a modal
 }
 
 function setTranslateStatus(message, tone = 'info') {
@@ -1452,7 +1482,6 @@ function setTranslateStatus(message, tone = 'info') {
 }
 
 async function runPageTranslation() {
-    const scope = (document.getElementById('translateScope')?.value || 'current').trim();
     const sourceLocaleRaw = (document.getElementById('translateSourceLocale')?.value || '').trim();
     const targetLocale = (document.getElementById('translateTargetLocale')?.value || '').trim();
 
@@ -1471,43 +1500,59 @@ async function runPageTranslation() {
         return;
     }
 
-    if (scope === 'current' && !selectPage?.value) {
-        setTranslateStatus('Please select a page first.', 'error');
+    const list = document.getElementById('translateScopeList');
+    const checkedBoxes = list ? Array.from(list.querySelectorAll('input[type="checkbox"]:checked')) : [];
+    if (checkedBoxes.length === 0) {
+        setTranslateStatus('Select at least one page to translate.', 'error');
         return;
     }
 
-    if (scope === 'tap_boards' && !includeLlmQuery) {
-        setTranslateStatus('Tap boards translation requires AI query prompts to be selected.', 'error');
-        return;
-    }
+    const allSelected = checkedBoxes.length === allUserPages.length;
+    const selectedPageBeforeRefresh = selectPage?.value || '';
 
-    const payload = {
+    const basePayload = {
         source_locale: sourceLocaleRaw || null,
         target_locale: targetLocale,
-        scope: scope === 'tap_boards' ? 'tap_boards' : (scope === 'all' ? 'all' : 'current'),
-        page_name: scope === 'all' || scope === 'tap_boards' ? null : selectPage.value,
         include_display_name: includeDisplayName,
         include_button_text: includeButtonText,
         include_speech_phrase: includeSpeechPhrase,
         include_llm_query: includeLlmQuery
     };
 
-    const selectedPageBeforeRefresh = selectPage?.value || '';
-
     try {
         if (runTranslatePagesBtn) runTranslatePagesBtn.disabled = true;
         setTranslateStatus('Translating content. This can take a moment for larger boards...', 'info');
 
-        const response = await window.authenticatedFetch('/api/admin/translate-pages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        let totalChanged = 0, totalPages = 0, totalSpecial = 0, totalTapBoards = 0;
 
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            const errorMessage = result?.detail || `Translation failed (${response.status})`;
-            throw new Error(errorMessage);
+        if (allSelected) {
+            const payload = { ...basePayload, scope: 'all', page_name: null };
+            const response = await window.authenticatedFetch('/api/admin/translate-pages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result?.detail || `Translation failed (${response.status})`);
+            totalChanged += Number(result?.strings_changed || 0);
+            totalPages += Number(result?.pages_processed || 0);
+            totalSpecial += Number(result?.special_pages_changed || 0);
+            totalTapBoards += Number(result?.tap_boards_prompts_changed || 0);
+        } else {
+            for (const cb of checkedBoxes) {
+                const payload = { ...basePayload, scope: 'current', page_name: cb.value };
+                const response = await window.authenticatedFetch('/api/admin/translate-pages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result?.detail || `Translation failed for "${cb.value}" (${response.status})`);
+                totalChanged += Number(result?.strings_changed || 0);
+                totalPages += Number(result?.pages_processed || 0);
+                totalSpecial += Number(result?.special_pages_changed || 0);
+                totalTapBoards += Number(result?.tap_boards_prompts_changed || 0);
+            }
         }
 
         await loadPages();
@@ -1516,20 +1561,9 @@ async function runPageTranslation() {
             handlePageSelected();
         }
 
-        const changed = Number(result?.strings_changed || 0);
-        const pagesProcessed = Number(result?.pages_processed || 0);
-        const specialPagesChanged = Number(result?.special_pages_changed || 0);
-        const specialPagesSuffix = specialPagesChanged > 0
-            ? ` Included ${specialPagesChanged} special page bundle(s).`
-            : '';
-        const tapBoardsSuffix = Number(result?.tap_boards_prompts_changed || 0) > 0
-            ? ` Updated ${Number(result.tap_boards_prompts_changed)} Tap board prompt(s).`
-            : '';
-        setTranslateStatus(`Translation complete. Updated ${changed} field(s) across ${pagesProcessed} page(s).${specialPagesSuffix}${tapBoardsSuffix}`, 'success');
-
-        setTimeout(() => {
-            closeTranslatePagesModal();
-        }, 800);
+        const specialSuffix = totalSpecial > 0 ? ` Included ${totalSpecial} special page bundle(s).` : '';
+        const tapSuffix = totalTapBoards > 0 ? ` Updated ${totalTapBoards} Tap board prompt(s).` : '';
+        setTranslateStatus(`Translation complete. Updated ${totalChanged} field(s) across ${totalPages} page(s).${specialSuffix}${tapSuffix}`, 'success');
     } catch (error) {
         console.error('Error translating pages:', error);
         setTranslateStatus(`Translation failed: ${error.message || 'Unknown error'}`, 'error');

@@ -77,6 +77,15 @@ AZURE_SPEECH_REGION="${AZURE_SPEECH_REGION:-westus2}"
 [ -z "$EMAIL_OAUTH_STATE_SECRET" ] && EMAIL_OAUTH_STATE_SECRET="$(get_secret_value "EMAIL_OAUTH_STATE_SECRET")"
 [ -z "$EMAIL_TOKEN_ENCRYPTION_KEY" ] && EMAIL_TOKEN_ENCRYPTION_KEY="$(get_secret_value "EMAIL_TOKEN_ENCRYPTION_KEY")"
 
+SYSTEM_EMAIL_SA_KEY_JSON="${SYSTEM_EMAIL_SA_KEY_JSON:-}"
+[ -z "$SYSTEM_EMAIL_SA_KEY_JSON" ] && SYSTEM_EMAIL_SA_KEY_JSON="$(get_secret_value "SYSTEM_EMAIL_SA_KEY_JSON")"
+
+if [ -n "$SYSTEM_EMAIL_SA_KEY_JSON" ]; then
+  echo "✅ System email service account key retrieved"
+else
+  echo "⚠️  WARNING: Could not retrieve SYSTEM_EMAIL_SA_KEY_JSON. Contact Support email will not work."
+fi
+
 if [ -z "$GOOGLE_OAUTH_CLIENT_ID" ] || [ -z "$GOOGLE_OAUTH_CLIENT_SECRET" ]; then
   echo "⚠️  WARNING: Could not retrieve Google OAuth secrets. Email feature will be disabled."
   echo "   If using Secret Manager, re-auth first: gcloud auth login && gcloud auth application-default login"
@@ -103,6 +112,7 @@ docker run -d --name bravo-dev -p 8000:8080 \
   -e GOOGLE_OAUTH_CLIENT_SECRET="$GOOGLE_OAUTH_CLIENT_SECRET" \
   -e EMAIL_OAUTH_STATE_SECRET="$EMAIL_OAUTH_STATE_SECRET" \
   -e EMAIL_TOKEN_ENCRYPTION_KEY="$EMAIL_TOKEN_ENCRYPTION_KEY" \
+  -e SYSTEM_EMAIL_SA_KEY_JSON="$SYSTEM_EMAIL_SA_KEY_JSON" \
   -e GCP_PROJECT_ID="$PROJECT_ID" \
   -e GOOGLE_CLOUD_PROJECT="$PROJECT_ID" \
   -e GOOGLE_CLOUD_QUOTA_PROJECT="$PROJECT_ID" \
