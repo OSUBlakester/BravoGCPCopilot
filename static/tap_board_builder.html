@@ -27,6 +27,25 @@
         .notification.success { background: #16a34a; }
         .notification.error { background: #dc2626; }
         .notification.info { background: #2563eb; }
+        /* Create Board Wizard */
+        .cbw-step-dot { width:2rem; height:2rem; border-radius:9999px; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:700; flex-shrink:0; background:#e5e7eb; color:#6b7280; transition:background 0.2s, color 0.2s; }
+        .cbw-step-dot.active { background:#4f46e5; color:#fff; }
+        .cbw-step-dot.done { background:#16a34a; color:#fff; }
+        .cbw-step-label { font-size:0.7rem; text-align:center; margin-top:0.2rem; color:#6b7280; }
+        .cbw-step-label.active { color:#4f46e5; font-weight:600; }
+        .cbw-ai-toggle { display:flex; gap:0.75rem; margin-top:0.5rem; }
+        .cbw-ai-toggle label { flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; padding:0.75rem; border:2px solid #e5e7eb; border-radius:0.5rem; cursor:pointer; font-weight:500; font-size:0.9rem; transition:border-color 0.15s, background 0.15s; }
+        .cbw-ai-toggle input[type=radio]:checked + label, .cbw-ai-toggle label:has(input[type=radio]:checked) { border-color:#4f46e5; background:#eef2ff; color:#3730a3; }
+        .cbw-menu-option { display:flex; align-items:flex-start; gap:0.6rem; padding:0.75rem; border:2px solid #e5e7eb; border-radius:0.5rem; cursor:pointer; margin-bottom:0.5rem; transition:border-color 0.15s, background 0.15s; }
+        .cbw-menu-option:has(input[type=radio]:checked) { border-color:#4f46e5; background:#eef2ff; }
+        /* AI button review grid */
+        .ai-review-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(82px,1fr)); gap:6px; max-height:280px; overflow-y:auto; padding:2px; }
+        .ai-btn-card { display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 4px; border:1px solid #e5e7eb; border-radius:6px; background:#fff; text-align:center; font-size:0.68rem; color:#374151; overflow:hidden; }
+        .ai-btn-card img { width:38px; height:38px; object-fit:contain; border-radius:4px; }
+        .ai-btn-card .ai-card-icon { width:38px; height:38px; display:flex; align-items:center; justify-content:center; background:#f3f4f6; border-radius:4px; color:#9ca3af; font-size:1.1rem; }
+        .ai-btn-card .ai-card-label { word-break:break-word; line-height:1.2; max-width:80px; font-size:0.68rem; }
+        .ai-btn-card--clickable { cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; }
+        .ai-btn-card--clickable:hover { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.18); }
         .readonly-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85); border: 2px dashed #f59e0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #92400e; font-weight: 600; font-size: 0.9rem; z-index: 20; }
         .drag-zone { position: absolute; top: 0; bottom: 0; width: 56px; z-index: 20; display: none; align-items: center; justify-content: center; writing-mode: vertical-rl; font-size: 11px; font-weight: 700; letter-spacing: 1px; pointer-events: none; transition: background 0.15s; }
         .drag-zone.active { background: rgba(99,102,241,0.25) !important; }
@@ -602,61 +621,274 @@
     </div>
 
     <div id="aiBulkBuilderModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5200;">
-        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">AI Build Board Options</h3>
-                <button id="closeAIBulkBuilder" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
+            <!-- Header + step indicator -->
+            <div class="flex justify-between items-start mb-4">
+                <div class="flex-1 mr-4">
+                    <h3 class="text-lg font-bold text-gray-900">Let Bravo Create Buttons</h3>
+                    <div class="flex items-center gap-1.5 mt-3">
+                        <div id="abiDot1" class="cbw-step-dot active">1</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="abiDot2" class="cbw-step-dot">2</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="abiDot3" class="cbw-step-dot">3</div>
+                    </div>
+                    <div class="flex mt-1">
+                        <span id="abiLbl1" class="flex-1 text-center cbw-step-label active">Prompt</span>
+                        <span id="abiLbl2" class="flex-1 text-center cbw-step-label">Options</span>
+                        <span id="abiLbl3" class="flex-1 text-center cbw-step-label">Review</span>
+                    </div>
+                </div>
+                <button id="closeAIBulkBuilder" class="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-1">&times;</button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="md:col-span-2">
-                    <label for="aiBulkTopic" class="block text-sm font-medium text-gray-700 mb-1">What is this board about?</label>
-                    <p class="text-xs text-gray-500 mb-2">e.g. School, At the Beach, Feelings, Favorite Songs, Morning Routine</p>
-                    <input type="text" id="aiBulkTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe the topic or theme of this board">
+
+            <!-- Step 1: AI Prompt -->
+            <div id="abi-step1">
+                <div class="space-y-4">
+                    <div>
+                        <label for="aiBulkTopic" class="block text-sm font-medium text-gray-700 mb-1">What is this board about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-500 mb-2">e.g. School, At the Beach, Feelings, Favorite Songs, Morning Routine</p>
+                        <input type="text" id="aiBulkTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe the topic or theme of this board">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="aiBulkExamples" class="block text-sm font-medium text-gray-700 mb-2">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="aiBulkExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play, go">
+                        </div>
+                        <div>
+                            <label for="aiBulkExclusions" class="block text-sm font-medium text-gray-700 mb-2">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="aiBulkExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. more, yes, no, all done">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label for="aiBulkCount" class="block text-sm font-medium text-gray-700 mb-2">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="aiBulkCount" min="5" max="50" value="30" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
                 </div>
-                <div>
-                    <label for="aiBulkExamples" class="block text-sm font-medium text-gray-700 mb-2">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
-                    <input type="text" id="aiBulkExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play, go">
-                </div>
-                <div>
-                    <label for="aiBulkExclusions" class="block text-sm font-medium text-gray-700 mb-2">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
-                    <input type="text" id="aiBulkExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. more, yes, no, all done">
-                </div>
-                <div>
-                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
-                    <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-                        <option value="do_nothing">Do nothing (default)</option>
-                        <option value="use_ai">Use AI</option>
-                        <option value="navigate">Navigate to Target Board</option>
-                        <option value="navigate_home">Navigate to Home Board</option>
-                    </select>
-                </div>
-                <div id="aiBulkTargetBoardWrapper" class="hidden">
-                    <label for="aiBulkTargetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label>
-                    <select id="aiBulkTargetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select>
-                </div>
-                <div>
-                    <label for="aiBulkBgColor" class="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
-                    <select id="aiBulkBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="#FFFFFF">Default</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option><option value="#DB2777">Pink</option><option value="#DC2626">Red</option><option value="#D97706">Orange/Amber</option><option value="#1F2937">Dark Gray</option><option value="#000000">Black</option></select>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="aiBulkCancelBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</button>
+                    <button id="abiGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-wand-magic-sparkles"></i>Generate Options</button>
                 </div>
             </div>
 
-            <div class="mt-4">
-                <div class="flex items-center justify-between">
-                    <h4 class="text-sm font-semibold text-gray-800">Preview</h4>
-                    <span id="aiBulkPreviewMeta" class="text-xs text-gray-500"></span>
+            <!-- Step 2: Review / Edit Options -->
+            <div id="abi-step2" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="abiOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, or add items below</p>
+                    <button id="abiAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
                 </div>
-                <div id="aiBulkPreviewList" class="mt-2 max-h-52 overflow-y-auto border border-gray-200 rounded-md p-3 text-sm text-gray-700 bg-gray-50">No preview generated yet.</div>
+                <div id="abiOptionsList" class="max-h-72 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="abiStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="abiStep2NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
             </div>
 
-            <div class="flex justify-end gap-2 mt-5">
-                <button id="aiBulkPreviewBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Preview</button>
-                <button id="aiBulkApplyBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>OK</button>
-                <button id="aiBulkCancelBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button>
+            <!-- Step 3: Review Display + Settings -->
+            <div id="abi-step3" class="hidden">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
+                        <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="do_nothing">Do nothing (default)</option>
+                            <option value="use_ai">Use AI</option>
+                            <option value="navigate">Navigate to Target Board</option>
+                            <option value="navigate_home">Navigate to Home Board</option>
+                        </select>
+                    </div>
+                    <div id="aiBulkTargetBoardWrapper" class="hidden">
+                        <label for="aiBulkTargetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label>
+                        <select id="aiBulkTargetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="">-- Select board --</option></select>
+                    </div>
+                    <div>
+                        <label for="aiBulkBgColor" class="block text-sm font-medium text-gray-700 mb-2">Button Color</label>
+                        <select id="aiBulkBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="#FFFFFF">Default (White)</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option><option value="#DB2777">Pink</option><option value="#DC2626">Red</option><option value="#D97706">Orange/Amber</option><option value="#1F2937">Dark Gray</option><option value="#000000">Black</option></select>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-semibold text-gray-800">Button Preview <span class="text-xs font-normal text-gray-400">(click a card to change its image)</span></h4>
+                    <button id="abiAssignImagesBtn" class="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-md hover:bg-violet-700 flex items-center gap-1.5"><i class="fas fa-images"></i> Assign Images</button>
+                </div>
+                <div id="abiDisplayGrid" class="ai-review-grid border border-gray-200 rounded-md p-2 bg-gray-50" style="min-height:80px; max-height:220px; overflow-y:auto;"></div>
+                <div id="abiStep3Status" class="text-xs text-gray-500 mt-2 min-h-[1.2rem]"></div>
+                <div class="flex justify-between gap-2 mt-3">
+                    <button id="abiStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="abiCreateBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-check"></i> Create Buttons</button>
+                </div>
             </div>
         </div>
     </div>
 
     <div id="notification" class="notification"></div>
+
+    <!-- Create Board Wizard Modal -->
+    <div id="createBoardWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6300;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full mx-4 flex flex-col" style="max-width:560px; max-height:90vh; overflow-y:auto;">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-plus-circle text-indigo-600 mr-2"></i>Create New Board</h3>
+                <button id="cbwCloseBtn" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <!-- Step indicator: 3 dots (Name | AI Build | Menu) -->
+            <div class="flex items-start mb-6">
+                <div class="flex flex-col items-center">
+                    <div class="cbw-step-dot active" id="cbwDot1">1</div>
+                    <div class="cbw-step-label active" id="cbwLbl1">Name</div>
+                </div>
+                <div class="flex-1 h-px bg-gray-200 mt-4 mx-1"></div>
+                <div class="flex flex-col items-center">
+                    <div class="cbw-step-dot" id="cbwDot2">2</div>
+                    <div class="cbw-step-label" id="cbwLbl2">AI Build</div>
+                </div>
+                <div class="flex-1 h-px bg-gray-200 mt-4 mx-1"></div>
+                <div class="flex flex-col items-center">
+                    <div class="cbw-step-dot" id="cbwDot3">3</div>
+                    <div class="cbw-step-label" id="cbwLbl3">Menu</div>
+                </div>
+            </div>
+
+            <!-- Step 1: Board Name + AI/Manual choice -->
+            <div id="cbwStep1" class="cbw-step">
+                <p class="text-sm text-gray-500 mb-4">Give your new board a name.</p>
+                <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwBoardName">Board Name <span class="text-red-500">*</span></label>
+                <input type="text" id="cbwBoardName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Morning Routine, Feelings, School">
+                <p class="text-xs text-gray-400 mt-1 mb-5">Tip: choose a short, descriptive name the user will recognize in the menu.</p>
+                <p class="text-sm font-medium text-gray-700 mb-3">Would you like Bravo AI to create the buttons?</p>
+                <div class="flex gap-3">
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-gray-200 rounded-lg cursor-pointer transition-all hover:border-indigo-300" id="cbwAiYesLabel">
+                        <input type="radio" name="cbwUseAi" value="yes" id="cbwAiYes" class="sr-only">
+                        <i class="fas fa-wand-magic-sparkles text-violet-600 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">Yes, use Bravo AI</span>
+                        <span class="text-xs text-gray-500 text-center">AI generates buttons based on a topic you describe</span>
+                    </label>
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-indigo-300 bg-indigo-50 rounded-lg cursor-pointer transition-all hover:border-indigo-400" id="cbwAiNoLabel">
+                        <input type="radio" name="cbwUseAi" value="no" id="cbwAiNo" class="sr-only" checked>
+                        <i class="fas fa-hand-pointer text-gray-500 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">No, I'll add buttons manually</span>
+                        <span class="text-xs text-gray-500 text-center">Start with a blank board and add buttons yourself</span>
+                    </label>
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button id="cbwStep1NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 2: AI Prompt (AI only) -->
+            <div id="cbwStep2" class="cbw-step hidden">
+                <p class="text-sm text-gray-500 mb-4">Tell Bravo what this board is about and how many buttons to create.</p>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwAiTopic">What is this board about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-400 mb-1">e.g. School, At the Beach, Feelings, Morning Routine</p>
+                        <input type="text" id="cbwAiTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Describe the topic or theme">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwAiExamples">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cbwAiExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="e.g. eat, drink, play">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwAiExclusions">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cbwAiExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="e.g. more, yes, no">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwAiCount">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="cbwAiCount" min="5" max="50" value="30" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+                <div class="flex justify-between gap-2 mt-6">
+                    <button id="cbwStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cbwStep2GenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-wand-magic-sparkles"></i> Generate Options</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Review / Edit Options (AI only) -->
+            <div id="cbwStep3" class="cbw-step hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="cbwOptionsCount" class="font-semibold text-gray-900">0</span> options generated — edit, delete, or add items</p>
+                    <button id="cbwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div id="cbwOptionsList" class="max-h-64 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="cbwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cbwStep3NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 4: Review Display + Settings (AI only) -->
+            <div id="cbwStep4" class="cbw-step hidden">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label for="cbwAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
+                        <select id="cbwAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="do_nothing">Do nothing (default)</option>
+                            <option value="use_ai">Use AI</option>
+                            <option value="navigate_home">Navigate to Home Board</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="cbwBgColor" class="block text-sm font-medium text-gray-700 mb-2">Button Color</label>
+                        <select id="cbwBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="#FFFFFF">Default (White)</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option></select>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-semibold text-gray-800">Button Preview <span class="text-xs font-normal text-gray-400">(click a card to change its image)</span></h4>
+                    <button id="cbwAssignImagesBtn" class="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-md hover:bg-violet-700 flex items-center gap-1.5"><i class="fas fa-images"></i> Assign Images</button>
+                </div>
+                <div id="cbwDisplayGrid" class="ai-review-grid border border-gray-200 rounded-md p-2 bg-gray-50" style="min-height:80px; max-height:200px; overflow-y:auto;"></div>
+                <div id="cbwStep4Status" class="text-xs text-gray-500 mt-2 min-h-[1.2rem]"></div>
+                <div class="flex justify-between gap-2 mt-3">
+                    <button id="cbwStep4BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cbwStep4NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 5: Menu Assignment + Create Board -->
+            <div id="cbwStep5" class="cbw-step hidden">
+                <p class="text-sm text-gray-500 mb-4">Where should this board appear in the Tap Interface navigation menu?</p>
+                <div id="cbwMenuOptions" class="space-y-2">
+                    <label class="cbw-menu-option">
+                        <input type="radio" name="cbwMenuPlacement" value="none" checked class="mt-0.5 flex-shrink-0">
+                        <div>
+                            <div class="font-semibold text-sm text-gray-800">Don't add to menu yet</div>
+                            <div class="text-xs text-gray-500">You can add it via Menu Settings later</div>
+                        </div>
+                    </label>
+                    <label class="cbw-menu-option" id="cbwMenuRootOption">
+                        <input type="radio" name="cbwMenuPlacement" value="root" class="mt-0.5 flex-shrink-0">
+                        <div class="flex-1">
+                            <div class="font-semibold text-sm text-gray-800">Add as a top-level menu item</div>
+                            <div class="text-xs text-gray-500 mb-2">Appears directly in the main Boards menu</div>
+                            <div id="cbwRootPositionWrapper" class="hidden">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Add after:</label>
+                                <select id="cbwRootPositionAfter" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm" disabled>
+                                    <option value="">— Beginning of list —</option>
+                                </select>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="cbw-menu-option" id="cbwMenuChildOption">
+                        <input type="radio" name="cbwMenuPlacement" value="child" class="mt-0.5 flex-shrink-0">
+                        <div class="flex-1">
+                            <div class="font-semibold text-sm text-gray-800">Add as a child of an existing menu item</div>
+                            <div class="text-xs text-gray-500 mb-2">Nested under a category in the Boards menu</div>
+                            <select id="cbwMenuParent" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm" disabled>
+                                <option value="">Loading menu…</option>
+                            </select>
+                            <p id="cbwMenuParentWarning" class="text-xs text-amber-600 mt-1 hidden"><i class="fas fa-exclamation-triangle mr-1"></i>This item currently navigates directly to a board. Making it a category will remove that direct link.</p>
+                        </div>
+                    </label>
+                </div>
+                <div id="cbwMenuLoadErr" class="hidden text-xs text-red-500 mt-2">Could not load the menu — you can assign this board via Menu Settings after creation.</div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="cbwStep5BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cbwCreateBoardBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-check"></i> Create Board</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Create Next Boards Modal -->
     <div id="createNextBoardsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6200;">
@@ -863,11 +1095,61 @@
             document.getElementById('imagePrevPage').addEventListener('click', () => navigateImagePage(-1));
             document.getElementById('imageNextPage').addEventListener('click', () => navigateImagePage(1));
             document.getElementById('imageSearchInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') searchImages(); });
+            // aiBulk modal (3-step)
             document.getElementById('closeAIBulkBuilder').addEventListener('click', closeAIBulkBuilderModal);
             document.getElementById('aiBulkCancelBtn').addEventListener('click', closeAIBulkBuilderModal);
-            document.getElementById('aiBulkPreviewBtn').addEventListener('click', previewAIBulkOptions);
-            document.getElementById('aiBulkApplyBtn').addEventListener('click', applyAIBulkOptions);
+            document.getElementById('abiGenerateBtn').addEventListener('click', _abiGenerate);
+            document.getElementById('abiStep2BackBtn').addEventListener('click', () => _abiGoStep(1));
+            document.getElementById('abiStep2NextBtn').addEventListener('click', _abiGoToStep3);
+            document.getElementById('abiAddOptionBtn').addEventListener('click', _abiAddOption);
+            document.getElementById('abiStep3BackBtn').addEventListener('click', () => { _abiGoStep(2); _abiRenderOptionsList(); });
+            document.getElementById('abiAssignImagesBtn').addEventListener('click', _abiAssignImages);
+            document.getElementById('abiCreateBtn').addEventListener('click', _abiCreate);
             document.getElementById('aiBulkAfterSelection').addEventListener('change', handleAIBulkAfterSelectionChange);
+
+            // Create Board Wizard (5-step) listeners
+            document.getElementById('cbwCloseBtn').addEventListener('click', _cbwClose);
+            document.getElementById('cbwStep1NextBtn').addEventListener('click', _cbwStep1Next);
+            document.getElementById('cbwStep2BackBtn').addEventListener('click', () => { _cbwStep = 1; _cbwUpdateStepUI(); });
+            document.getElementById('cbwStep2GenerateBtn').addEventListener('click', _cbwGenerate);
+            document.getElementById('cbwStep3BackBtn').addEventListener('click', () => { _cbwStep = 2; _cbwUpdateStepUI(); });
+            document.getElementById('cbwStep3NextBtn').addEventListener('click', _cbwGoToStep4);
+            document.getElementById('cbwAddOptionBtn').addEventListener('click', _cbwAddOption);
+            document.getElementById('cbwStep4BackBtn').addEventListener('click', () => { _cbwStep = 3; _cbwUpdateStepUI(); _cbwRenderOptionsList(); });
+            document.getElementById('cbwStep4NextBtn').addEventListener('click', _cbwGoToStep5);
+            document.getElementById('cbwAssignImagesBtn').addEventListener('click', _cbwAssignImages);
+            document.getElementById('cbwStep5BackBtn').addEventListener('click', () => { _cbwStep = _cbwUseAi ? 4 : 1; _cbwUpdateStepUI(); });
+            document.getElementById('cbwCreateBoardBtn').addEventListener('click', _cbwCreateBoard);
+            // Enter on board name advances step
+            document.getElementById('cbwBoardName').addEventListener('keydown', (e) => { if (e.key === 'Enter') _cbwStep1Next(); });
+            // AI toggle visual feedback
+            document.querySelectorAll('input[name="cbwUseAi"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    const useAi = document.getElementById('cbwAiYes').checked;
+                    document.getElementById('cbwAiYesLabel').classList.toggle('border-violet-500', useAi);
+                    document.getElementById('cbwAiYesLabel').classList.toggle('bg-violet-50', useAi);
+                    document.getElementById('cbwAiYesLabel').classList.toggle('border-gray-200', !useAi);
+                    document.getElementById('cbwAiNoLabel').classList.toggle('border-indigo-300', !useAi);
+                    document.getElementById('cbwAiNoLabel').classList.toggle('bg-indigo-50', !useAi);
+                    document.getElementById('cbwAiNoLabel').classList.toggle('border-gray-200', useAi);
+                });
+            });
+            // Menu placement radio wiring
+            document.querySelectorAll('input[name="cbwMenuPlacement"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    const val = document.querySelector('input[name="cbwMenuPlacement"]:checked')?.value;
+                    const parentSelect = document.getElementById('cbwMenuParent');
+                    parentSelect.disabled = val !== 'child';
+                    document.getElementById('cbwRootPositionWrapper').classList.toggle('hidden', val !== 'root');
+                    document.getElementById('cbwRootPositionAfter').disabled = val !== 'root';
+                    if (val === 'child') {
+                        _cbwCheckParentWarning();
+                    } else {
+                        document.getElementById('cbwMenuParentWarning').classList.add('hidden');
+                    }
+                });
+            });
+            document.getElementById('cbwMenuParent').addEventListener('change', _cbwCheckParentWarning);
 
             window.addEventListener('message', (event) => {
                 if (!event || !event.data || typeof event.data !== 'object') return;
@@ -1021,10 +1303,394 @@
             document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
         }
 
+        // ── Create Board Wizard (5-step) ─────────────────────────────────────
+        let _cbwStep = 1;
+        let _cbwMenuTree = [];
+        let _cbwUseAi = false;
+        let _cbwEditableOptions = [];
+        let _cbwDisplayButtons = [];
+        let _cbwImagesAssigned = false;
+
+        // ── aiBulk 3-step modal state ────────────────────────────────────────
+        let _abiStep = 1;
+        let _abiEditableOptions = [];
+        let _abiDisplayButtons = [];
+        let _abiImagesAssigned = false;
+
+        // Per-button image picker context (shared between wizard and aiBulk modal)
+        let _aiImagePickCtx = null; // {ctx:'abi'|'cbw', idx:number}
+
+        function openCreateBoardWizard() {
+            _cbwStep = 1;
+            _cbwMenuTree = [];
+            _cbwUseAi = false;
+            _cbwEditableOptions = [];
+            _cbwDisplayButtons = [];
+            _cbwImagesAssigned = false;
+            document.getElementById('cbwBoardName').value = '';
+            document.querySelector('input[name="cbwUseAi"][value="no"]').checked = true;
+            document.getElementById('cbwAiYesLabel').classList.remove('border-violet-500', 'bg-violet-50');
+            document.getElementById('cbwAiYesLabel').classList.add('border-gray-200');
+            document.getElementById('cbwAiNoLabel').classList.add('border-indigo-300', 'bg-indigo-50');
+            document.getElementById('cbwAiNoLabel').classList.remove('border-gray-200');
+            document.getElementById('cbwAiTopic').value = '';
+            document.getElementById('cbwAiExamples').value = '';
+            document.getElementById('cbwAiExclusions').value = '';
+            document.getElementById('cbwAiCount').value = '30';
+            document.getElementById('cbwAfterSelection').value = 'do_nothing';
+            document.getElementById('cbwBgColor').value = '#FFFFFF';
+            document.querySelector('input[name="cbwMenuPlacement"][value="none"]').checked = true;
+            document.getElementById('cbwMenuParent').innerHTML = '<option value="">Loading…</option>';
+            document.getElementById('cbwMenuParent').disabled = true;
+            document.getElementById('cbwMenuParentWarning').classList.add('hidden');
+            document.getElementById('cbwMenuLoadErr').classList.add('hidden');
+            document.getElementById('cbwRootPositionWrapper').classList.add('hidden');
+            document.getElementById('cbwRootPositionAfter').innerHTML = '<option value="">— Beginning of list —</option>';
+            document.getElementById('cbwRootPositionAfter').disabled = true;
+            document.getElementById('cbwDisplayGrid').innerHTML = '';
+            document.getElementById('cbwStep4Status').innerHTML = '';
+            _cbwUpdateStepUI();
+            document.getElementById('createBoardWizardModal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('cbwBoardName').focus(), 100);
+        }
+
+        function _cbwClose() {
+            document.getElementById('createBoardWizardModal').classList.add('hidden');
+            _aiImagePickCtx = null;
+        }
+
+        function _cbwUpdateStepUI() {
+            [1, 2, 3, 4, 5].forEach(n => {
+                const el = document.getElementById(`cbwStep${n}`);
+                if (el) el.classList.toggle('hidden', n !== _cbwStep);
+            });
+            const dot1 = document.getElementById('cbwDot1'), lbl1 = document.getElementById('cbwLbl1');
+            const dot2 = document.getElementById('cbwDot2'), lbl2 = document.getElementById('cbwLbl2');
+            const dot3 = document.getElementById('cbwDot3'), lbl3 = document.getElementById('cbwLbl3');
+            [dot1, dot2, dot3].forEach(d => d.classList.remove('active', 'done'));
+            [lbl1, lbl2, lbl3].forEach(l => l.classList.remove('active'));
+            if (_cbwStep === 1) {
+                dot1.textContent = '1'; dot1.classList.add('active'); lbl1.classList.add('active');
+                dot2.textContent = '2'; lbl2.textContent = 'AI Build';
+                dot3.textContent = '3';
+            } else if (_cbwStep === 2) {
+                dot1.textContent = '✓'; dot1.classList.add('done');
+                dot2.textContent = '2'; dot2.classList.add('active'); lbl2.textContent = 'AI Prompt'; lbl2.classList.add('active');
+                dot3.textContent = '3';
+            } else if (_cbwStep === 3) {
+                dot1.textContent = '✓'; dot1.classList.add('done');
+                dot2.textContent = '2'; dot2.classList.add('active'); lbl2.textContent = 'AI Options'; lbl2.classList.add('active');
+                dot3.textContent = '3';
+            } else if (_cbwStep === 4) {
+                dot1.textContent = '✓'; dot1.classList.add('done');
+                dot2.textContent = '2'; dot2.classList.add('active'); lbl2.textContent = 'AI Review'; lbl2.classList.add('active');
+                dot3.textContent = '3';
+            } else if (_cbwStep === 5) {
+                dot1.textContent = '✓'; dot1.classList.add('done');
+                if (_cbwUseAi) { dot2.textContent = '✓'; dot2.classList.add('done'); } else { dot2.textContent = '—'; }
+                lbl2.textContent = 'AI Build';
+                dot3.textContent = '3'; dot3.classList.add('active'); lbl3.classList.add('active');
+            }
+        }
+
+        function _cbwStep1Next() {
+            const name = document.getElementById('cbwBoardName').value.trim();
+            if (!name) { document.getElementById('cbwBoardName').focus(); showNotification('Enter a board name to continue', 'error'); return; }
+            _cbwUseAi = document.getElementById('cbwAiYes').checked;
+            if (_cbwUseAi) {
+                _cbwStep = 2;
+                _cbwUpdateStepUI();
+                setTimeout(() => document.getElementById('cbwAiTopic').focus(), 50);
+            } else {
+                _cbwGoToStep5();
+            }
+        }
+
+        async function _cbwGenerate() {
+            const topic = document.getElementById('cbwAiTopic').value.trim();
+            if (!topic) { document.getElementById('cbwAiTopic').focus(); showNotification('Enter a topic first', 'error'); return; }
+            const btn = document.getElementById('cbwStep2GenerateBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
+            try {
+                await previewAIBulkOptions({
+                    topic,
+                    examples: document.getElementById('cbwAiExamples').value.trim(),
+                    exclusions: document.getElementById('cbwAiExclusions').value.trim(),
+                    count: document.getElementById('cbwAiCount').value,
+                });
+                if (!aiBulkPreviewOptions.length) { showNotification('No options returned — try a different topic', 'error'); return; }
+                _cbwEditableOptions = aiBulkPreviewOptions.map(o => ({...o}));
+                _cbwStep = 3;
+                _cbwUpdateStepUI();
+                _cbwRenderOptionsList();
+            } catch (e) {
+                showNotification('Generation failed: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Generate Options';
+            }
+        }
+
+        function _cbwRenderOptionsList() {
+            const list = document.getElementById('cbwOptionsList');
+            document.getElementById('cbwOptionsCount').textContent = _cbwEditableOptions.filter(o => o.label.trim()).length;
+            if (!_cbwEditableOptions.length) {
+                list.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">No options. Add items with the button above.</p>';
+                return;
+            }
+            list.innerHTML = _cbwEditableOptions.map((opt, i) =>
+                `<div class="flex items-center gap-2 p-1.5 bg-white border border-gray-200 rounded-md">
+                    <span class="text-xs text-gray-400 w-5 flex-shrink-0 text-right">${i + 1}.</span>
+                    <input type="text" data-cbw-idx="${i}" value="${escapeHtml(opt.label)}"
+                        class="flex-1 px-2 py-1 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:border-indigo-400"
+                        placeholder="Enter label">
+                    <button type="button" data-cbw-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs"><i class="fas fa-times"></i></button>
+                </div>`
+            ).join('');
+            list.querySelectorAll('input[data-cbw-idx]').forEach(inp => {
+                inp.addEventListener('change', () => {
+                    const idx = parseInt(inp.dataset.cbwIdx, 10);
+                    if (_cbwEditableOptions[idx]) _cbwEditableOptions[idx].label = inp.value;
+                    document.getElementById('cbwOptionsCount').textContent = _cbwEditableOptions.filter(o => o.label.trim()).length;
+                });
+            });
+            list.querySelectorAll('button[data-cbw-del]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.cbwDel, 10);
+                    _cbwEditableOptions.splice(idx, 1);
+                    _cbwRenderOptionsList();
+                });
+            });
+        }
+
+        function _cbwAddOption() {
+            _cbwEditableOptions.push({ label: '', plural: null, past_tense: null });
+            _cbwRenderOptionsList();
+            const inputs = document.querySelectorAll('#cbwOptionsList input[type=text]');
+            if (inputs.length) inputs[inputs.length - 1].focus();
+        }
+
+        function _cbwSyncOptionsFromDOM() {
+            document.querySelectorAll('#cbwOptionsList input[data-cbw-idx]').forEach(inp => {
+                const idx = parseInt(inp.dataset.cbwIdx, 10);
+                if (_cbwEditableOptions[idx]) _cbwEditableOptions[idx].label = inp.value.trim();
+            });
+            _cbwEditableOptions = _cbwEditableOptions.filter(o => o.label.trim());
+        }
+
+        function _cbwGoToStep4() {
+            _cbwSyncOptionsFromDOM();
+            if (!_cbwEditableOptions.length) { showNotification('Add at least one option', 'error'); return; }
+            aiBulkPreviewOptions = _cbwEditableOptions.map(o => ({...o}));
+            _cbwImagesAssigned = false;
+            _cbwStep = 4;
+            _cbwUpdateStepUI();
+            document.getElementById('cbwStep4Status').textContent = '';
+            const color = document.getElementById('cbwBgColor').value || '#FFFFFF';
+            _cbwDisplayButtons = _cbwEditableOptions.filter(o => o.label.trim()).map(o => ({
+                label: o.label, image_url: null, background_color: color
+            }));
+            _renderAiButtonCardsClickable('cbwDisplayGrid', _cbwDisplayButtons, 'cbw');
+        }
+
+        async function _cbwAssignImages() {
+            const btn = document.getElementById('cbwAssignImagesBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working…';
+            document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-spinner fa-spin text-violet-500"></i> Creating board & assigning images…';
+            try {
+                const boardName = document.getElementById('cbwBoardName').value.trim() || 'New Board';
+                createNewBoardDraft(boardName);
+                document.getElementById('boardLabel').value = boardName;
+                _cbwApplyOptionsToBoard();
+                await saveBoard();
+                const savedId = currentBoardData?.id;
+                const imgResp = await fetch('/api/tap-interface/boards/assign-all-images', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+                if (imgResp.ok && savedId) {
+                    await loadBoards();
+                    const refreshed = allBoards.find(b => b.id === savedId);
+                    if (refreshed) { currentBoardData = JSON.parse(JSON.stringify(refreshed)); renderButtonGrid(); }
+                    _cbwImagesAssigned = true;
+                    _cbwDisplayButtons = (currentBoardData?.buttons || []).filter(b => String(b.label || '').trim());
+                    _renderAiButtonCardsClickable('cbwDisplayGrid', _cbwDisplayButtons, 'cbw');
+                    document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-check text-green-600"></i> Images assigned — click any card to choose a different image';
+                } else {
+                    document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-exclamation-circle text-amber-500"></i> Image assignment failed — you can try again or continue';
+                }
+            } catch (e) {
+                document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-exclamation-circle text-amber-500"></i> Error: ' + e.message;
+            } finally {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-images"></i> Assign Images';
+            }
+        }
+
+        function _cbwApplyOptionsToBoard() {
+            if (!currentBoardData) return;
+            const perRow = GRID_COLS;
+            const afterSelection = document.getElementById('cbwAfterSelection').value;
+            const backgroundColor = document.getElementById('cbwBgColor').value.trim() || '#FFFFFF';
+            const boardExplicitDynamic = (currentBoardData?.dynamic_rows !== null && currentBoardData?.dynamic_rows !== undefined)
+                ? Number(currentBoardData.dynamic_rows) : (useHybridPages ? tapDynamicRows : 0);
+            const maxStaticRow = Math.max(0, tapWordsRows - boardExplicitDynamic);
+            const maxOnPage = maxStaticRow * perRow;
+            const bulkConfig = { afterSelection, targetBoardId: '', backgroundColor };
+            const validOptions = aiBulkPreviewOptions.filter(o => o.label.trim());
+            currentBoardData.buttons = [];
+            for (let i = 0; i < validOptions.length; i++) {
+                const opt = validOptions[i];
+                const isOverflow = i >= maxOnPage;
+                currentBoardData.buttons.push(buildGeneratedButtonPayload(
+                    opt.label,
+                    isOverflow ? null : Math.floor(i / perRow),
+                    isOverflow ? null : (i % perRow),
+                    bulkConfig, opt.plural, opt.past_tense, i
+                ));
+            }
+            const topic = document.getElementById('cbwAiTopic').value.trim();
+            currentBoardData.prompt_topic = topic || null;
+            currentBoardData.prompt_examples = document.getElementById('cbwAiExamples').value.trim() || null;
+            currentBoardData.prompt_exclusions = document.getElementById('cbwAiExclusions').value.trim() || null;
+            renderButtonGrid();
+        }
+
+        function _cbwGoToStep5() {
+            _cbwStep = 5;
+            _cbwUpdateStepUI();
+            _cbwLoadMenuForStep5();
+        }
+
+        async function _cbwLoadMenuForStep5() {
+            const select = document.getElementById('cbwMenuParent');
+            const posSelect = document.getElementById('cbwRootPositionAfter');
+            select.innerHTML = '<option value="">Loading…</option>';
+            select.disabled = true;
+            try {
+                const resp = await fetch('/api/tap-interface/boards-menu', { headers: getAuthHeaders() });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                _cbwMenuTree = Array.isArray(data.boards_menu) ? data.boards_menu : [];
+                select.innerHTML = '<option value="">— select a parent item —</option>';
+                _cbwMenuTree.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.id; opt.textContent = item.label; opt.dataset.hasBoardId = item.board_id ? '1' : '0';
+                    select.appendChild(opt);
+                });
+                if (_cbwMenuTree.length === 0) select.innerHTML = '<option value="">No menu items yet</option>';
+                posSelect.innerHTML = '<option value="">— Beginning of list —</option>';
+                _cbwMenuTree.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.id; opt.textContent = 'After: ' + item.label;
+                    posSelect.appendChild(opt);
+                });
+            } catch (e) {
+                document.getElementById('cbwMenuLoadErr').classList.remove('hidden');
+                select.innerHTML = '<option value="">Unavailable</option>';
+                posSelect.innerHTML = '<option value="">Unavailable</option>';
+            }
+        }
+
+        async function _cbwCreateBoard() {
+            const btn = document.getElementById('cbwCreateBoardBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Creating…';
+            const boardName = document.getElementById('cbwBoardName').value.trim() || 'New Board';
+            const menuPlacement = document.querySelector('input[name="cbwMenuPlacement"]:checked')?.value || 'none';
+            const menuParentId = document.getElementById('cbwMenuParent').value;
+            const menuPositionAfterId = document.getElementById('cbwRootPositionAfter').value;
+            try {
+                let savedId = currentBoardData?.id && allBoards.find(b => b.id === currentBoardData.id) ? currentBoardData.id : null;
+                if (!savedId) {
+                    createNewBoardDraft(boardName);
+                    document.getElementById('boardLabel').value = boardName;
+                    if (_cbwUseAi && aiBulkPreviewOptions.length) { _cbwApplyOptionsToBoard(); }
+                    await saveBoard();
+                    savedId = currentBoardData?.id;
+                }
+                if (menuPlacement !== 'none' && savedId) {
+                    try {
+                        const menuResp = await fetch('/api/tap-interface/boards-menu', { headers: getAuthHeaders() });
+                        if (!menuResp.ok) throw new Error('Failed to load menu');
+                        const menuData = await menuResp.json();
+                        let menuTree = Array.isArray(menuData.boards_menu) ? JSON.parse(JSON.stringify(menuData.boards_menu)) : [];
+                        const newMenuItem = { id: `menu_${savedId}`, label: boardName, board_id: savedId, source: 'custom', sort_order: 999, hidden: false, background_color: '#FFFFFF', text_color: '#000000', children: [] };
+                        if (menuPlacement === 'root') {
+                            if (menuPositionAfterId) {
+                                const idx = menuTree.findIndex(item => item.id === menuPositionAfterId);
+                                menuTree.splice(idx >= 0 ? idx + 1 : menuTree.length, 0, newMenuItem);
+                            } else { menuTree.unshift(newMenuItem); }
+                        } else if (menuPlacement === 'child' && menuParentId) {
+                            const parent = menuTree.find(item => item.id === menuParentId);
+                            if (parent) { if (!Array.isArray(parent.children)) parent.children = []; parent.children.push(newMenuItem); }
+                            else menuTree.push(newMenuItem);
+                        }
+                        await fetch('/api/tap-interface/boards-menu', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ boards_menu: menuTree }) });
+                    } catch (menuErr) {
+                        console.error('[cbwCreateBoard] menu error:', menuErr);
+                        showNotification('Board created but menu assignment failed — add it via Menu Settings', 'error');
+                    }
+                }
+                _cbwClose();
+                showNotification(`"${boardName}" created successfully`, 'success');
+                // Background image assignment if not yet done
+                if (_cbwUseAi && !_cbwImagesAssigned && savedId && (currentBoardData?.buttons || []).length > 0) {
+                    (async () => {
+                        try {
+                            await fetch('/api/tap-interface/boards/assign-all-images', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+                            await loadBoards();
+                            const refreshed = allBoards.find(b => b.id === savedId);
+                            if (refreshed) { currentBoardData = JSON.parse(JSON.stringify(refreshed)); renderButtonGrid(); }
+                        } catch (e) { /* silent */ }
+                    })();
+                }
+            } catch (err) {
+                console.error('[cbwCreateBoard]', err);
+                showNotification('Failed to create board: ' + err.message, 'error');
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Create Board';
+            }
+        }
+
+        // Render clickable button cards (image + label) into a grid — ctx = 'abi' | 'cbw'
+        function _renderAiButtonCardsClickable(containerId, buttons, ctx) {
+            const grid = document.getElementById(containerId);
+            if (!grid) return;
+            const labeled = (buttons || []).filter(b => String(b.label || '').trim());
+            if (!labeled.length) { grid.innerHTML = '<p class="text-xs text-gray-400 col-span-full text-center py-4">No buttons yet.</p>'; return; }
+            grid.innerHTML = labeled.map((b, i) => {
+                const imgHtml = b.image_url
+                    ? `<img src="${escapeHtml(b.image_url)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                      + `<div class="ai-card-icon" style="display:none"><i class="fas fa-image"></i></div>`
+                    : `<div class="ai-card-icon"><i class="fas fa-image"></i></div>`;
+                return `<div class="ai-btn-card ai-btn-card--clickable" data-ctx="${escapeHtml(ctx)}" data-btn-idx="${i}" style="background:${escapeHtml(b.background_color || '#fff')}" title="Click to change image">${imgHtml}<div class="ai-card-label">${escapeHtml(b.label)}</div></div>`;
+            }).join('');
+            grid.onclick = e => {
+                const card = e.target.closest('.ai-btn-card--clickable');
+                if (!card) return;
+                _aiImagePickCtx = { ctx: card.dataset.ctx, idx: parseInt(card.dataset.btnIdx, 10) };
+                openImagePicker();
+            };
+        }
+
+        // Non-clickable version for backward compat
+        function _renderAiButtonCards(containerId, buttons) {
+            const grid = document.getElementById(containerId);
+            if (!grid) return;
+            const labeled = (buttons || []).filter(b => String(b.label || '').trim());
+            if (!labeled.length) { grid.innerHTML = '<p class="text-xs text-gray-400 col-span-full text-center py-4">No buttons yet.</p>'; return; }
+            grid.innerHTML = labeled.map(b => {
+                const imgHtml = b.image_url
+                    ? `<img src="${escapeHtml(b.image_url)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                      + `<div class="ai-card-icon" style="display:none"><i class="fas fa-image"></i></div>`
+                    : `<div class="ai-card-icon"><i class="fas fa-image"></i></div>`;
+                return `<div class="ai-btn-card" style="background:${escapeHtml(b.background_color || '#fff')}">${imgHtml}<div class="ai-card-label">${escapeHtml(b.label)}</div></div>`;
+            }).join('');
+        }
+
+        function _cbwCheckParentWarning() {
+            const sel = document.getElementById('cbwMenuParent');
+            const selected = sel.options[sel.selectedIndex];
+            const hasBoardId = selected?.dataset?.hasBoardId === '1';
+            document.getElementById('cbwMenuParentWarning').classList.toggle('hidden', !hasBoardId);
+        }
+
         function promptCreateNewBoard() {
-            const name = window.prompt('Enter a name for the new board:', '');
-            if (name === null) return; // cancelled
-            createNewBoardDraft(name.trim() || 'New Board');
+            openCreateBoardWizard();
         }
 
         function createNewBoardDraft(label = 'New Board') {
@@ -1939,20 +2605,27 @@
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
             if (String(currentBoardData?.board_type || 'ai') === 'ai') { showNotification('This board is fully AI-generated — add static rows first via Configure Dynamic Rows', 'error'); return; }
             aiBulkPreviewOptions = [];
-            document.getElementById('aiBulkPreviewList').textContent = 'No preview generated yet.';
-            document.getElementById('aiBulkPreviewMeta').textContent = '';
-            document.getElementById('aiBulkApplyBtn').disabled = true;
-            // Pre-populate from the board's existing topic and optional fields
+            _abiEditableOptions = [];
+            _abiDisplayButtons = [];
+            _abiImagesAssigned = false;
             document.getElementById('aiBulkTopic').value = currentBoardData.prompt_topic || '';
             document.getElementById('aiBulkExamples').value = currentBoardData.prompt_examples || '';
             document.getElementById('aiBulkExclusions').value = currentBoardData.prompt_exclusions || '';
+            document.getElementById('aiBulkCount').value = '30';
+            document.getElementById('aiBulkAfterSelection').value = 'do_nothing';
+            document.getElementById('aiBulkBgColor').value = '#FFFFFF';
+            document.getElementById('abiStep3Status').textContent = '';
+            document.getElementById('abiDisplayGrid').innerHTML = '';
             populateAIBulkTargetBoardDropdown();
             handleAIBulkAfterSelectionChange();
+            _abiGoStep(1);
             document.getElementById('aiBulkBuilderModal').classList.remove('hidden');
         }
 
         function closeAIBulkBuilderModal() {
             document.getElementById('aiBulkBuilderModal').classList.add('hidden');
+            _abiImagesAssigned = false;
+            _aiImagePickCtx = null;
         }
 
         function openTouchChatMigrationModal() {
@@ -2062,25 +2735,14 @@
             }
         }
 
-        async function previewAIBulkOptions() {
-            const topic = document.getElementById('aiBulkTopic').value.trim();
+        async function previewAIBulkOptions(overrides = {}) {
+            const topic = overrides.topic ?? document.getElementById('aiBulkTopic').value.trim();
             if (!topic) { showNotification('Enter a topic first', 'error'); return; }
-            const examples = document.getElementById('aiBulkExamples').value.trim();
-            const exclusions = document.getElementById('aiBulkExclusions').value.trim();
+            const examples = overrides.examples ?? document.getElementById('aiBulkExamples').value.trim();
+            const exclusions = overrides.exclusions ?? document.getElementById('aiBulkExclusions').value.trim();
+            const countVal = overrides.count ?? document.getElementById('aiBulkCount')?.value ?? '30';
+            const maxPool = Math.min(50, Math.max(5, parseInt(countVal, 10) || 30));
             const prompt = `Generate AAC word and phrase options for a board about: ${topic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`;
-            const staticRows = getStaticRowsCount();
-            const perRow = GRID_COLS;
-            const maxOnPage = staticRows * perRow;
-            const maxPool = 30;
-
-            const previewList = document.getElementById('aiBulkPreviewList');
-            const previewMeta = document.getElementById('aiBulkPreviewMeta');
-            const previewBtn = document.getElementById('aiBulkPreviewBtn');
-            const applyBtn = document.getElementById('aiBulkApplyBtn');
-            previewList.textContent = 'Generating preview...';
-            previewMeta.textContent = '';
-            previewBtn.disabled = true;
-            applyBtn.disabled = true;
 
             try {
                 let enhancedPrompt = `Generate UP TO ${maxPool} UNIQUE board button labels for AAC communication: ${prompt}\n`;
@@ -2101,28 +2763,14 @@
                 aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, maxPool);
                 console.log('Normalized options:', aiBulkPreviewOptions, 'Count:', aiBulkPreviewOptions.length);
                 if (!aiBulkPreviewOptions.length) {
-                    previewList.textContent = 'No options returned. Try a different prompt.';
                     showNotification('No preview options returned', 'error');
                     return;
                 }
-                // Enrich with plural/past_tense during preview so they're ready on apply
                 await enrichOptionsWithVariants(aiBulkPreviewOptions);
-                const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
-                const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
-                const metaParts = [`${aiBulkPreviewOptions.length} option(s) — ${onPage} on page 1`];
-                if (overflow > 0) metaParts.push(`${overflow} on next page (via Something Else)`);
-                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map((opt, i) => {
-                    const pageTag = i >= maxOnPage ? ' <span class="text-gray-400 text-xs">(next page)</span>' : '';
-                    return `<li>${escapeHtml(opt.label)}${pageTag}</li>`;
-                }).join('')}</ol>`;
-                previewMeta.textContent = metaParts.join(' · ');
-                applyBtn.disabled = false;
             } catch (error) {
                 console.error(error);
-                previewList.textContent = 'Preview failed. Please try again.';
                 showNotification('Preview failed: ' + error.message, 'error');
-            } finally {
-                previewBtn.disabled = false;
+                throw error;
             }
         }
 
@@ -2211,88 +2859,157 @@
             };
         }
 
-        function applyAIBulkOptions() {
-            if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
-            if (!aiBulkPreviewOptions.length) { showNotification('Preview options first', 'error'); return; }
+        // ── aiBulk 3-step modal functions ────────────────────────────────────
 
+        function _abiGoStep(n) {
+            _abiStep = n;
+            ['abi-step1', 'abi-step2', 'abi-step3'].forEach((id, i) => {
+                document.getElementById(id).classList.toggle('hidden', i + 1 !== n);
+            });
+            [1, 2, 3].forEach(i => {
+                const dot = document.getElementById(`abiDot${i}`);
+                const lbl = document.getElementById(`abiLbl${i}`);
+                dot.classList.remove('active', 'done');
+                lbl.classList.remove('active');
+                if (i < n) { dot.classList.add('done'); dot.textContent = '✓'; }
+                else { dot.textContent = String(i); }
+                if (i === n) { dot.classList.add('active'); lbl.classList.add('active'); }
+            });
+        }
+
+        async function _abiGenerate() {
+            const topic = document.getElementById('aiBulkTopic').value.trim();
+            if (!topic) { showNotification('Enter a topic first', 'error'); return; }
+            const btn = document.getElementById('abiGenerateBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
+            try {
+                await previewAIBulkOptions();
+                if (!aiBulkPreviewOptions.length) { showNotification('No options returned — try a different topic', 'error'); return; }
+                _abiEditableOptions = aiBulkPreviewOptions.map(o => ({...o}));
+                _abiGoStep(2);
+                _abiRenderOptionsList();
+            } catch (e) {
+                // previewAIBulkOptions already called showNotification
+            } finally {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Generate Options';
+            }
+        }
+
+        function _abiRenderOptionsList() {
+            const list = document.getElementById('abiOptionsList');
+            document.getElementById('abiOptionsCount').textContent = _abiEditableOptions.filter(o => o.label.trim()).length;
+            if (!_abiEditableOptions.length) {
+                list.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">No options. Add items with the button above.</p>';
+                return;
+            }
+            list.innerHTML = _abiEditableOptions.map((opt, i) =>
+                `<div class="flex items-center gap-2 p-1.5 bg-white border border-gray-200 rounded-md">
+                    <span class="text-xs text-gray-400 w-5 flex-shrink-0 text-right">${i + 1}.</span>
+                    <input type="text" data-abi-idx="${i}" value="${escapeHtml(opt.label)}"
+                        class="flex-1 px-2 py-1 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:border-indigo-400"
+                        placeholder="Enter label">
+                    <button type="button" data-abi-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs"><i class="fas fa-times"></i></button>
+                </div>`
+            ).join('');
+            list.querySelectorAll('input[data-abi-idx]').forEach(inp => {
+                inp.addEventListener('change', () => {
+                    const idx = parseInt(inp.dataset.abiIdx, 10);
+                    if (_abiEditableOptions[idx]) _abiEditableOptions[idx].label = inp.value;
+                    document.getElementById('abiOptionsCount').textContent = _abiEditableOptions.filter(o => o.label.trim()).length;
+                });
+            });
+            list.querySelectorAll('button[data-abi-del]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.abiDel, 10);
+                    _abiEditableOptions.splice(idx, 1);
+                    _abiRenderOptionsList();
+                });
+            });
+        }
+
+        function _abiAddOption() {
+            _abiEditableOptions.push({ label: '', plural: null, past_tense: null });
+            _abiRenderOptionsList();
+            const inputs = document.querySelectorAll('#abiOptionsList input[type=text]');
+            if (inputs.length) inputs[inputs.length - 1].focus();
+        }
+
+        function _abiSyncFromDOM() {
+            document.querySelectorAll('#abiOptionsList input[data-abi-idx]').forEach(inp => {
+                const idx = parseInt(inp.dataset.abiIdx, 10);
+                if (_abiEditableOptions[idx]) _abiEditableOptions[idx].label = inp.value.trim();
+            });
+            _abiEditableOptions = _abiEditableOptions.filter(o => o.label.trim());
+        }
+
+        function _abiGoToStep3() {
+            _abiSyncFromDOM();
+            if (!_abiEditableOptions.length) { showNotification('Add at least one option', 'error'); return; }
+            aiBulkPreviewOptions = _abiEditableOptions.map(o => ({...o}));
+            _abiImagesAssigned = false;
+            document.getElementById('abiStep3Status').textContent = '';
+            _abiGoStep(3);
+            _abiRenderDisplayGrid();
+        }
+
+        function _abiRenderDisplayGrid(buttons) {
+            const color = document.getElementById('aiBulkBgColor').value || '#FFFFFF';
+            const src = buttons || _abiEditableOptions.filter(o => o.label.trim()).map(o => ({
+                label: o.label, image_url: null, background_color: color
+            }));
+            _renderAiButtonCardsClickable('abiDisplayGrid', src, 'abi');
+        }
+
+        async function _abiAssignImages() {
+            const btn = document.getElementById('abiAssignImagesBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Assigning…';
+            document.getElementById('abiStep3Status').innerHTML = '<i class="fas fa-spinner fa-spin text-violet-500"></i> Saving & assigning images…';
+            try {
+                _abiApplyOptionsToBoard();
+                await saveBoard();
+                const imgResp = await fetch('/api/tap-interface/boards/assign-all-images', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+                if (imgResp.ok) {
+                    await loadBoards();
+                    if (currentBoardData?.id) {
+                        const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                        if (refreshed) { currentBoardData = JSON.parse(JSON.stringify(refreshed)); renderButtonGrid(); }
+                    }
+                    _abiImagesAssigned = true;
+                    _abiDisplayButtons = (currentBoardData?.buttons || []).filter(b => String(b.label || '').trim());
+                    _renderAiButtonCardsClickable('abiDisplayGrid', _abiDisplayButtons, 'abi');
+                    document.getElementById('abiStep3Status').innerHTML = '<i class="fas fa-check text-green-600"></i> Images assigned — click any card to choose a different image';
+                } else {
+                    document.getElementById('abiStep3Status').innerHTML = '<i class="fas fa-exclamation-circle text-amber-500"></i> Image assignment failed — try again';
+                }
+            } catch (e) {
+                document.getElementById('abiStep3Status').innerHTML = '<i class="fas fa-exclamation-circle text-amber-500"></i> Error: ' + e.message;
+            } finally {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-images"></i> Assign Images';
+            }
+        }
+
+        function _abiApplyOptionsToBoard() {
+            if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
             const perRow = GRID_COLS;
             const afterSelection = document.getElementById('aiBulkAfterSelection').value;
             const targetBoardId = document.getElementById('aiBulkTargetBoard').value.trim();
             const backgroundColor = document.getElementById('aiBulkBgColor').value.trim() || '#FFFFFF';
-            if (afterSelection === 'navigate' && !targetBoardId) {
-                showNotification('Select a target board for Navigate', 'error');
-                return;
-            }
-
-            const existingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
-            const hasExistingDefined = existingButtons.some(btn => !!String(btn.label || '').trim());
-            let mode = 'replace';
-            if (hasExistingDefined) {
-                const choice = window.prompt('Existing buttons found. Type "add" to add below existing rows, or "replace" to replace existing buttons.', 'add');
-                if (!choice) return;
-                const normalizedChoice = choice.trim().toLowerCase();
-                if (normalizedChoice !== 'add' && normalizedChoice !== 'replace') {
-                    showNotification('Please enter add or replace', 'error');
-                    return;
-                }
-                mode = normalizedChoice;
-            }
-
-            if (mode === 'replace') {
-                currentBoardData.buttons = [];
-            }
-
-            const workingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
-            // Compute static rows from global settings — getStaticRowsCount() returns 0 for 'ai'
-            // boards and can give wrong results for unsaved boards, so bypass it here.
+            if (afterSelection === 'navigate' && !targetBoardId) { showNotification('Select a target board for Navigate', 'error'); return; }
             const boardExplicitDynamic = (currentBoardData?.dynamic_rows !== null && currentBoardData?.dynamic_rows !== undefined)
-                ? Number(currentBoardData.dynamic_rows)
-                : (useHybridPages ? tapDynamicRows : 0);
+                ? Number(currentBoardData.dynamic_rows) : (useHybridPages ? tapDynamicRows : 0);
             const maxStaticRow = Math.max(0, tapWordsRows - boardExplicitDynamic);
             const maxOnPage = maxStaticRow * perRow;
             const bulkConfig = { afterSelection, targetBoardId, backgroundColor };
-
-            if (mode === 'replace') {
-                // Assign pool_index to all options; first page gets row/col, overflow gets null/null
-                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
-                    const opt = aiBulkPreviewOptions[i];
-                    const isOverflow = i >= maxOnPage;
-                    const row = isOverflow ? null : Math.floor(i / perRow);
-                    const col = isOverflow ? null : (i % perRow);
-                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, i));
-                }
-            } else {
-                // Add mode: find available visible slots, fill them first; remaining go as overflow
-                const startRow = findFirstCompletelyEmptyRow(workingButtons);
-                if (startRow < 0) {
-                    showNotification('No empty row available to add options', 'error');
-                    return;
-                }
-                const slots = [];
-                for (let row = startRow; row < maxStaticRow; row++) {
-                    for (let col = 0; col < perRow; col++) {
-                        const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
-                        if (!occupied) slots.push({ row, col });
-                    }
-                }
-                // Determine next pool_index to continue from
-                const existingPoolIndices = workingButtons
-                    .map(b => b.pool_index)
-                    .filter(idx => idx !== null && idx !== undefined)
-                    .map(Number);
-                let nextPoolIndex = existingPoolIndices.length > 0 ? Math.max(...existingPoolIndices) + 1 : 0;
-                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
-                    const opt = aiBulkPreviewOptions[i];
-                    const slot = slots[i] || null;
-                    const row = slot ? slot.row : null;
-                    const col = slot ? slot.col : null;
-                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, nextPoolIndex + i));
-                }
+            const validOptions = aiBulkPreviewOptions.filter(o => o.label.trim());
+            currentBoardData.buttons = [];
+            for (let i = 0; i < validOptions.length; i++) {
+                const opt = validOptions[i];
+                const isOverflow = i >= maxOnPage;
+                currentBoardData.buttons.push(buildGeneratedButtonPayload(
+                    opt.label, isOverflow ? null : Math.floor(i / perRow), isOverflow ? null : (i % perRow),
+                    bulkConfig, opt.plural, opt.past_tense, i
+                ));
             }
-
-            currentBoardData.buttons = workingButtons;
-
-            // Save topic, generated prompt, examples, and exclusions to the board
             const appliedTopic = document.getElementById('aiBulkTopic').value.trim();
             currentBoardData.prompt_topic = appliedTopic || null;
             currentBoardData.llm_prompt = appliedTopic
@@ -2300,16 +3017,22 @@
                 : null;
             currentBoardData.prompt_examples = document.getElementById('aiBulkExamples').value.trim() || null;
             currentBoardData.prompt_exclusions = document.getElementById('aiBulkExclusions').value.trim() || null;
-
-            const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
-            const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
-            pendingImageAssignmentAfterSave = true;
             renderButtonGrid();
-            closeAIBulkBuilderModal();
-            const msg = overflow > 0
-                ? `Applied ${aiBulkPreviewOptions.length} options (${onPage} visible, ${overflow} on next page)`
-                : `Applied ${aiBulkPreviewOptions.length} options`;
-            showNotification(msg, 'success');
+        }
+
+        async function _abiCreate() {
+            if (_abiImagesAssigned) { closeAIBulkBuilderModal(); return; }
+            if (!aiBulkPreviewOptions.length) { showNotification('No options to apply', 'error'); return; }
+            const btn = document.getElementById('abiCreateBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+            try {
+                _abiApplyOptionsToBoard();
+                closeAIBulkBuilderModal();
+                showNotification(`Applied ${(currentBoardData?.buttons || []).filter(b => b.label).length} buttons`, 'success');
+                await saveBoard();
+            } finally {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Create Buttons';
+            }
         }
 
         async function saveBoard() {
@@ -2453,7 +3176,7 @@
 
         function clearAssignedImage() { document.getElementById('assignedImageUrl').value = ''; updateAssignedImagePreview(''); updateButtonPreview(); }
         function openImagePicker() { selectedImageUrl = null; document.getElementById('selectImageBtn').disabled = true; document.getElementById('imagePickerModal').classList.remove('hidden'); loadImages(); }
-        function closeImagePicker() { document.getElementById('imagePickerModal').classList.add('hidden'); document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; selectedImageUrl = null; }
+        function closeImagePicker() { document.getElementById('imagePickerModal').classList.add('hidden'); document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; selectedImageUrl = null; _aiImagePickCtx = null; }
 
         async function loadImages(searchTerm = '', page = 0) {
             const loadingIndicator = document.getElementById('imageLoadingIndicator');
@@ -2508,7 +3231,37 @@
             document.getElementById('selectImageBtn').disabled = false;
         }
 
-        function selectAssignedImage() { if (!selectedImageUrl) return; document.getElementById('assignedImageUrl').value = selectedImageUrl; updateAssignedImagePreview(selectedImageUrl); updateButtonPreview(); closeImagePicker(); }
+        function selectAssignedImage() {
+            if (!selectedImageUrl) return;
+            if (_aiImagePickCtx) {
+                const url = selectedImageUrl;
+                const {ctx, idx} = _aiImagePickCtx;
+                _aiImagePickCtx = null;
+                closeImagePicker();
+                if (ctx === 'abi') {
+                    if (_abiDisplayButtons[idx]) {
+                        _abiDisplayButtons[idx].image_url = url;
+                        const label = _abiDisplayButtons[idx].label;
+                        const match = (currentBoardData?.buttons || []).find(b => b.label === label);
+                        if (match) match.image_url = url;
+                    }
+                    _renderAiButtonCardsClickable('abiDisplayGrid', _abiDisplayButtons, 'abi');
+                } else if (ctx === 'cbw') {
+                    if (_cbwDisplayButtons[idx]) {
+                        _cbwDisplayButtons[idx].image_url = url;
+                        const label = _cbwDisplayButtons[idx].label;
+                        const match = (currentBoardData?.buttons || []).find(b => b.label === label);
+                        if (match) match.image_url = url;
+                    }
+                    _renderAiButtonCardsClickable('cbwDisplayGrid', _cbwDisplayButtons, 'cbw');
+                }
+                return;
+            }
+            document.getElementById('assignedImageUrl').value = selectedImageUrl;
+            updateAssignedImagePreview(selectedImageUrl);
+            updateButtonPreview();
+            closeImagePicker();
+        }
         function searchImages() { currentImageSearch = document.getElementById('imageSearchInput').value.trim(); currentImagePage = 0; loadImages(currentImageSearch, 0); }
         function clearImageSearch() { document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; loadImages('', 0); }
         function navigateImagePage(direction) { const newPage = currentImagePage + direction; if (newPage >= 0 && newPage < totalImagePages) { currentImagePage = newPage; loadImages(currentImageSearch, newPage); } }
