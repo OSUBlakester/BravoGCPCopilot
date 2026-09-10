@@ -179,6 +179,7 @@ function setupEventListeners() {
     // Button grid controls
     saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
     addNewButtonBtn.addEventListener('click', openAddNewButtonWizard);
+    document.getElementById('saveGridColumnsBtn')?.addEventListener('click', saveGridColumns);
     if (helpWizardBtn) helpWizardBtn.addEventListener('click', openHelpWizard);
     const bravoButtonWizardBtn = document.getElementById('bravoButtonWizardBtn');
     if (bravoButtonWizardBtn) bravoButtonWizardBtn.addEventListener('click', openBravoButtonWizard);
@@ -1253,9 +1254,38 @@ async function loadGlobalSettings() {
         if (response.ok) {
             const s = await response.json();
             _globalGridColumns = parseInt(s.gridColumns) || 6;
+            const inp = document.getElementById('gridColumnsInput');
+            if (inp) inp.value = _globalGridColumns;
         }
     } catch (err) {
         console.warn('Could not load global settings for row indicators:', err);
+    }
+}
+
+async function saveGridColumns() {
+    const inp = document.getElementById('gridColumnsInput');
+    const status = document.getElementById('gridColumnsSaveStatus');
+    const btn = document.getElementById('saveGridColumnsBtn');
+    const cols = parseInt(inp?.value) || 6;
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+        const resp = await window.authenticatedFetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gridColumns: cols }),
+        });
+        if (resp.ok) {
+            _globalGridColumns = cols;
+            renderButtonGrid();
+            if (status) { status.textContent = 'Saved!'; status.className = 'text-xs text-green-600'; status.classList.remove('hidden'); }
+        } else {
+            if (status) { status.textContent = 'Save failed.'; status.className = 'text-xs text-red-600'; status.classList.remove('hidden'); }
+        }
+    } catch (err) {
+        if (status) { status.textContent = 'Error saving.'; status.className = 'text-xs text-red-600'; status.classList.remove('hidden'); }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        if (status) setTimeout(() => status.classList.add('hidden'), 3000);
     }
 }
 

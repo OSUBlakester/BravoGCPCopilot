@@ -2004,18 +2004,6 @@
                     </div>
                 </div>
                 <div class="sgroup">
-                    <div class="sgroup-header"><i class="fas fa-th"></i> Grid Layout</div>
-                    <div class="srow">
-                        <div class="srow-meta">
-                            <span class="srow-label">Buttons Per Row</span>
-                            <span class="srow-desc">Number of buttons displayed in each row on the grid/scan interface (also controls the row indicators in the Page Buttons editor)</span>
-                        </div>
-                        <div class="srow-ctrl">
-                            <input type="number" id="ss-gridColumns" min="2" max="18" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="6">
-                        </div>
-                    </div>
-                </div>
-                <div class="sgroup">
                     <div class="sgroup-header"><i class="fas fa-eye"></i> Display</div>
                     <div class="srow">
                         <div class="srow-meta">
@@ -2103,6 +2091,19 @@
                 <button type="button" id="revertPageBtn" class="px-4 py-2 bg-gray-500 text-white rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">Revert Changes</button>
             </div>
         </form>
+
+        <!-- Global Layout Setting -->
+        <div class="mb-6 p-4 border border-orange-200 rounded-md bg-orange-50 flex items-center gap-4 flex-wrap">
+            <div class="flex-1 min-w-0">
+                <label for="gridColumnsInput" class="block text-sm font-medium text-gray-700">Buttons Per Row <span class="text-xs font-normal text-gray-500">(Global Setting — applies to all pages)</span></label>
+                <p class="mt-0.5 text-xs text-gray-500">Controls how many buttons appear in each row on the grid/scan interface and the row indicators below</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <input type="number" id="gridColumnsInput" min="2" max="18" step="1" value="6" class="w-20 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-center focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                <button type="button" id="saveGridColumnsBtn" class="px-3 py-2 bg-orange-500 text-white rounded-md shadow-sm hover:bg-orange-600 text-sm font-medium">Save</button>
+                <span id="gridColumnsSaveStatus" class="text-xs hidden"></span>
+            </div>
+        </div>
 
         <h3 class="text-xl font-semibold mb-3">Page Buttons</h3>
         <p class="text-gray-600 mb-4">Click on any button to edit its configuration. Drag and drop to rearrange buttons.</p>
@@ -3100,7 +3101,6 @@
                 if (el('ss-enablePictograms')) el('ss-enablePictograms').checked = s.enablePictograms !== false;
                 if (el('ss-displaySplash'))  el('ss-displaySplash').checked  = s.displaySplash || false;
                 if (el('ss-displaySplashTime')) el('ss-displaySplashTime').value = s.displaySplashTime || 3000;
-                if (el('ss-gridColumns'))    el('ss-gridColumns').value       = s.gridColumns !== undefined ? s.gridColumns : 6;
             } catch (err) {
                 console.error('Failed to load scan settings:', err);
             }
@@ -3123,14 +3123,7 @@
                     enablePictograms:     el('ss-enablePictograms')?.checked !== false,
                     displaySplash:        el('ss-displaySplash')?.checked || false,
                     displaySplashTime:    parseInt(el('ss-displaySplashTime')?.value) || 3000,
-                    gridColumns:          parseInt(el('ss-gridColumns')?.value) || 6,
                 };
-                // Update the live grid column count so row indicators refresh immediately
-                const newCols = parseInt(el('ss-gridColumns')?.value) || 6;
-                if (typeof _globalGridColumns !== 'undefined' && newCols !== _globalGridColumns) {
-                    _globalGridColumns = newCols;
-                    if (typeof renderButtonGrid === 'function') renderButtonGrid();
-                }
                 try {
                     saveBtn.disabled = true;
                     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving…';
