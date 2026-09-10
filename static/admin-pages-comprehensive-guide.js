@@ -153,8 +153,8 @@ class AdminPagesComprehensiveGuide {
         
         this.guidePanel.innerHTML = `
             <div id="guide-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center;">
-                <h2 style="margin: 0; font-size: 24px;">Admin Pages - Comprehensive Guide</h2>
-                <p style="margin: 10px 0 0 0; opacity: 0.9;">Master page and button management with guided tours and AI assistance</p>
+                <h2 style="margin: 0; font-size: 22px;">Adding a New Button — Guide</h2>
+                <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 14px;">Step-by-step walkthrough for the Add New Button wizard</p>
             </div>
             
             <div id="guide-content" style="padding: 30px; overflow-y: auto; max-height: 60vh;">
@@ -183,360 +183,332 @@ class AdminPagesComprehensiveGuide {
     getGuideSteps() {
         return [
             {
-                title: "Welcome to Admin Pages",
+                title: "Adding a New Button",
                 type: "overview",
                 content: `
-                    <div style="text-align: center; margin-bottom: 30px;">
-                        <div style="font-size: 48px; margin-bottom: 20px;">🎯</div>
-                        <h3>Master Page and Button Management</h3>
-                        <p style="font-size: 16px; color: #6c757d; line-height: 1.6;">
-                            This comprehensive guide will walk you through every aspect of managing pages and buttons 
-                            in your AAC system. You'll learn to create, edit, organize, and optimize your communication 
-                            interface with confidence.
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <div style="font-size: 40px; margin-bottom: 12px;">➕</div>
+                        <h3 style="margin: 0 0 8px;">Adding a New Button</h3>
+                        <p style="font-size: 15px; color: #6c757d; line-height: 1.6; margin: 0;">
+                            There are two ways to add a button to a page. This guide walks you through both paths.
                         </p>
                     </div>
-                    
-                    <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                        <h4 style="color: #495057; margin-top: 0;">What You'll Learn:</h4>
-                        <ul style="color: #6c757d; line-height: 1.8;">
-                            <li><strong>Page Management:</strong> Create, edit, and organize communication pages</li>
-                            <li><strong>Button Configuration:</strong> Design effective communication buttons</li>
-                            <li><strong>Navigation Setup:</strong> Build intuitive page-to-page navigation</li>
-                            <li><strong>Content Organization:</strong> Structure your AAC system for maximum usability</li>
-                            <li><strong>Advanced Features:</strong> Utilize smart suggestions and AI assistance</li>
-                        </ul>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0;">
+                        <div style="background: #eff6ff; border: 2px solid #3b82f6; padding: 16px; border-radius: 10px;">
+                            <strong style="color: #1d4ed8;">Button Wizard</strong>
+                            <p style="font-size: 13px; color: #374151; margin: 8px 0 0;">
+                                Bravo guides you through creating a button step-by-step with AI suggestions for label and speech text.
+                            </p>
+                        </div>
+                        <div style="background: #f0fdf4; border: 2px solid #22c55e; padding: 16px; border-radius: 10px;">
+                            <strong style="color: #15803d;">Create Manually</strong>
+                            <p style="font-size: 13px; color: #374151; margin: 8px 0 0;">
+                                Opens the button editor directly so you can fill in all fields yourself with full control.
+                            </p>
+                        </div>
                     </div>
-                    
-                    <div style="background: linear-gradient(135deg, #667eea20, #764ba220); padding: 20px; border-radius: 10px; border-left: 4px solid #667eea;">
-                        <h4 style="color: #495057; margin-top: 0;">🤖 AI-Powered Assistance</h4>
-                        <p style="color: #6c757d; margin-bottom: 0;">
-                            Throughout this guide, you can access Smart Help AI for contextual assistance, 
-                            personalized suggestions, and instant answers to your questions.
+
+                    <div style="background: #fff7ed; border-left: 4px solid #f97316; padding: 14px; border-radius: 8px; margin: 16px 0;">
+                        <strong style="color: #c2410c;">Before you start:</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 6px 0 0;">
+                            Make sure you have the correct page selected in the <strong>Manage Pages &amp; Buttons</strong> tab.
+                            Buttons are always added to the currently selected page.
                         </p>
                     </div>
+
+                    <p style="color: #6b7280; font-size: 13px; text-align: center; margin: 8px 0 0;">
+                        Click <strong>Next</strong> to walk through the full process step by step.
+                    </p>
                 `,
-                smartHelpContext: "admin_pages_overview",
-                videos: []
+                smartHelpContext: "add_button_overview"
             },
             {
-                title: "Understanding the Interface",
-                type: "interface_tour",
-                target: "body",
-                content: `
-                    <h3>📱 Admin Pages Interface Overview</h3>
-                    <p>Let's explore the main components of the admin pages interface:</p>
-                    
-                    <div style="margin: 20px 0;">
-                        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>🗂️ Page Management Section</strong><br>
-                            <span style="color: #666;">Create, edit, and organize your communication pages</span>
-                        </div>
-                        <div style="background: #f3e5f5; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>🔘 Button Management Section</strong><br>
-                            <span style="color: #666;">Design and configure individual communication buttons</span>
-                        </div>
-                        <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>🔄 Navigation Tools</strong><br>
-                            <span style="color: #666;">Set up page-to-page navigation and workflows</span>
-                        </div>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.multimedia.showVideo('interface_overview')" 
-                                style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold;">
-                            📹 Watch Interface Overview Video
-                        </button>
-                    </div>
-                `,
-                smartHelpContext: "interface_overview",
-                videos: ["interface_overview"]
-            },
-            {
-                title: "Creating Your First Page",
+                title: "Step 1 — Click Add New Button",
                 type: "hands_on",
-                target: ".create-page-btn, [data-action='create-page']",
+                highlightTarget: "#addNewButtonBtn",
                 content: `
-                    <h3>📄 Creating Communication Pages</h3>
-                    <p>Pages are the foundation of your AAC system. Let's create your first page step by step.</p>
-                    
-                    <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #ffc107;">
-                        <strong>💡 Pro Tip:</strong> Start with simple, frequently-used communication topics before creating complex pages.
+                    <h3 style="margin-top: 0;">Click the "Add New Button" button</h3>
+                    <p style="color: #374151;">In the <strong>Page Buttons</strong> section, locate the green <strong>Add New Button</strong> button at the top of the button list.</p>
+
+                    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin: 16px 0; display: flex; align-items: center; gap: 12px;">
+                        <div style="background: #16a34a; color: white; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; white-space: nowrap;">
+                            ＋ Add New Button
+                        </div>
+                        <span style="font-size: 13px; color: #6b7280;">Click this to open the two-step placement wizard.</span>
                     </div>
-                    
-                    <h4>Step-by-Step Process:</h4>
-                    <ol style="line-height: 1.8;">
-                        <li>Click the "Create New Page" button (highlighted below)</li>
-                        <li>Choose a descriptive page name</li>
-                        <li><strong>Note:</strong> Page names can be changed later if needed</li>
-                        <li><strong>After creation:</strong> A blank grid will be available for adding buttons</li>
-                        <li><strong>Remember to save:</strong> Click the save button after making changes</li>
+
+                    <p style="font-size: 13px; color: #374151;">This opens a small modal with two steps:</p>
+                    <ol style="font-size: 13px; color: #374151; line-height: 1.8;">
+                        <li><strong>Step 1:</strong> Choose where to place the new button in the list</li>
+                        <li><strong>Step 2:</strong> Choose how to create it — wizard or manually</li>
                     </ol>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.multimedia.showVideo('create_page_tutorial')" 
-                                style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            📹 Watch Page Creation Tutorial
-                        </button>
-                        <button onclick="guideInstance.smartHelp.getContextualHelp('creating_pages')" 
-                                style="background: #2f3542; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            🤖 Get Smart Help
-                        </button>
+
+                    <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px; border-radius: 8px; margin: 14px 0;">
+                        <strong style="color: #1e40af; font-size: 13px;">The highlighted element above</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 4px 0 0;">
+                            The blue outline shows exactly which button to click on the page behind this guide.
+                        </p>
                     </div>
                 `,
-                smartHelpContext: "creating_pages",
-                videos: ["create_page_tutorial"],
-                highlightTarget: ".create-page-btn, [data-action='create-page'], button[onclick*='createPage'], .add-page-button"
+                smartHelpContext: "add_button_step1"
             },
             {
-                title: "Button Design Guide",
-                type: "hands_on", 
-                target: ".create-button-btn, [data-action='create-button']",
-                content: `
-                    <h3>🔘 Complete Button Design Guide</h3>
-                    <p>Buttons are the core communication elements of your AAC system. Master button design to create effective communication tools.</p>
-                    
-                    <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #28a745;">
-                        <strong>� Button Functions:</strong>
-                        <ul style="margin: 10px 0;">
-                            <li><strong>Navigation Buttons:</strong> Move to another page</li>
-                            <li><strong>Communication Buttons:</strong> Express thoughts, needs, or ideas</li>
-                        </ul>
-                    </div>
-                    
-                    <h4>📝 Communication Button Types:</h4>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 15px 0;">
-                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 2px solid #007bff;">
-                            <strong>🔒 Static Buttons</strong>
-                            <p style="font-size: 14px; margin: 10px 0;">Always say the same predefined message</p>
-                            <ul style="font-size: 13px;">
-                                <li>Consistent output</li>
-                                <li>Reliable communication</li>
-                                <li>Perfect for routine phrases</li>
-                            </ul>
-                        </div>
-                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 2px solid #ff6b6b;">
-                            <strong>🤖 Dynamic Buttons</strong>
-                            <p style="font-size: 14px; margin: 10px 0;">Use AI to generate contextual responses</p>
-                            <ul style="font-size: 13px;">
-                                <li>Adaptive communication</li>
-                                <li>Context-aware responses</li>
-                                <li>Flexible interaction</li>
-                            </ul>
-                        </div>
-                    </div>
-                    
-                    <h4>🛠️ Button Creation Methods:</h4>
-                    <div style="margin: 15px 0;">
-                        <div style="background: #fff3cd; padding: 12px; border-radius: 6px; margin: 8px 0;">
-                            <strong>✋ Manual Creation:</strong> Design each button individually with full customization control
-                        </div>
-                        <div style="background: #d1ecf1; padding: 12px; border-radius: 6px; margin: 8px 0;">
-                            <strong>🪄 Wizard Creation:</strong> Use guided setup for quick, standardized button creation
-                        </div>
-                    </div>
-                    
-                    <h4>🎛️ Button Properties Guide:</h4>
-                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                        <strong>Essential Properties:</strong>
-                        <ul style="margin: 10px 0; line-height: 1.6;">
-                            <li><strong>Label Text:</strong> The text displayed on the button</li>
-                            <li><strong>Speech Output:</strong> What the device will say when pressed</li>
-                            <li><strong>Target Page:</strong> Which page to navigate to (if navigation button)</li>
-                            <li><strong>AI Query:</strong> Dynamic content generation prompt (if dynamic button)</li>
-                            <li><strong>Hidden:</strong> Checkbox to hide the button from the user interface</li>
-                        </ul>
-                    </div>
-                    
-                    <h4>🎨 System Colors & Indicators:</h4>
-                    <p style="margin: 10px 0; font-size: 14px;">The system automatically assigns colors and indicators based on button function:</p>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin: 15px 0;">
-                        <div style="background: linear-gradient(135deg, #ddd6fe 0%, #e0e7ff 100%); border: 2px solid #7c3aed; padding: 15px; border-radius: 8px;">
-                            <strong>🤖 AI Buttons (Purple)</strong><br>
-                            <small>Contains AI Query for dynamic responses</small><br>
-                            <div style="margin-top: 8px; background: #7c3aed; color: white; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px;">AI</div>
-                            <small style="margin-left: 8px;">Purple indicator with "AI"</small>
-                        </div>
-                        <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #d97706; padding: 15px; border-radius: 8px;">
-                            <strong>🧭 Navigation Buttons (Orange)</strong><br>
-                            <small>Links to another page</small><br>
-                            <div style="margin-top: 8px; background: #d97706; color: white; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px;">→</div>
-                            <small style="margin-left: 8px;">Orange indicator with arrow</small>
-                        </div>
-                        <div style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border: 2px solid #059669; padding: 15px; border-radius: 8px;">
-                            <strong>�️ Speech Buttons (Green)</strong><br>
-                            <small>Has custom speech phrase</small><br>
-                            <div style="margin-top: 8px; background: #059669; color: white; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px;">♪</div>
-                            <small style="margin-left: 8px;">Green indicator with music note</small>
-                        </div>
-                        <div style="background: #f3f4f6; border: 2px solid #9ca3af; padding: 15px; border-radius: 8px; opacity: 0.7;">
-                            <strong>🫥 Hidden Buttons (Faded)</strong><br>
-                            <small>Not visible to users, admin-only</small><br>
-                            <small style="margin-top: 8px; color: #6b7280;">Appears faded with reduced opacity</small>
-                        </div>
-                    </div>
-                    
-                    <div style="background: #ffe6e6; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #ff4757;">
-                        <strong>🎯 Drag & Drop Arrangement:</strong>
-                        <p style="margin: 10px 0; font-size: 14px;">Buttons can be dragged and dropped to change their arrangement on the grid. Organize frequently used buttons in easily accessible positions.</p>
-                    </div>
-                    
-                    <div style="background: #ff6b6b; color: white; padding: 15px; border-radius: 8px; margin: 15px 0; text-align: center;">
-                        <strong>💾 IMPORTANT: Always click the SAVE button after making any changes!</strong>
-                    </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.multimedia.showVideo('button_design_tutorial')" 
-                                style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            📹 Watch Button Design Tutorial
-                        </button>
-                        <button onclick="guideInstance.smartHelp.getContextualHelp('button_design')" 
-                                style="background: #2f3542; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            🤖 Get Smart Help
-                        </button>
-                    </div>
-                `,
-                smartHelpContext: "button_design",
-                videos: ["button_design_tutorial"],
-                highlightTarget: ".create-button-btn, [data-action='create-button'], button[onclick*='createButton'], .add-button"
-            },
-            {
-                title: "Setting Up Navigation",
+                title: "Step 1 — Choose Placement",
                 type: "hands_on",
-                target: ".navigation-settings, [data-section='navigation']",
+                highlightTarget: "#anbStep1",
                 content: `
-                    <h3>🧭 Page Navigation Configuration</h3>
-                    <p>Effective navigation helps users move smoothly between different communication contexts.</p>
-                    
-                    <div style="background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #28a745;">
-                        <strong>🗺️ Navigation Best Practices:</strong>
-                        <ul style="margin: 10px 0;">
-                            <li>Create logical page hierarchies</li>
-                            <li>Provide easy "back" and "home" options</li>
-                            <li>Use consistent navigation patterns</li>
-                            <li>Test navigation with actual users</li>
-                        </ul>
-                    </div>
-                    
-                    <h4>Navigation Types:</h4>
-                    <div style="margin: 15px 0;">
-                        <div style="background: #fff; border: 1px solid #dee2e6; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>📂 Category Navigation</strong><br>
-                            <span style="color: #666; font-size: 14px;">Organize pages by communication topics (food, activities, feelings, etc.)</span>
+                    <h3 style="margin-top: 0;">Choose where to place the button</h3>
+                    <p style="font-size: 13px; color: #374151;">After clicking <strong>Add New Button</strong>, the wizard shows a placement list. Select one option:</p>
+
+                    <div style="margin: 16px 0;">
+                        <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 12px; border-radius: 8px; margin: 8px 0;">
+                            <strong style="color: #15803d; font-size: 13px;">End of list (default)</strong>
+                            <p style="font-size: 12px; color: #374151; margin: 4px 0 0;">The new button is added after all existing buttons. This is the most common choice.</p>
                         </div>
-                        <div style="background: #fff; border: 1px solid #dee2e6; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>🔄 Contextual Navigation</strong><br>
-                            <span style="color: #666; font-size: 14px;">Link related pages based on conversation flow</span>
+                        <div style="background: #fefce8; border: 1px solid #fde047; padding: 12px; border-radius: 8px; margin: 8px 0;">
+                            <strong style="color: #854d0e; font-size: 13px;">Top of list</strong>
+                            <p style="font-size: 12px; color: #374151; margin: 4px 0 0;">The new button becomes the first button — it will appear in the first row on the scan interface.</p>
                         </div>
-                        <div style="background: #fff; border: 1px solid #dee2e6; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            <strong>⭐ Quick Access</strong><br>
-                            <span style="color: #666; font-size: 14px;">Create shortcuts to frequently used pages</span>
+                        <div style="background: #faf5ff; border: 1px solid #d8b4fe; padding: 12px; border-radius: 8px; margin: 8px 0;">
+                            <strong style="color: #6b21a8; font-size: 13px;">Before [existing button name]</strong>
+                            <p style="font-size: 12px; color: #374151; margin: 4px 0 0;">The list shows each existing button with a "Before …" option. Pick one to insert the new button just ahead of it.</p>
                         </div>
                     </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.multimedia.showVideo('navigation_setup')" 
-                                style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            📹 Navigation Setup Tutorial
-                        </button>
-                        <button onclick="guideInstance.startPracticeExercise('navigation')" 
-                                style="background: #00d2d3; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            🎯 Practice Exercise
-                        </button>
-                    </div>
+
+                    <p style="font-size: 13px; color: #6b7280;">
+                        Once you've selected a position, click <strong>Next →</strong> to move to Step 2.
+                    </p>
                 `,
-                smartHelpContext: "navigation_setup",
-                videos: ["navigation_setup"],
-                practiceExercise: "navigation",
-                highlightTarget: ".navigation-settings, [data-section='navigation'], .nav-config"
+                smartHelpContext: "add_button_placement"
             },
             {
-                title: "Organization and Categories",
-                type: "organizational",
+                title: "Step 2 — Choose Creation Method",
+                type: "hands_on",
+                highlightTarget: "#anbStep2",
                 content: `
-                    <h3>📋 Content Organization Strategies</h3>
-                    <p>Proper organization makes your AAC system more efficient and user-friendly.</p>
-                    
-                    <div style="background: #f8d7da; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #dc3545;">
-                        <strong>⚠️ Common Organization Mistakes:</strong>
-                        <ul style="margin: 10px 0;">
-                            <li>Too many buttons on one page</li>
-                            <li>Inconsistent categorization</li>
-                            <li>Poor visual hierarchy</li>
-                            <li>Missing search functionality</li>
-                        </ul>
+                    <h3 style="margin-top: 0;">Choose how to create the button</h3>
+                    <p style="font-size: 13px; color: #374151;">Step 2 asks how you'd like to build the button. Pick the method that suits you:</p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0;">
+                        <div style="background: #eff6ff; border: 2px solid #3b82f6; padding: 16px; border-radius: 10px;">
+                            <div style="font-size: 22px; margin-bottom: 6px;">🪄</div>
+                            <strong style="color: #1d4ed8; display: block; margin-bottom: 6px;">Button Wizard</strong>
+                            <p style="font-size: 12px; color: #374151; margin: 0;">
+                                Bravo walks you through a guided setup. It suggests button labels and speech text based on the page context.
+                                Great when you want AI-assisted suggestions.
+                            </p>
+                        </div>
+                        <div style="background: #f0fdf4; border: 2px solid #22c55e; padding: 16px; border-radius: 10px;">
+                            <div style="font-size: 22px; margin-bottom: 6px;">✏️</div>
+                            <strong style="color: #15803d; display: block; margin-bottom: 6px;">Create Manually</strong>
+                            <p style="font-size: 12px; color: #374151; margin: 0;">
+                                Opens the button editor immediately. You fill in all fields yourself.
+                                Best when you already know exactly what the button should say or do.
+                            </p>
+                        </div>
                     </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.multimedia.showVideo('organization_strategies')" 
-                                style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            📹 Organization Strategies
-                        </button>
-                        <button onclick="guideInstance.multimedia.showGif('category_setup_demo')" 
-                                style="background: #5f27cd; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            🎞️ Category Setup Demo
-                        </button>
+
+                    <div style="background: #fff7ed; border-left: 4px solid #f97316; padding: 12px; border-radius: 8px; margin: 14px 0;">
+                        <strong style="color: #c2410c; font-size: 13px;">Tip:</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 4px 0 0;">
+                            Not sure which to pick? Start with the <strong>Button Wizard</strong> — you can always edit the result afterward.
+                        </p>
                     </div>
                 `,
-                smartHelpContext: "content_organization",
-                videos: ["organization_strategies"],
-                gifs: ["category_setup_demo"]
+                smartHelpContext: "add_button_method"
             },
             {
-                title: "Completion & Next Steps",
+                title: "Path A — Button Wizard",
+                type: "hands_on",
+                highlightTarget: "#helpWizardModal",
+                content: `
+                    <h3 style="margin-top: 0;">Using the Button Wizard</h3>
+                    <p style="font-size: 13px; color: #374151;">When you choose <strong>Button Wizard</strong>, the Bravo wizard opens and guides you through each field.</p>
+
+                    <div style="margin: 16px 0;">
+                        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background: #f9fafb; margin: 8px 0;">
+                            <div style="background: #3b82f6; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0;">1</div>
+                            <div>
+                                <strong style="font-size: 13px;">Button Label</strong>
+                                <p style="font-size: 12px; color: #6b7280; margin: 2px 0 0;">The text that appears on the button. Keep it short and clear.</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background: #f9fafb; margin: 8px 0;">
+                            <div style="background: #3b82f6; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0;">2</div>
+                            <div>
+                                <strong style="font-size: 13px;">Button Type</strong>
+                                <p style="font-size: 12px; color: #6b7280; margin: 2px 0 0;">Static (fixed phrase), AI Dynamic (context-aware response), or Navigation (links to another page).</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background: #f9fafb; margin: 8px 0;">
+                            <div style="background: #3b82f6; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0;">3</div>
+                            <div>
+                                <strong style="font-size: 13px;">Content / Target</strong>
+                                <p style="font-size: 12px; color: #6b7280; margin: 2px 0 0;">The phrase to speak, the AI prompt, or the page to navigate to — depending on button type.</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background: #f9fafb; margin: 8px 0;">
+                            <div style="background: #3b82f6; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0;">4</div>
+                            <div>
+                                <strong style="font-size: 13px;">Confirm &amp; Accept</strong>
+                                <p style="font-size: 12px; color: #6b7280; margin: 2px 0 0;">Review the summary and click <strong>Accept</strong>. The button is added to the list at the position you chose.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; border-radius: 8px; margin: 14px 0;">
+                        <strong style="color: #991b1b; font-size: 13px;">Remember to save!</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 4px 0 0;">
+                            After the wizard closes, click <strong>Save Button Changes</strong> to persist the new button.
+                        </p>
+                    </div>
+                `,
+                smartHelpContext: "add_button_wizard"
+            },
+            {
+                title: "Path B — Create Manually",
+                type: "hands_on",
+                highlightTarget: "#buttonEditorModal",
+                content: `
+                    <h3 style="margin-top: 0;">Using the Button Editor</h3>
+                    <p style="font-size: 13px; color: #374151;">When you choose <strong>Create Manually</strong>, the button editor opens directly. Fill in the fields for your button:</p>
+
+                    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin: 14px 0;">
+                        <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #e5e7eb;">
+                                <td style="padding: 8px 10px 8px 0; font-weight: 600; white-space: nowrap; vertical-align: top;">Label</td>
+                                <td style="padding: 8px 0; color: #374151;">Text shown on the button. Required.</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #e5e7eb;">
+                                <td style="padding: 8px 10px 8px 0; font-weight: 600; white-space: nowrap; vertical-align: top;">Speech Text</td>
+                                <td style="padding: 8px 0; color: #374151;">What Bravo says aloud when the button is pressed. Defaults to the label if left blank.</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #e5e7eb;">
+                                <td style="padding: 8px 10px 8px 0; font-weight: 600; white-space: nowrap; vertical-align: top;">AI Query</td>
+                                <td style="padding: 8px 0; color: #374151;">Enter a prompt here to make this a dynamic AI button. Leave blank for a static button.</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #e5e7eb;">
+                                <td style="padding: 8px 10px 8px 0; font-weight: 600; white-space: nowrap; vertical-align: top;">Target Page</td>
+                                <td style="padding: 8px 0; color: #374151;">Select a page to make this a navigation button. Leave blank otherwise.</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 10px 0 0; font-weight: 600; white-space: nowrap; vertical-align: top;">Hidden</td>
+                                <td style="padding: 8px 0 0; color: #374151;">Check to hide this button from the user's scan interface. It stays in the admin list with a dashed border.</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <p style="font-size: 13px; color: #374151;">Click <strong>Save</strong> in the editor to add the button. Then click <strong>Save Button Changes</strong> to persist all changes to the page.</p>
+                `,
+                smartHelpContext: "add_button_manual"
+            },
+            {
+                title: "Button Indicators",
+                type: "reference",
+                content: `
+                    <h3 style="margin-top: 0;">Reading button indicators in the list</h3>
+                    <p style="font-size: 13px; color: #374151;">Each button in the Page Buttons list has a colored left border and badge that shows its type at a glance:</p>
+
+                    <div style="margin: 16px 0;">
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: #faf5ff; border: 1px solid #d8b4fe; border-left: 4px solid #7c3aed; border-radius: 8px; margin: 8px 0;">
+                            <span style="background: #7c3aed; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; white-space: nowrap;">AI</span>
+                            <div>
+                                <strong style="font-size: 13px; color: #6d28d9;">AI Dynamic Button</strong>
+                                <p style="font-size: 12px; color: #374151; margin: 2px 0 0;">Has an AI Query — Bravo generates a context-aware response each time it's pressed.</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: #fff7ed; border: 1px solid #fed7aa; border-left: 4px solid #f97316; border-radius: 8px; margin: 8px 0;">
+                            <span style="background: #f97316; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; white-space: nowrap;">→</span>
+                            <div>
+                                <strong style="font-size: 13px; color: #c2410c;">Navigation Button</strong>
+                                <p style="font-size: 12px; color: #374151; margin: 2px 0 0;">Linked to a Target Page — pressing it takes the user to that page.</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: #f0fdf4; border: 1px solid #86efac; border-left: 4px solid #16a34a; border-radius: 8px; margin: 8px 0;">
+                            <span style="background: #16a34a; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; white-space: nowrap;">♪</span>
+                            <div>
+                                <strong style="font-size: 13px; color: #15803d;">Speech Button</strong>
+                                <p style="font-size: 12px; color: #374151; margin: 2px 0 0;">Has a custom Speech Text that differs from the label.</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: #f3f4f6; border: 1px dashed #9ca3af; border-left: 4px dashed #9ca3af; border-radius: 8px; margin: 8px 0; opacity: 0.8;">
+                            <span style="background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; white-space: nowrap;">👁 Hidden</span>
+                            <div>
+                                <strong style="font-size: 13px; color: #4b5563;">Hidden Button</strong>
+                                <p style="font-size: 12px; color: #374151; margin: 2px 0 0;">Not visible to users. Shown here with a dashed border and reduced opacity. Does not take up a visible slot in the scan interface rows.</p>
+                            </div>
+                        </div>
+                    </div>
+                `,
+                smartHelpContext: "button_indicators"
+            },
+            {
+                title: "Row Dividers & Buttons Per Row",
+                type: "reference",
+                content: `
+                    <h3 style="margin-top: 0;">Understanding row dividers</h3>
+                    <p style="font-size: 13px; color: #374151;">The Page Buttons list shows <strong>Row 1</strong>, <strong>Row 2</strong>, etc. dividers so you can see exactly how buttons will be grouped on the scan interface.</p>
+
+                    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin: 14px 0; font-size: 12px; color: #374151;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <div style="flex:1; height:1px; background:#d1d5db;"></div>
+                            <span style="text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: #9ca3af;">Row 1</span>
+                            <div style="flex:1; height:1px; background:#d1d5db;"></div>
+                        </div>
+                        <p style="margin: 0; color: #6b7280;">↑ This divider appears every N visible buttons, where N is your <strong>Buttons Per Row</strong> setting.</p>
+                    </div>
+
+                    <div style="background: #fff7ed; border-left: 4px solid #f97316; padding: 12px; border-radius: 8px; margin: 14px 0;">
+                        <strong style="color: #c2410c; font-size: 13px;">Hidden buttons don't count toward row fill</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 4px 0 0;">
+                            A hidden button is skipped on the scan interface, so it doesn't use up a visible row slot.
+                            If you have 8 buttons per row and one is hidden, there will be 9 entries in the list before the next row divider.
+                        </p>
+                    </div>
+
+                    <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px; border-radius: 8px; margin: 14px 0;">
+                        <strong style="color: #1e40af; font-size: 13px;">Changing Buttons Per Row</strong>
+                        <p style="font-size: 13px; color: #374151; margin: 4px 0 0;">
+                            Find the orange <strong>Buttons Per Row</strong> card just above the Page Buttons list.
+                            Change the number and click <strong>Save</strong> — the dividers update immediately.
+                            This is a global setting that applies to all pages.
+                        </p>
+                    </div>
+                `,
+                smartHelpContext: "row_dividers"
+            },
+            {
+                title: "Done — Save Your Changes",
                 type: "completion",
                 content: `
-                    <div style="text-align: center; margin-bottom: 30px;">
-                        <div style="font-size: 48px; margin-bottom: 20px;">🎉</div>
-                        <h3>Congratulations! You've Mastered Admin Pages</h3>
-                        <p style="font-size: 16px; color: #6c757d; line-height: 1.6;">
-                            You now have the knowledge and tools to create effective AAC communication systems.
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">✅</div>
+                        <h3 style="margin: 0 0 8px;">You're ready to add buttons!</h3>
+                        <p style="font-size: 14px; color: #6c757d; line-height: 1.6; margin: 0;">
+                            Here's a quick recap of the full flow.
                         </p>
                     </div>
-                    
-                    <div style="background: linear-gradient(135deg, #667eea20, #764ba220); padding: 25px; border-radius: 15px; margin: 20px 0;">
-                        <h4 style="color: #495057; margin-top: 0;">📚 What You've Learned:</h4>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <div>
-                                <ul style="color: #6c757d; line-height: 1.8;">
-                                    <li>✅ Page creation and management</li>
-                                    <li>✅ Button design principles</li>
-                                    <li>✅ Navigation configuration</li>
-                                </ul>
-                            </div>
-                            <div>
-                                <ul style="color: #6c757d; line-height: 1.8;">
-                                    <li>✅ Content organization strategies</li>
-                                    <li>✅ System navigation setup</li>
-                                    <li>✅ AI-powered assistance tools</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div style="background: #d1ecf1; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #17a2b8;">
-                        <h4 style="color: #495057; margin-top: 0;">🚀 Next Steps:</h4>
-                        <ol style="color: #6c757d; line-height: 1.8;">
-                            <li>Start creating your first communication pages</li>
-                            <li>Test your configurations with users</li>
-                            <li>Use Smart Help for ongoing assistance</li>
-                            <li>Explore other admin tools and settings</li>
+
+                    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 16px 0;">
+                        <ol style="font-size: 13px; color: #374151; line-height: 2; margin: 0; padding-left: 20px;">
+                            <li>Select the page you want to add a button to</li>
+                            <li>Click <strong>Add New Button</strong></li>
+                            <li>Choose a placement position, then click <strong>Next →</strong></li>
+                            <li>Choose <strong>Button Wizard</strong> or <strong>Create Manually</strong></li>
+                            <li>Complete the wizard or fill in the editor fields</li>
+                            <li>Click <strong>Save Button Changes</strong> to persist everything</li>
                         </ol>
                     </div>
-                    
-                    <div style="text-align: center; margin: 20px 0;">
-                        <button onclick="guideInstance.smartHelp.getPersonalizedRecommendations()" 
-                                style="background: #2f3542; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            🤖 Get Personalized Recommendations
-                        </button>
-                        <button onclick="guideInstance.downloadGuideReference()" 
-                                style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 5px;">
-                            📄 Download Reference Guide
-                        </button>
+
+                    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px; text-align: center; margin: 16px 0;">
+                        <strong style="color: #991b1b; font-size: 14px;">Always click Save Button Changes when you're done!</strong>
+                        <p style="font-size: 12px; color: #374151; margin: 6px 0 0;">Changes to the button list are not saved automatically.</p>
                     </div>
-                    
-                    <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef;">
-                        <p style="color: #6c757d; font-size: 14px;">
-                            Need help? Smart Help AI is always available by clicking the 🤖 button or asking questions in any admin section.
+
+                    <div style="text-align: center; margin-top: 16px;">
+                        <p style="font-size: 13px; color: #6b7280;">
+                            You can also use <strong>Use Bravo to Create Static Buttons</strong> to generate an entire set of buttons for a page at once — useful for new pages.
                         </p>
                     </div>
                 `,
