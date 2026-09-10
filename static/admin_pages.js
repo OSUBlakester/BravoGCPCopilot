@@ -21,6 +21,9 @@ let runTranslatePagesBtn = null;
 let _anbTargetIndex = null;  // null=end, N=insert before array index N
 let _anbPlaceholderPos = null; // {row,col} of pre-inserted placeholder for manual edit
 
+// Global layout setting (loaded from /api/settings)
+let _globalGridColumns = 6;
+
 // Modal Elements
 let buttonEditorModal = null;
 let helpWizardModal = null;
@@ -106,6 +109,7 @@ async function initializePage() {
         setupEventListeners();
 
         // Load initial data
+        await loadGlobalSettings();
         await loadPages();
         
         // Update page title with profile name
@@ -493,7 +497,18 @@ function renderButtonGrid() {
         return;
     }
 
-    buttons.forEach(btn => buttonGrid.appendChild(_createBtnListRow(btn, buttons)));
+    const cols = _globalGridColumns || 6;
+    buttons.forEach((btn, idx) => {
+        // Insert row divider before every Nth button (including the first)
+        if (idx % cols === 0) {
+            const rowNum = Math.floor(idx / cols) + 1;
+            const divider = document.createElement('div');
+            divider.className = 'btn-row-divider';
+            divider.innerHTML = `<div class="btn-row-divider-line"></div><span class="btn-row-divider-label">Row ${rowNum}</span><div class="btn-row-divider-line"></div>`;
+            buttonGrid.appendChild(divider);
+        }
+        buttonGrid.appendChild(_createBtnListRow(btn, buttons));
+    });
 }
 
 function _createBtnListRow(btn, allSorted) {
@@ -1229,6 +1244,18 @@ function handlePageSelected() {
         checkForOutOfBoundsButtons();
         
         renderButtonGrid();
+    }
+}
+
+async function loadGlobalSettings() {
+    try {
+        const response = await window.authenticatedFetch('/api/settings');
+        if (response.ok) {
+            const s = await response.json();
+            _globalGridColumns = parseInt(s.gridColumns) || 6;
+        }
+    } catch (err) {
+        console.warn('Could not load global settings for row indicators:', err);
     }
 }
 

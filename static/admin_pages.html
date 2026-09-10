@@ -38,6 +38,9 @@
     .btn-list-edit:hover { background:#dbeafe; }
     .btn-list-del { padding:3px 9px; background:#fff1f2; color:#e11d48; border:1px solid #fecdd3; border-radius:4px; font-size:0.75rem; cursor:pointer; }
     .btn-list-del:hover { background:#ffe4e6; }
+    .btn-row-divider { display:flex; align-items:center; gap:8px; margin:6px 0 2px; pointer-events:none; }
+    .btn-row-divider-line { flex:1; height:1px; background:#d1d5db; }
+    .btn-row-divider-label { font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#9ca3af; white-space:nowrap; }
 
     /* Wizard styles */
     .wizard-step {
@@ -2001,6 +2004,18 @@
                     </div>
                 </div>
                 <div class="sgroup">
+                    <div class="sgroup-header"><i class="fas fa-th"></i> Grid Layout</div>
+                    <div class="srow">
+                        <div class="srow-meta">
+                            <span class="srow-label">Buttons Per Row</span>
+                            <span class="srow-desc">Number of buttons displayed in each row on the grid/scan interface (also controls the row indicators in the Page Buttons editor)</span>
+                        </div>
+                        <div class="srow-ctrl">
+                            <input type="number" id="ss-gridColumns" min="2" max="18" step="1" class="sinput" style="width:80px; text-align:center;" placeholder="6">
+                        </div>
+                    </div>
+                </div>
+                <div class="sgroup">
                     <div class="sgroup-header"><i class="fas fa-eye"></i> Display</div>
                     <div class="srow">
                         <div class="srow-meta">
@@ -3085,6 +3100,7 @@
                 if (el('ss-enablePictograms')) el('ss-enablePictograms').checked = s.enablePictograms !== false;
                 if (el('ss-displaySplash'))  el('ss-displaySplash').checked  = s.displaySplash || false;
                 if (el('ss-displaySplashTime')) el('ss-displaySplashTime').value = s.displaySplashTime || 3000;
+                if (el('ss-gridColumns'))    el('ss-gridColumns').value       = s.gridColumns !== undefined ? s.gridColumns : 6;
             } catch (err) {
                 console.error('Failed to load scan settings:', err);
             }
@@ -3107,7 +3123,14 @@
                     enablePictograms:     el('ss-enablePictograms')?.checked !== false,
                     displaySplash:        el('ss-displaySplash')?.checked || false,
                     displaySplashTime:    parseInt(el('ss-displaySplashTime')?.value) || 3000,
+                    gridColumns:          parseInt(el('ss-gridColumns')?.value) || 6,
                 };
+                // Update the live grid column count so row indicators refresh immediately
+                const newCols = parseInt(el('ss-gridColumns')?.value) || 6;
+                if (typeof _globalGridColumns !== 'undefined' && newCols !== _globalGridColumns) {
+                    _globalGridColumns = newCols;
+                    if (typeof renderButtonGrid === 'function') renderButtonGrid();
+                }
                 try {
                     saveBtn.disabled = true;
                     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving…';
