@@ -14,7 +14,12 @@ let updatePageBtn = null;
 let revertPageBtn = null;
 let saveButtonsBtn = null; // New button for saving changes
 let helpWizardBtn = null;
+let addNewButtonBtn = null;
 let runTranslatePagesBtn = null;
+
+// Add New Button wizard state
+let _anbTargetIndex = null;  // null=end, N=insert before array index N
+let _anbPlaceholderPos = null; // {row,col} of pre-inserted placeholder for manual edit
 
 // Modal Elements
 let buttonEditorModal = null;
@@ -121,7 +126,8 @@ function assignDOMElements() {
     updatePageBtn = document.getElementById('updatePageBtn');
     revertPageBtn = document.getElementById('revertPageBtn');
     saveButtonsBtn = document.getElementById('saveButtonsBtn');
-    helpWizardBtn = document.getElementById('helpWizardBtn');
+    helpWizardBtn = document.getElementById('helpWizardBtn');  // may be null (button removed)
+    addNewButtonBtn = document.getElementById('addNewButtonBtn');
     runTranslatePagesBtn = document.getElementById('runTranslatePagesBtn');
 
     // Modal elements
@@ -149,9 +155,9 @@ function assignDOMElements() {
 
 function validateDOMElements() {
     const required = [
-        pageForm, selectPage, buttonGrid, 
-        newPageDisplayNameInput, createNewPageBtn, updatePageBtn, deletePageButton, 
-        revertPageBtn, saveButtonsBtn, helpWizardBtn,
+        pageForm, selectPage, buttonGrid,
+        newPageDisplayNameInput, createNewPageBtn, updatePageBtn, deletePageButton,
+        revertPageBtn, saveButtonsBtn, addNewButtonBtn,
         buttonEditorModal, helpWizardModal, imagePickerModal
     ];
     return required.every(element => element !== null);
@@ -168,7 +174,8 @@ function setupEventListeners() {
     
     // Button grid controls
     saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
-    helpWizardBtn.addEventListener('click', openHelpWizard);
+    addNewButtonBtn.addEventListener('click', openAddNewButtonWizard);
+    if (helpWizardBtn) helpWizardBtn.addEventListener('click', openHelpWizard);
     const bravoButtonWizardBtn = document.getElementById('bravoButtonWizardBtn');
     if (bravoButtonWizardBtn) bravoButtonWizardBtn.addEventListener('click', openBravoButtonWizard);
     document.getElementById('closeBravoButtonWizard')?.addEventListener('click', closeBravoButtonWizard);
@@ -472,101 +479,106 @@ function repositionOutOfBoundsButtons() {
 
 function renderButtonGrid() {
     if (!currentPageData || !buttonGrid) return;
-    
     buttonGrid.innerHTML = '';
-    
-    // Get dynamic grid dimensions
-    const { maxRow, maxCol } = getMaxGridDimensions();
-    const actualRows = Math.max(GRID_ROWS, maxRow + 1);
-    const actualCols = Math.max(GRID_COLS, maxCol + 1);
-    
-    // Update CSS grid template
-    buttonGrid.style.gridTemplateColumns = `repeat(${actualCols}, 1fr)`;
-    
-    for (let row = 0; row < actualRows; row++) {
-        for (let col = 0; col < actualCols; col++) {
-            const button = createVisualButton(row, col);
-            buttonGrid.appendChild(button);
-        }
+
+    const buttons = [...(currentPageData.buttons || [])]
+        .filter(b => b.text || b.LLMQuery || b.targetPage)
+        .sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
+
+    if (!buttons.length) {
+        const empty = document.createElement('div');
+        empty.className = 'btn-list-empty';
+        empty.textContent = 'No buttons yet. Use "New Button Wizard" or "Use Bravo to Create Static Buttons" to add some.';
+        buttonGrid.appendChild(empty);
+        return;
     }
+
+    buttons.forEach(btn => buttonGrid.appendChild(_createBtnListRow(btn, buttons)));
 }
 
-function createVisualButton(row, col) {
-    const buttonDiv = document.createElement('div');
-    buttonDiv.className = 'visual-button';
-    buttonDiv.dataset.row = row;
-    buttonDiv.dataset.col = col;
-    
-    // Find button data for this position
-    const buttonData = findButtonAtPosition(row, col);
-    
-    if (buttonData && buttonData.text) {
-        buttonDiv.classList.add('has-content');
-        
-        // Show assigned image if available
-        if (buttonData.assigned_image_url) {
-            buttonDiv.style.backgroundImage = `url('${buttonData.assigned_image_url}')`;
-            buttonDiv.style.backgroundSize = 'cover';
-            buttonDiv.style.backgroundPosition = 'center';
-            buttonDiv.style.color = 'white';
-            buttonDiv.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
-            buttonDiv.innerHTML = `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 4px; font-size: 12px;">${buttonData.text}</div>`;
-        } else {
-            buttonDiv.textContent = buttonData.text;
-        }
-        
-        // Add indicators based on button type
-        addButtonIndicators(buttonDiv, buttonData);
-        
-        // Add visual styling based on content
-        if (buttonData.LLMQuery) {
-            buttonDiv.classList.add('has-ai');
-        }
-        if (buttonData.targetPage) {
-            buttonDiv.classList.add('has-navigation');
-        }
-    } else {
-        buttonDiv.textContent = 'Undefined';
-        buttonDiv.classList.add('undefined');
-    }
-    
-    // Add event listeners
-    buttonDiv.addEventListener('click', () => openButtonEditor(row, col));
-    
-    // Drag and drop
-    buttonDiv.draggable = true;
-    buttonDiv.addEventListener('dragstart', handleDragStart);
-    buttonDiv.addEventListener('dragover', handleDragOver);
-    buttonDiv.addEventListener('drop', handleDrop);
-    buttonDiv.addEventListener('dragend', handleDragEnd);
-    
-    return buttonDiv;
+function _createBtnListRow(btn, allSorted) {
+    const row = document.createElement('div');
+    row.className = 'btn-list-row' + (btn.LLMQuery ? ' has-ai' : btn.targetPage ? ' has-nav' : '');
+    row.draggable = true;
+
+    const handle = document.createElement('span');
+    handle.className = 'btn-list-handle';
+    handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+    row.appendChild(handle);
+
+    const label = document.createElement('span');
+    label.className = 'btn-list-label';
+    label.textContent = btn.text || (btn.LLMQuery ? '[AI Query]' : '[Nav Button]');
+    row.appendChild(label);
+
+    const badges = document.createElement('span');
+    badges.className = 'btn-list-badges';
+    if (btn.LLMQuery) badges.innerHTML += '<span class="btn-list-badge badge-ai">AI</span>';
+    if (btn.targetPage) badges.innerHTML += `<span class="btn-list-badge badge-nav">→ ${btn.targetPage}</span>`;
+    if (btn.speechPhrase) badges.innerHTML += '<span class="btn-list-badge badge-speech">♪</span>';
+    if (badges.innerHTML) row.appendChild(badges);
+
+    const actions = document.createElement('div');
+    actions.className = 'btn-list-actions';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn-list-edit';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', (e) => { e.stopPropagation(); openButtonEditor(btn.row, btn.col); });
+    actions.appendChild(editBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-list-del';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete button "${btn.text || btn.LLMQuery || 'this button'}"?`)) return;
+        currentPageData.buttons = currentPageData.buttons.filter(b => !(b.row === btn.row && b.col === btn.col));
+        _repackButtonPositions();
+        markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
+        renderButtonGrid();
+    });
+    actions.appendChild(delBtn);
+    row.appendChild(actions);
+
+    // List drag-and-drop reorder
+    row.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', `${btn.row},${btn.col}`);
+        setTimeout(() => row.classList.add('dragging'), 0);
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        const [fromRow, fromCol] = e.dataTransfer.getData('text/plain').split(',').map(Number);
+        if (fromRow === btn.row && fromCol === btn.col) return;
+        const sorted = [...(currentPageData.buttons || [])]
+            .filter(b => b.text || b.LLMQuery || b.targetPage)
+            .sort((a, b2) => a.row !== b2.row ? a.row - b2.row : a.col - b2.col);
+        const fromIdx = sorted.findIndex(b => b.row === fromRow && b.col === fromCol);
+        const toIdx = sorted.findIndex(b => b.row === btn.row && b.col === btn.col);
+        if (fromIdx === -1 || toIdx === -1) return;
+        const [moved] = sorted.splice(fromIdx, 1);
+        sorted.splice(toIdx, 0, moved);
+        currentPageData.buttons = sorted;
+        _repackButtonPositions();
+        markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
+        renderButtonGrid();
+    });
+
+    return row;
 }
 
-function addButtonIndicators(buttonDiv, buttonData) {
-    if (buttonData.LLMQuery) {
-        const indicator = document.createElement('div');
-        indicator.className = 'button-indicator indicator-ai';
-        indicator.textContent = 'AI';
-        indicator.title = 'Has AI Query';
-        buttonDiv.appendChild(indicator);
-    }
-    
-    if (buttonData.targetPage) {
-        const indicator = document.createElement('div');
-        indicator.className = 'button-indicator indicator-nav';
-        indicator.textContent = '→';
-        indicator.title = 'Navigates to page';
-        buttonDiv.appendChild(indicator);
-    }
-    
-    if (buttonData.speechPhrase) {
-        const indicator = document.createElement('div');
-        indicator.className = 'button-indicator indicator-speech';
-        indicator.textContent = '♪';
-        indicator.title = 'Has speech phrase';
-        buttonDiv.appendChild(indicator);
-    }
+function _repackButtonPositions() {
+    if (!currentPageData || !currentPageData.buttons) return;
+    currentPageData.buttons.forEach((btn, idx) => {
+        btn.row = Math.floor(idx / GRID_COLS);
+        btn.col = idx % GRID_COLS;
+    });
 }
 
 function findButtonAtPosition(row, col) {
@@ -681,6 +693,15 @@ function openButtonEditor(row, col) {
 function closeButtonEditor() {
     buttonEditorModal.classList.add('hidden');
     currentEditingButton = null;
+    // Clean up any pre-inserted placeholder if user cancelled without saving
+    if (_anbPlaceholderPos && currentPageData) {
+        currentPageData.buttons = (currentPageData.buttons || []).filter(
+            b => !(b.row === _anbPlaceholderPos.row && b.col === _anbPlaceholderPos.col && !b.text && !b.LLMQuery && !b.targetPage)
+        );
+        _repackButtonPositions();
+        renderButtonGrid();
+        _anbPlaceholderPos = null;
+    }
 }
 
 function saveButtonEdit() {
@@ -716,10 +737,14 @@ function saveButtonEdit() {
     // Add new button if it has content
     if (buttonData.text || buttonData.LLMQuery || buttonData.targetPage) {
         currentPageData.buttons.push(buttonData);
+        // Keep array in visual (row/col) order so repackButtonPositions stays correct
+        currentPageData.buttons.sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
     }
 
+    _anbPlaceholderPos = null; // clear before closeButtonEditor runs its placeholder check
+
     markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
-    
+
     // Re-render grid and close modal
     renderButtonGrid();
     closeButtonEditor();
@@ -754,11 +779,12 @@ function updateButtonPreview() {
     const assignedImageUrl = document.getElementById('assignedImageUrl').value.trim();
     
     // Update preview button
+    const previewBase = 'border:2px solid #059669;border-radius:8px;padding:10px 14px;display:inline-flex;align-items:center;background:white;font-size:0.875rem;font-weight:500;';
     if (text) {
-        let buttonHTML = `<div class="visual-button has-content">`;
+        let buttonHTML = `<div style="${previewBase}">`;
         if (assignedImageUrl) {
-            buttonHTML += `<div style="position: relative; width: 100%; height: 80px; background-image: url('${assignedImageUrl}'); background-size: cover; background-position: center; border-radius: 6px;">`;
-            buttonHTML += `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: white; padding: 4px; font-size: 12px; text-align: center;">${text}</div>`;
+            buttonHTML += `<div style="position:relative;width:100%;height:80px;background-image:url('${assignedImageUrl}');background-size:cover;background-position:center;border-radius:6px;">`;
+            buttonHTML += `<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.7);color:white;padding:4px;font-size:12px;text-align:center;">${text}</div>`;
             buttonHTML += `</div>`;
         } else {
             buttonHTML += text;
@@ -766,7 +792,7 @@ function updateButtonPreview() {
         buttonHTML += `</div>`;
         preview.innerHTML = buttonHTML;
     } else {
-        preview.innerHTML = `<div class="visual-button undefined">Undefined</div>`;
+        preview.innerHTML = `<div style="${previewBase}border-color:#d1d5db;color:#9ca3af;font-style:italic;">Undefined</div>`;
     }
     
     // Update configuration summary
@@ -1018,7 +1044,7 @@ async function generateLLMPrompt(description) {
 function updateWizardPreview() {
     // Update preview
     const preview = document.getElementById('wizardButtonPreview');
-    preview.innerHTML = `<div class="visual-button has-content">${wizardData.name}</div>`;
+    preview.innerHTML = `<div style="border:2px solid #059669;border-radius:8px;padding:10px 14px;display:inline-flex;align-items:center;background:white;font-size:0.875rem;font-weight:500;">${wizardData.name}</div>`;
 
     // Update configuration preview
     const configPreview = document.getElementById('wizardConfigPreview');
@@ -1138,7 +1164,15 @@ function wizardAccept() {
     // Add to current page
     if (!currentPageData.buttons) currentPageData.buttons = [];
     currentPageData.buttons.push(buttonData);
-    
+
+    // If opened via Add New Button wizard with a specific insertion point, reorder
+    if (_anbTargetIndex !== null) {
+        const added = currentPageData.buttons.pop();
+        currentPageData.buttons.splice(_anbTargetIndex, 0, added);
+        _repackButtonPositions();
+        _anbTargetIndex = null;
+    }
+
     // Re-render and close
     renderButtonGrid();
     closeHelpWizard();
@@ -1280,7 +1314,7 @@ async function createNewPage() {
     const trimmedDisplayName = displayName.trim();
     
     // Generate page name: all lowercase, only letters
-    const pageName = trimmedDisplayName.toLowerCase().replace(/[^a-z]/g, '');
+    const pageName = trimmedDisplayName.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!pageName) {
         alert('Display name must contain at least one letter.');
         return;
@@ -1802,6 +1836,32 @@ function openCreatePageWizard() {
     document.getElementById('cpwExclusions').value = '';
     document.getElementById('cpwCount').value = '20';
     document.getElementById('cpwAiNo').checked = true;
+    const cpwNavChk = document.getElementById('cpwAddNavBtn');
+    if (cpwNavChk) cpwNavChk.checked = false;
+    document.getElementById('cpwNavBtnOptions')?.classList.add('hidden');
+    document.getElementById('cpwNavBtnName').value = 'Home';
+    // Populate nav target dropdown
+    const navSel = document.getElementById('cpwNavBtnTarget');
+    if (navSel) {
+        navSel.innerHTML = '<option value="home">Home Page</option>';
+        if (Array.isArray(allUserPages)) {
+            allUserPages.forEach(page => {
+                if (page.name === 'home') return;
+                const o = document.createElement('option');
+                o.value = page.name;
+                o.textContent = page.displayName || page.name;
+                navSel.appendChild(o);
+            });
+        }
+        if (Array.isArray(SPECIAL_PAGES)) {
+            SPECIAL_PAGES.forEach(sp => {
+                const o = document.createElement('option');
+                o.value = '!' + sp.name;
+                o.textContent = (sp.displayName || sp.name) + ' (Special)';
+                navSel.appendChild(o);
+            });
+        }
+    }
     _cpwUpdateChoiceStyles();
     _cpwGoToStep(1);
     document.getElementById('createPageWizardModal').classList.remove('hidden');
@@ -1936,7 +1996,7 @@ async function _cpwCreatePage(withAiButtons) {
     const displayName = document.getElementById('cpwDisplayName').value.trim();
     if (!displayName) { alert('Please enter a page name.'); _cpwGoToStep(1); return; }
 
-    const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
+    const pageName = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!pageName) { alert('Display name must contain at least one letter.'); return; }
 
     const buttons = [];
@@ -1948,6 +2008,14 @@ async function _cpwCreatePage(withAiButtons) {
             col++;
             if (col >= GRID_COLS) { col = 0; row++; }
         });
+        if (document.getElementById('cpwAddNavBtn')?.checked) {
+            const navName = document.getElementById('cpwNavBtnName')?.value.trim() || 'Home';
+            const navTarget = document.getElementById('cpwNavBtnTarget')?.value || 'home';
+            const navBtn = { ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: navName, targetPage: navTarget, navigationType: 'PERMANENT' };
+            buttons.unshift(navBtn);
+        }
+        // Repack positions after any prepend/append
+        buttons.forEach((b, idx) => { b.row = Math.floor(idx / GRID_COLS); b.col = idx % GRID_COLS; });
     }
 
     const pageData = { name: pageName, displayName, buttons };
@@ -1964,7 +2032,9 @@ async function _cpwCreatePage(withAiButtons) {
         });
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Failed to create page: ${errorText || response.statusText}`);
+            let detail = errorText;
+            try { detail = JSON.parse(errorText).detail || errorText; } catch (_) {}
+            throw Object.assign(new Error(detail), { isServerError: true, detail });
         }
         await loadPages();
         selectPage.value = pageName;
@@ -1973,8 +2043,20 @@ async function _cpwCreatePage(withAiButtons) {
         closeCreatePageWizard();
     } catch (error) {
         console.error('Error creating page:', error);
-        alert('Failed to create page. Please try again.');
         markAdminSaved();
+        const detail = error.detail || error.message || '';
+        const isDup = /already exists/i.test(detail);
+        if (isDup) {
+            // Go back to step 1 and show a clear explanation
+            _cpwGoToStep(1);
+            const warn = document.getElementById('cpwDupWarn');
+            if (warn) {
+                warn.innerHTML = `<i class="fas fa-exclamation-triangle mr-1"></i>A page named <strong>${pageName}</strong> already exists (display names are stripped to lowercase letters only). Please choose a different name.`;
+                warn.classList.remove('hidden');
+            }
+        } else {
+            alert(`Failed to create page: ${detail || 'Please try again.'}`);
+        }
     } finally {
         if (createBtn) { createBtn.disabled = false; createBtn.innerHTML = '<i class="fas fa-plus-circle"></i> Create Page'; }
     }
@@ -2001,7 +2083,7 @@ function _cpwWireEvents() {
     document.getElementById('cpwStep1NextBtn')?.addEventListener('click', () => {
         const displayName = document.getElementById('cpwDisplayName').value.trim();
         if (!displayName) { alert('Please enter a page display name.'); return; }
-        const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
+        const pageName = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (!pageName) { alert('Display name must contain at least one letter.'); return; }
 
         const useAi = document.getElementById('cpwAiYes').checked;
@@ -2018,6 +2100,9 @@ function _cpwWireEvents() {
     document.getElementById('cpwGenerateBtn')?.addEventListener('click', _cpwGenerate);
 
     // Step 3
+    document.getElementById('cpwAddNavBtn')?.addEventListener('change', function() {
+        document.getElementById('cpwNavBtnOptions').classList.toggle('hidden', !this.checked);
+    });
     document.getElementById('cpwStep3BackBtn')?.addEventListener('click', () => _cpwGoToStep(2));
     document.getElementById('cpwAddOptionBtn')?.addEventListener('click', () => {
         _cpwOptions.push({ label: '' });
@@ -2042,6 +2127,8 @@ function openBravoButtonWizard() {
     document.getElementById('bbwExamples').value = '';
     document.getElementById('bbwExclusions').value = '';
     document.getElementById('bbwCount').value = '20';
+    const bbwHomeChk = document.getElementById('bbwAddHomeBtn');
+    if (bbwHomeChk) bbwHomeChk.checked = false;
     _bbwGoToStep(1);
 
     // Populate target page dropdown
@@ -2233,9 +2320,118 @@ function _bbwSaveButtons() {
         });
     });
 
+    if (document.getElementById('bbwAddHomeBtn')?.checked) {
+        const spot = findEmptyGridSpot();
+        if (spot) {
+            currentPageData.buttons.push({ ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: 'Home', targetPage: 'home', navigationType: 'PERMANENT', row: spot.row, col: spot.col });
+        }
+    }
+
+    _repackButtonPositions();
     markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
     renderButtonGrid();
     closeBravoButtonWizard();
+}
+
+// --- Add New Button Wizard ---
+
+function openAddNewButtonWizard() {
+    if (!currentPageData) { alert('Please select a page first.'); return; }
+    _anbTargetIndex = null;
+    _anbPlaceholderPos = null;
+    _anbPopulatePlacements();
+    _anbGoToStep(1);
+    document.getElementById('addNewButtonModal').classList.remove('hidden');
+}
+
+function closeAddNewButtonWizard() {
+    document.getElementById('addNewButtonModal').classList.add('hidden');
+}
+
+function _anbGoToStep(step) {
+    document.getElementById('anbStep1').classList.toggle('hidden', step !== 1);
+    document.getElementById('anbStep2').classList.toggle('hidden', step !== 2);
+    ['anbDot1', 'anbDot2'].forEach((id, i) => {
+        const dot = document.getElementById(id);
+        dot.className = 'cbw-step-dot';
+        if (i + 1 === step) dot.classList.add('active');
+        else if (i + 1 < step) dot.classList.add('done');
+    });
+}
+
+function _anbNextStep() {
+    _anbGoToStep(2);
+}
+
+function _anbPopulatePlacements() {
+    const list = document.getElementById('anbPlacementList');
+    list.innerHTML = '';
+
+    const buttons = [...(currentPageData?.buttons || [])]
+        .filter(b => b.text || b.LLMQuery || b.targetPage)
+        .sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
+
+    const makeRow = (value, label, checked = false) => {
+        const div = document.createElement('label');
+        div.className = 'flex items-center gap-3 p-2 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50';
+        div.innerHTML = `<input type="radio" name="anbPlacement" value="${value}" class="accent-indigo-600"${checked ? ' checked' : ''}><span class="text-sm text-gray-700">${label}</span>`;
+        return div;
+    };
+
+    list.appendChild(makeRow('end', 'End of list', true));
+    list.appendChild(makeRow('top', 'Top of list'));
+
+    buttons.forEach((btn, idx) => {
+        const label = (btn.text || btn.LLMQuery || '(unnamed)').replace(/</g, '&lt;');
+        list.appendChild(makeRow(`before_${idx}`, `Before "${label}"`));
+    });
+}
+
+function _anbProceed(method) {
+    const selected = document.querySelector('input[name="anbPlacement"]:checked');
+    const placement = selected ? selected.value : 'end';
+
+    const visibleButtons = [...(currentPageData?.buttons || [])]
+        .filter(b => b.text || b.LLMQuery || b.targetPage)
+        .sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
+
+    if (placement === 'end') {
+        _anbTargetIndex = null;
+    } else if (placement === 'top') {
+        _anbTargetIndex = 0;
+    } else if (placement.startsWith('before_')) {
+        const visIdx = parseInt(placement.split('_')[1], 10);
+        const refBtn = visibleButtons[visIdx];
+        if (refBtn) {
+            _anbTargetIndex = currentPageData.buttons.findIndex(b => b.row === refBtn.row && b.col === refBtn.col);
+            if (_anbTargetIndex === -1) _anbTargetIndex = null;
+        } else {
+            _anbTargetIndex = null;
+        }
+    }
+
+    closeAddNewButtonWizard();
+
+    if (method === 'wizard') {
+        openHelpWizard();
+    } else {
+        // Pre-insert placeholder at the target position so the editor has the right row/col
+        if (!currentPageData.buttons) currentPageData.buttons = [];
+        const placeholder = { ...DEFAULT_PAGE_BUTTON_STRUCTURE };
+        if (_anbTargetIndex === null) {
+            currentPageData.buttons.push(placeholder);
+        } else {
+            currentPageData.buttons.splice(_anbTargetIndex, 0, placeholder);
+        }
+        _repackButtonPositions();
+
+        const insertedIdx = _anbTargetIndex !== null ? _anbTargetIndex : currentPageData.buttons.length - 1;
+        const btn = currentPageData.buttons[insertedIdx];
+        _anbPlaceholderPos = { row: btn.row, col: btn.col };
+        _anbTargetIndex = null;
+
+        openButtonEditor(btn.row, btn.col);
+    }
 }
 
 // Fallback: Check if auth context already exists
