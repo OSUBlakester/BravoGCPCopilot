@@ -499,14 +499,20 @@ function renderButtonGrid() {
     }
 
     const cols = _globalGridColumns || 6;
-    buttons.forEach((btn, idx) => {
-        // Insert row divider before every Nth button (including the first)
-        if (idx % cols === 0) {
-            const rowNum = Math.floor(idx / cols) + 1;
-            const divider = document.createElement('div');
-            divider.className = 'btn-row-divider';
-            divider.innerHTML = `<div class="btn-row-divider-line"></div><span class="btn-row-divider-label">Row ${rowNum}</span><div class="btn-row-divider-line"></div>`;
-            buttonGrid.appendChild(divider);
+    let visibleCount = 0; // only non-hidden buttons count toward row fill
+    buttons.forEach(btn => {
+        // Hidden buttons are skipped entirely on the grid page, so only
+        // visible buttons consume a row slot. Insert a divider before each
+        // new visual row, triggered by the visible count, not total count.
+        if (!btn.hidden) {
+            if (visibleCount % cols === 0) {
+                const rowNum = Math.floor(visibleCount / cols) + 1;
+                const divider = document.createElement('div');
+                divider.className = 'btn-row-divider';
+                divider.innerHTML = `<div class="btn-row-divider-line"></div><span class="btn-row-divider-label">Row ${rowNum}</span><div class="btn-row-divider-line"></div>`;
+                buttonGrid.appendChild(divider);
+            }
+            visibleCount++;
         }
         buttonGrid.appendChild(_createBtnListRow(btn, buttons));
     });
