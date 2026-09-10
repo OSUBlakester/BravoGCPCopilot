@@ -560,7 +560,7 @@ class AdminPagesComprehensiveGuide {
         this.saveProgress();
         
         // Initialize Smart Help context
-        this.smartHelp.setContext('comprehensive_guide_started');
+        if (this.smartHelp?.setContext) this.smartHelp.setContext('comprehensive_guide_started');
     }
 
     showCurrentStep() {
@@ -595,7 +595,7 @@ class AdminPagesComprehensiveGuide {
         }
         
         // Set Smart Help context
-        if (step.smartHelpContext) {
+        if (step.smartHelpContext && this.smartHelp?.setContext) {
             this.smartHelp.setContext(step.smartHelpContext);
         }
         
