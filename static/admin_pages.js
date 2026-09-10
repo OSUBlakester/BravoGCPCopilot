@@ -487,7 +487,7 @@ function renderButtonGrid() {
     buttonGrid.innerHTML = '';
 
     const buttons = [...(currentPageData.buttons || [])]
-        .filter(b => b.text || b.LLMQuery || b.targetPage)
+        .filter(b => b.text || b.LLMQuery || b.targetPage || b.hidden)
         .sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
 
     if (!buttons.length) {
@@ -503,12 +503,9 @@ function renderButtonGrid() {
         // Insert row divider before every Nth button (including the first)
         if (idx % cols === 0) {
             const rowNum = Math.floor(idx / cols) + 1;
-            const rowSlice = buttons.slice(idx, idx + cols);
-            const hiddenCount = rowSlice.filter(b => b.hidden).length;
-            const hiddenNote = hiddenCount > 0 ? ` · ${hiddenCount} hidden` : '';
             const divider = document.createElement('div');
             divider.className = 'btn-row-divider';
-            divider.innerHTML = `<div class="btn-row-divider-line"></div><span class="btn-row-divider-label">Row ${rowNum}${hiddenNote}</span><div class="btn-row-divider-line"></div>`;
+            divider.innerHTML = `<div class="btn-row-divider-line"></div><span class="btn-row-divider-label">Row ${rowNum}</span><div class="btn-row-divider-line"></div>`;
             buttonGrid.appendChild(divider);
         }
         buttonGrid.appendChild(_createBtnListRow(btn, buttons));
