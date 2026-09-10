@@ -782,6 +782,7 @@ async function loadSettings() {
         if (displaySplashInput) { displaySplashInput.checked = currentSettings.displaySplash || false; }
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
+        _moodOptionsFromSettings = Array.isArray(currentSettings.customMoodOptions) && currentSettings.customMoodOptions.length ? JSON.parse(JSON.stringify(currentSettings.customMoodOptions)) : null;
         // if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; } // Removed from UI
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms !== false; }
         if (disableTapPictogramsInput) { disableTapPictogramsInput.checked = currentSettings.disableTapPictograms || false; }
@@ -1390,6 +1391,7 @@ async function saveSettings() {
         speech_rate: parseInt(newSpeechRate),
         applicationVolume: newApplicationVolume,
         enableMoodSelection: newEnableMoodSelection,
+        customMoodOptions: _moodOptionsFromSettings,
         useTapInterface: newUseTapInterface,
         selected_tts_voice_name: newDefaultPartnerVoice,
         userLanguage: newUserLanguage,
@@ -1479,6 +1481,7 @@ async function saveSettings() {
         if (displaySplashInput) displaySplashInput.checked = currentSettings.displaySplash || false;
         if (displaySplashTimeInput) displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000;
         if (enableMoodSelectionInput) enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false;
+        _moodOptionsFromSettings = Array.isArray(currentSettings.customMoodOptions) && currentSettings.customMoodOptions.length ? JSON.parse(JSON.stringify(currentSettings.customMoodOptions)) : null;
         if (enablePictogramsInput) enablePictogramsInput.checked = currentSettings.enablePictograms !== false;
         if (enableSightWordsInput) enableSightWordsInput.checked = currentSettings.enableSightWords !== false;
         if (sightWordGradeLevelInput) sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k';
@@ -2074,6 +2077,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initializePage();
     setupAdminToolbarButtons(); // Add toolbar button functionality
 
+    // Mood options manager
+    initMoodOptionsManager();
+
     // Mascot image picker
     const picker = document.getElementById('mascot-picker');
     if (picker) {
@@ -2085,3 +2091,122 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// ── Mood Options Manager ─────────────────────────────────────────────────────
+
+let _moodOptionsFromSettings = null; // null = use defaults, array = custom list
+let _moodEditing = []; // working copy while modal is open
+
+const DEFAULT_MOOD_OPTIONS = [
+    { name: 'Happy', emoji: '😊' },
+    { name: 'Sad', emoji: '😢' },
+    { name: 'Excited', emoji: '🤩' },
+    { name: 'Calm', emoji: '😌' },
+    { name: 'Angry', emoji: '😠' },
+    { name: 'Silly', emoji: '🤪' },
+    { name: 'Tired', emoji: '😴' },
+    { name: 'Anxious', emoji: '😰' },
+    { name: 'Confused', emoji: '😕' },
+    { name: 'Surprised', emoji: '😲' },
+    { name: 'Proud', emoji: '😎' },
+    { name: 'Worried', emoji: '😟' },
+    { name: 'Cranky', emoji: '😤' },
+    { name: 'Peaceful', emoji: '🕊️' },
+    { name: 'Playful', emoji: '😄' },
+    { name: 'Frustrated', emoji: '😫' },
+    { name: 'Curious', emoji: '🤔' },
+    { name: 'Grateful', emoji: '🙏' },
+    { name: 'Lonely', emoji: '😔' },
+    { name: 'Content', emoji: '😊' },
+];
+
+function initMoodOptionsManager() {
+    const modal = document.getElementById('moodOptionsModal');
+    if (!modal) return;
+
+    document.getElementById('manageMoodOptionsBtn').addEventListener('click', () => {
+        _moodEditing = JSON.parse(JSON.stringify(_moodOptionsFromSettings || DEFAULT_MOOD_OPTIONS));
+        _renderMoodList();
+        modal.classList.remove('hidden');
+        document.getElementById('moodNewEmoji').value = '';
+        document.getElementById('moodNewName').value = '';
+    });
+
+    document.getElementById('moodOptionsModalClose').addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('moodOptionsDoneBtn').addEventListener('click', () => {
+        _moodOptionsFromSettings = _moodEditing.filter(m => m.name.trim());
+        modal.classList.add('hidden');
+    });
+    document.getElementById('moodResetDefaultsBtn').addEventListener('click', () => {
+        _moodEditing = JSON.parse(JSON.stringify(DEFAULT_MOOD_OPTIONS));
+        _moodOptionsFromSettings = null;
+        _renderMoodList();
+    });
+    document.getElementById('moodAddBtn').addEventListener('click', _moodAddItem);
+    document.getElementById('moodNewName').addEventListener('keydown', e => { if (e.key === 'Enter') _moodAddItem(); });
+    modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+}
+
+function _moodAddItem() {
+    const emoji = document.getElementById('moodNewEmoji').value.trim() || '😊';
+    const name = document.getElementById('moodNewName').value.trim();
+    if (!name) { document.getElementById('moodNewName').focus(); return; }
+    _moodEditing.push({ name, emoji });
+    document.getElementById('moodNewEmoji').value = '';
+    document.getElementById('moodNewName').value = '';
+    document.getElementById('moodNewName').focus();
+    _renderMoodList();
+}
+
+function _renderMoodList() {
+    const list = document.getElementById('moodOptionsList');
+    if (!_moodEditing.length) {
+        list.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">No mood options. Add one above.</p>';
+        return;
+    }
+    list.innerHTML = _moodEditing.map((m, i) =>
+        `<div class="mood-opt-row flex items-center gap-2 p-1.5 bg-white border border-gray-200 rounded-md" draggable="true" data-mood-idx="${i}">
+            <span class="mood-drag-handle cursor-grab text-gray-300 hover:text-gray-500 px-1 flex-shrink-0" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+            <input type="text" data-mood-emoji="${i}" value="${m.emoji}" class="w-12 px-1 py-1 border border-gray-200 rounded text-center text-lg focus:outline-none focus:border-indigo-400" maxlength="4">
+            <input type="text" data-mood-name="${i}" value="${m.name}" class="flex-1 px-2 py-1 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:border-indigo-400">
+            <button type="button" data-mood-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs" title="Delete"><i class="fas fa-times"></i></button>
+        </div>`
+    ).join('');
+
+    // Sync inputs
+    list.querySelectorAll('input[data-mood-emoji]').forEach(inp => {
+        inp.addEventListener('change', () => { const i = +inp.dataset.moodEmoji; if (_moodEditing[i]) _moodEditing[i].emoji = inp.value.trim() || '😊'; });
+    });
+    list.querySelectorAll('input[data-mood-name]').forEach(inp => {
+        inp.addEventListener('change', () => { const i = +inp.dataset.moodName; if (_moodEditing[i]) _moodEditing[i].name = inp.value.trim(); });
+    });
+    list.querySelectorAll('button[data-mood-del]').forEach(btn => {
+        btn.addEventListener('click', () => { _moodEditing.splice(+btn.dataset.moodDel, 1); _renderMoodList(); });
+    });
+
+    // Drag-and-drop reorder
+    let dragSrc = null;
+    list.querySelectorAll('.mood-opt-row').forEach(row => {
+        row.addEventListener('dragstart', e => {
+            // Sync current input values first
+            list.querySelectorAll('input[data-mood-name]').forEach(inp => { const i = +inp.dataset.moodName; if (_moodEditing[i]) _moodEditing[i].name = inp.value.trim(); });
+            list.querySelectorAll('input[data-mood-emoji]').forEach(inp => { const i = +inp.dataset.moodEmoji; if (_moodEditing[i]) _moodEditing[i].emoji = inp.value.trim() || '😊'; });
+            dragSrc = +row.dataset.moodIdx;
+            e.dataTransfer.effectAllowed = 'move';
+            row.style.opacity = '0.4';
+        });
+        row.addEventListener('dragend', () => row.style.opacity = '');
+        row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.style.background = '#eef2ff'; });
+        row.addEventListener('dragleave', () => row.style.background = '');
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.style.background = '';
+            const dest = +row.dataset.moodIdx;
+            if (dragSrc === null || dragSrc === dest) return;
+            const [moved] = _moodEditing.splice(dragSrc, 1);
+            _moodEditing.splice(dest, 0, moved);
+            dragSrc = null;
+            _renderMoodList();
+        });
+    });
+}

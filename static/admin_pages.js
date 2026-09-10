@@ -160,14 +160,38 @@ function validateDOMElements() {
 function setupEventListeners() {
     // Page management
     selectPage.addEventListener('change', handlePageSelected);
-    createNewPageBtn.addEventListener('click', createNewPage);
+    createNewPageBtn.addEventListener('click', openCreatePageWizard);
+    _cpwWireEvents();
     updatePageBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_PAGE_SETTINGS));
     deletePageButton.addEventListener('click', deletePage);
     revertPageBtn.addEventListener('click', revertPage);
     
     // Button grid controls
     saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
-    helpWizardBtn.addEventListener('click', startComprehensiveGuide);
+    helpWizardBtn.addEventListener('click', openHelpWizard);
+    const bravoButtonWizardBtn = document.getElementById('bravoButtonWizardBtn');
+    if (bravoButtonWizardBtn) bravoButtonWizardBtn.addEventListener('click', openBravoButtonWizard);
+    document.getElementById('closeBravoButtonWizard')?.addEventListener('click', closeBravoButtonWizard);
+    document.getElementById('bbwCancelBtn')?.addEventListener('click', closeBravoButtonWizard);
+    document.getElementById('bbwGenerateBtn')?.addEventListener('click', _bbwGenerate);
+    document.getElementById('bbwAddOptionBtn')?.addEventListener('click', () => {
+        _bbwOptions.push({ label: '' });
+        _bbwRenderOptions();
+        const inputs = document.getElementById('bbwOptionsList').querySelectorAll('input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+    document.getElementById('bbwStep2BackBtn')?.addEventListener('click', () => _bbwGoToStep(1));
+    document.getElementById('bbwStep2NextBtn')?.addEventListener('click', () => {
+        const valid = _bbwOptions.filter(o => o.label.trim());
+        if (!valid.length) { alert('Add at least one option.'); return; }
+        _bbwGoToStep(3);
+    });
+    document.getElementById('bbwStep3BackBtn')?.addEventListener('click', () => _bbwGoToStep(2));
+    document.getElementById('bbwSaveBtn')?.addEventListener('click', _bbwSaveButtons);
+    document.querySelectorAll('input[name="bbwMode"]').forEach(r =>
+        r.addEventListener('change', _bbwUpdateSummary)
+    );
+    document.getElementById('bbwTargetPage')?.addEventListener('change', _bbwUpdateSummary);
     if (runTranslatePagesBtn) {
         runTranslatePagesBtn.addEventListener('click', runPageTranslation);
     }
@@ -1763,6 +1787,455 @@ function navigateImagePage(direction) {
         currentImagePage = newPage;
         loadImages(currentImageSearch, newPage);
     }
+}
+
+// ── Create New Page Wizard ───────────────────────────────────────────────────
+
+let _cpwOptions = [];
+
+function openCreatePageWizard() {
+    _cpwOptions = [];
+    document.getElementById('cpwDisplayName').value = '';
+    document.getElementById('cpwDupWarn').classList.add('hidden');
+    document.getElementById('cpwTopic').value = '';
+    document.getElementById('cpwExamples').value = '';
+    document.getElementById('cpwExclusions').value = '';
+    document.getElementById('cpwCount').value = '20';
+    document.getElementById('cpwAiNo').checked = true;
+    _cpwUpdateChoiceStyles();
+    _cpwGoToStep(1);
+    document.getElementById('createPageWizardModal').classList.remove('hidden');
+}
+
+function closeCreatePageWizard() {
+    document.getElementById('createPageWizardModal').classList.add('hidden');
+}
+
+function _cpwUpdateChoiceStyles() {
+    const aiChosen = document.getElementById('cpwAiYes').checked;
+    document.getElementById('cpwAiYesLabel').className = `flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 rounded-lg cursor-pointer transition-all ${aiChosen ? 'border-violet-400 bg-violet-50' : 'border-gray-200 hover:border-violet-300'}`;
+    document.getElementById('cpwAiNoLabel').className = `flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 rounded-lg cursor-pointer transition-all ${!aiChosen ? 'border-green-300 bg-green-50' : 'border-gray-200 hover:border-green-300'}`;
+}
+
+function _cpwGoToStep(step) {
+    [1, 2, 3].forEach(n => {
+        document.getElementById(`cpw-step${n}`).classList.toggle('hidden', n !== step);
+    });
+    const isAi = step > 1;
+    document.getElementById('cpwStepIndicator').classList.toggle('hidden', !isAi);
+    if (isAi) {
+        [1, 2, 3].forEach(n => {
+            const dot = document.getElementById(`cpwDot${n}`);
+            const lbl = document.getElementById(`cpwLbl${n}`);
+            if (n < step) dot.className = 'cbw-step-dot done';
+            else if (n === step) dot.className = 'cbw-step-dot active';
+            else dot.className = 'cbw-step-dot';
+            if (lbl) lbl.className = `flex-1 text-center ${n === step ? 'font-medium text-green-600' : 'text-gray-400'}`;
+        });
+    }
+}
+
+function _cpwRenderOptions() {
+    const list = document.getElementById('cpwOptionsList');
+    list.innerHTML = '';
+    document.getElementById('cpwOptionsCount').textContent = _cpwOptions.length;
+    _cpwOptions.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 bg-white border border-gray-200 rounded px-2 py-1';
+        row.draggable = true;
+        row.dataset.idx = idx;
+
+        const grip = document.createElement('span');
+        grip.className = 'text-gray-300 cursor-grab select-none';
+        grip.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = item.label;
+        input.className = 'flex-1 text-sm border-none outline-none bg-transparent';
+        input.addEventListener('input', () => { _cpwOptions[idx].label = input.value; });
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'text-red-400 hover:text-red-600 text-xs px-1';
+        del.innerHTML = '<i class="fas fa-times"></i>';
+        del.addEventListener('click', () => { _cpwOptions.splice(idx, 1); _cpwRenderOptions(); });
+
+        row.appendChild(grip);
+        row.appendChild(input);
+        row.appendChild(del);
+
+        row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', idx); row.classList.add('opacity-50'); });
+        row.addEventListener('dragend', () => row.classList.remove('opacity-50'));
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('bg-violet-50'); });
+        row.addEventListener('dragleave', () => row.classList.remove('bg-violet-50'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('bg-violet-50');
+            const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            if (fromIdx === idx) return;
+            const [moved] = _cpwOptions.splice(fromIdx, 1);
+            _cpwOptions.splice(idx, 0, moved);
+            _cpwRenderOptions();
+        });
+
+        list.appendChild(row);
+    });
+}
+
+async function _cpwGenerate() {
+    const topic = document.getElementById('cpwTopic').value.trim();
+    if (!topic) { alert('Please enter a topic first.'); return; }
+    const examples = document.getElementById('cpwExamples').value.trim();
+    const exclusions = document.getElementById('cpwExclusions').value.trim();
+    const maxCount = Math.min(50, Math.max(5, parseInt(document.getElementById('cpwCount').value, 10) || 20));
+
+    const btn = document.getElementById('cpwGenerateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating…';
+
+    try {
+        let prompt = `Generate UP TO ${maxCount} UNIQUE button labels for an AAC communication page about: ${topic}.\n`;
+        if (examples) prompt += `Examples of the type of options to include: ${examples}\n`;
+        if (exclusions) prompt += `Do NOT include any of these: ${exclusions}\n`;
+        prompt += `\nRequirements:\n- Short labels (1–4 words each)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of strings ONLY — e.g. ["eat","drink","play"]`;
+
+        const response = await window.authenticatedFetch('/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, response_format: 'json' })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        let labels = [];
+        if (Array.isArray(data)) {
+            labels = data.map(item => typeof item === 'string' ? item : (item.option || item.label || ''));
+        } else if (data && Array.isArray(data.options)) {
+            labels = data.options.map(o => typeof o === 'string' ? o : (o.option || o.label || ''));
+        } else if (typeof data === 'string') {
+            labels = data.split('\n').map(s => s.trim()).filter(Boolean);
+        }
+        labels = labels.filter(l => l && l.trim()).slice(0, maxCount);
+
+        if (!labels.length) { alert('No options returned — try a different topic.'); return; }
+
+        _cpwOptions = labels.map(l => ({ label: l.trim() }));
+        _cpwRenderOptions();
+        _cpwGoToStep(3);
+    } catch (err) {
+        console.error('Create Page Wizard generate error:', err);
+        alert('Generation failed: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i>Generate Options';
+    }
+}
+
+async function _cpwCreatePage(withAiButtons) {
+    const displayName = document.getElementById('cpwDisplayName').value.trim();
+    if (!displayName) { alert('Please enter a page name.'); _cpwGoToStep(1); return; }
+
+    const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
+    if (!pageName) { alert('Display name must contain at least one letter.'); return; }
+
+    const buttons = [];
+    if (withAiButtons) {
+        const valid = _cpwOptions.filter(o => o.label.trim());
+        let row = 0, col = 0;
+        valid.forEach(item => {
+            buttons.push({ ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: item.label, row, col });
+            col++;
+            if (col >= GRID_COLS) { col = 0; row++; }
+        });
+    }
+
+    const pageData = { name: pageName, displayName, buttons };
+
+    const createBtn = document.getElementById('cpwCreateBtn');
+    if (createBtn) { createBtn.disabled = true; createBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Creating…'; }
+
+    try {
+        markAdminSaving(UNSAVED_SCOPE_PAGE_SETTINGS);
+        const response = await window.authenticatedFetch('/pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pageData)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to create page: ${errorText || response.statusText}`);
+        }
+        await loadPages();
+        selectPage.value = pageName;
+        await handlePageSelected();
+        markAdminSaved();
+        closeCreatePageWizard();
+    } catch (error) {
+        console.error('Error creating page:', error);
+        alert('Failed to create page. Please try again.');
+        markAdminSaved();
+    } finally {
+        if (createBtn) { createBtn.disabled = false; createBtn.innerHTML = '<i class="fas fa-plus-circle"></i> Create Page'; }
+    }
+}
+
+function _cpwWireEvents() {
+    document.getElementById('closeCreatePageWizard')?.addEventListener('click', closeCreatePageWizard);
+
+    // Update radio choice styles on change
+    document.querySelectorAll('input[name="cpwUseAi"]').forEach(r =>
+        r.addEventListener('change', _cpwUpdateChoiceStyles)
+    );
+    // Clicking the label cards also toggles the radio
+    document.getElementById('cpwAiYesLabel')?.addEventListener('click', () => {
+        document.getElementById('cpwAiYes').checked = true;
+        _cpwUpdateChoiceStyles();
+    });
+    document.getElementById('cpwAiNoLabel')?.addEventListener('click', () => {
+        document.getElementById('cpwAiNo').checked = true;
+        _cpwUpdateChoiceStyles();
+    });
+
+    // Step 1 Next
+    document.getElementById('cpwStep1NextBtn')?.addEventListener('click', () => {
+        const displayName = document.getElementById('cpwDisplayName').value.trim();
+        if (!displayName) { alert('Please enter a page display name.'); return; }
+        const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
+        if (!pageName) { alert('Display name must contain at least one letter.'); return; }
+
+        const useAi = document.getElementById('cpwAiYes').checked;
+        if (useAi) {
+            document.getElementById('cpwStepIndicator').classList.remove('hidden');
+            _cpwGoToStep(2);
+        } else {
+            _cpwCreatePage(false);
+        }
+    });
+
+    // Step 2
+    document.getElementById('cpwStep2BackBtn')?.addEventListener('click', () => _cpwGoToStep(1));
+    document.getElementById('cpwGenerateBtn')?.addEventListener('click', _cpwGenerate);
+
+    // Step 3
+    document.getElementById('cpwStep3BackBtn')?.addEventListener('click', () => _cpwGoToStep(2));
+    document.getElementById('cpwAddOptionBtn')?.addEventListener('click', () => {
+        _cpwOptions.push({ label: '' });
+        _cpwRenderOptions();
+        const inputs = document.getElementById('cpwOptionsList').querySelectorAll('input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+    document.getElementById('cpwCreateBtn')?.addEventListener('click', () => _cpwCreatePage(true));
+}
+
+// ── Bravo Button Wizard ─────────────────────────────────────────────────────
+
+let _bbwOptions = []; // [{label}]
+
+function openBravoButtonWizard() {
+    if (!currentPageData) {
+        alert('Please select a page first.');
+        return;
+    }
+    _bbwOptions = [];
+    document.getElementById('bbwTopic').value = '';
+    document.getElementById('bbwExamples').value = '';
+    document.getElementById('bbwExclusions').value = '';
+    document.getElementById('bbwCount').value = '20';
+    _bbwGoToStep(1);
+
+    // Populate target page dropdown
+    const sel = document.getElementById('bbwTargetPage');
+    sel.innerHTML = '<option value="">No page navigation</option>';
+    if (Array.isArray(SPECIAL_PAGES)) {
+        SPECIAL_PAGES.forEach(sp => {
+            const o = document.createElement('option');
+            o.value = '!' + sp.name;
+            o.textContent = (sp.displayName || sp.name) + ' (Special)';
+            sel.appendChild(o);
+        });
+    }
+    if (Array.isArray(allUserPages)) {
+        allUserPages.forEach(page => {
+            const o = document.createElement('option');
+            o.value = page.name;
+            o.textContent = page.displayName || page.name;
+            sel.appendChild(o);
+        });
+    }
+
+    // Show/hide replace section based on whether buttons exist
+    const hasButtons = currentPageData.buttons && currentPageData.buttons.length > 0;
+    document.getElementById('bbwReplaceSection').style.display = hasButtons ? '' : 'none';
+    if (!hasButtons) document.getElementById('bbwModeReplace').checked = true;
+
+    document.getElementById('bravoButtonWizardModal').classList.remove('hidden');
+}
+
+function closeBravoButtonWizard() {
+    document.getElementById('bravoButtonWizardModal').classList.add('hidden');
+}
+
+function _bbwGoToStep(step) {
+    [1, 2, 3].forEach(n => {
+        document.getElementById(`bbw-step${n}`).classList.toggle('hidden', n !== step);
+        const dot = document.getElementById(`bbwDot${n}`);
+        const lbl = document.getElementById(`bbwLbl${n}`);
+        if (n < step) { dot.className = 'cbw-step-dot done'; }
+        else if (n === step) { dot.className = 'cbw-step-dot active'; }
+        else { dot.className = 'cbw-step-dot'; }
+        if (lbl) {
+            lbl.className = n === step
+                ? 'flex-1 text-center font-medium text-violet-600'
+                : 'flex-1 text-center text-gray-400';
+        }
+    });
+    if (step === 3) _bbwUpdateSummary();
+}
+
+function _bbwRenderOptions() {
+    const list = document.getElementById('bbwOptionsList');
+    list.innerHTML = '';
+    document.getElementById('bbwOptionsCount').textContent = _bbwOptions.length;
+    _bbwOptions.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 bg-white border border-gray-200 rounded px-2 py-1';
+        row.draggable = true;
+        row.dataset.idx = idx;
+
+        const grip = document.createElement('span');
+        grip.className = 'text-gray-300 cursor-grab select-none';
+        grip.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = item.label;
+        input.className = 'flex-1 text-sm border-none outline-none bg-transparent';
+        input.addEventListener('input', () => { _bbwOptions[idx].label = input.value; });
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'text-red-400 hover:text-red-600 text-xs px-1';
+        del.innerHTML = '<i class="fas fa-times"></i>';
+        del.addEventListener('click', () => { _bbwOptions.splice(idx, 1); _bbwRenderOptions(); });
+
+        row.appendChild(grip);
+        row.appendChild(input);
+        row.appendChild(del);
+
+        // Drag-and-drop reorder
+        row.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', idx);
+            row.classList.add('opacity-50');
+        });
+        row.addEventListener('dragend', () => row.classList.remove('opacity-50'));
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('bg-violet-50'); });
+        row.addEventListener('dragleave', () => row.classList.remove('bg-violet-50'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('bg-violet-50');
+            const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            const toIdx = idx;
+            if (fromIdx === toIdx) return;
+            const [moved] = _bbwOptions.splice(fromIdx, 1);
+            _bbwOptions.splice(toIdx, 0, moved);
+            _bbwRenderOptions();
+        });
+
+        list.appendChild(row);
+    });
+}
+
+function _bbwUpdateSummary() {
+    const count = _bbwOptions.filter(o => o.label.trim()).length;
+    const hasButtons = currentPageData && currentPageData.buttons && currentPageData.buttons.length > 0;
+    const mode = document.querySelector('input[name="bbwMode"]:checked')?.value || 'replace';
+    const targetPage = document.getElementById('bbwTargetPage').value;
+    let text = `${count} button${count !== 1 ? 's' : ''} will be ${hasButtons && mode === 'replace' ? 'created, replacing existing buttons' : 'added'} on this page.`;
+    if (targetPage) text += ` Each button will navigate to "${document.getElementById('bbwTargetPage').selectedOptions[0]?.textContent}".`;
+    document.getElementById('bbwSummary').textContent = text;
+}
+
+async function _bbwGenerate() {
+    const topic = document.getElementById('bbwTopic').value.trim();
+    if (!topic) { alert('Please enter a topic first.'); return; }
+    const examples = document.getElementById('bbwExamples').value.trim();
+    const exclusions = document.getElementById('bbwExclusions').value.trim();
+    const maxCount = Math.min(50, Math.max(5, parseInt(document.getElementById('bbwCount').value, 10) || 20));
+
+    const btn = document.getElementById('bbwGenerateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating…';
+
+    try {
+        let prompt = `Generate UP TO ${maxCount} UNIQUE button labels for an AAC communication page about: ${topic}.\n`;
+        if (examples) prompt += `Examples of the type of options to include: ${examples}\n`;
+        if (exclusions) prompt += `Do NOT include any of these: ${exclusions}\n`;
+        prompt += `\nRequirements:\n- Short labels (1–4 words each)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of strings ONLY — e.g. ["eat","drink","play"]`;
+
+        const response = await window.authenticatedFetch('/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, response_format: 'json' })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        let labels = [];
+        if (Array.isArray(data)) {
+            labels = data.map(item => typeof item === 'string' ? item : (item.option || item.label || JSON.stringify(item)));
+        } else if (data && Array.isArray(data.options)) {
+            labels = data.options.map(o => typeof o === 'string' ? o : (o.option || o.label || ''));
+        } else if (typeof data === 'string') {
+            labels = data.split('\n').map(s => s.trim()).filter(Boolean);
+        }
+        labels = labels.filter(l => l && l.trim()).slice(0, maxCount);
+
+        if (!labels.length) { alert('No options returned — try a different topic.'); return; }
+
+        _bbwOptions = labels.map(l => ({ label: l.trim() }));
+        _bbwRenderOptions();
+        _bbwGoToStep(2);
+    } catch (err) {
+        console.error('Bravo Button Wizard generate error:', err);
+        alert('Generation failed: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i>Generate Options';
+    }
+}
+
+function _bbwSaveButtons() {
+    if (!currentPageData) return;
+    const valid = _bbwOptions.filter(o => o.label.trim());
+    if (!valid.length) { alert('No buttons to save.'); return; }
+
+    const hasButtons = currentPageData.buttons && currentPageData.buttons.length > 0;
+    const mode = document.querySelector('input[name="bbwMode"]:checked')?.value || 'replace';
+    const targetPage = document.getElementById('bbwTargetPage').value.trim();
+
+    if (!currentPageData.buttons) currentPageData.buttons = [];
+
+    if (hasButtons && mode === 'replace') {
+        currentPageData.buttons = [];
+    }
+
+    valid.forEach(item => {
+        const spot = findEmptyGridSpot();
+        if (!spot) return;
+        currentPageData.buttons.push({
+            ...DEFAULT_PAGE_BUTTON_STRUCTURE,
+            text: item.label,
+            targetPage: targetPage || '',
+            navigationType: targetPage ? 'PERMANENT' : '',
+            row: spot.row,
+            col: spot.col
+        });
+    });
+
+    markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
+    renderButtonGrid();
+    closeBravoButtonWizard();
 }
 
 // Fallback: Check if auth context already exists

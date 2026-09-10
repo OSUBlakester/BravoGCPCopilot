@@ -1857,7 +1857,8 @@ DEFAULT_SETTINGS = {
     "defaultButtonAction": "do_nothing",
     "hasLoggedIn": False,
     "regenerate_boards": False,
-    "mascot": "buddy"
+    "mascot": "buddy",
+    "customMoodOptions": None
 }
 
 
@@ -8957,6 +8958,7 @@ class SettingsModel(BaseModel):
     hasLoggedIn: Optional[bool] = Field(None, description="Whether the user profile has completed initial setup/login.")
     regenerate_boards: Optional[bool] = Field(None, description="Trigger board regeneration on settings save.")
     mascot: Optional[str] = Field(None, description="Mascot character for button images (e.g., 'bobby', 'bonnie', 'buddy').")
+    customMoodOptions: Optional[List[Dict[str, str]]] = Field(None, description="Custom list of mood options (name + emoji). Null means use built-in defaults.")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')

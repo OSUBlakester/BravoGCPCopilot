@@ -46,6 +46,11 @@
         .ai-btn-card .ai-card-label { word-break:break-word; line-height:1.2; max-width:80px; font-size:0.68rem; }
         .ai-btn-card--clickable { cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; }
         .ai-btn-card--clickable:hover { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.18); }
+        .ai-opt-row { display:flex; align-items:center; gap:0.5rem; padding:0.375rem; background:#fff; border:1px solid #e5e7eb; border-radius:0.375rem; cursor:default; transition:background 0.1s; }
+        .ai-opt-row.drag-over { background:#eef2ff; border-color:#6366f1; }
+        .ai-opt-row.dragging { opacity:0.4; }
+        .ai-opt-drag-handle { cursor:grab; color:#9ca3af; padding:0 2px; flex-shrink:0; font-size:0.8rem; }
+        .ai-opt-drag-handle:active { cursor:grabbing; }
         .readonly-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85); border: 2px dashed #f59e0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #92400e; font-weight: 600; font-size: 0.9rem; z-index: 20; }
         .drag-zone { position: absolute; top: 0; bottom: 0; width: 56px; z-index: 20; display: none; align-items: center; justify-content: center; writing-mode: vertical-rl; font-size: 11px; font-weight: 700; letter-spacing: 1px; pointer-events: none; transition: background 0.15s; }
         .drag-zone.active { background: rgba(99,102,241,0.25) !important; }
@@ -520,7 +525,7 @@
         </div>
     </div>
 
-    <div id="imagePickerModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5100;">
+    <div id="imagePickerModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 7000;">
         <div class="relative top-8 mx-auto p-5 border w-11/12 max-w-6xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-900">Browse Images</h3><button id="closeImagePicker" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button></div>
             <div class="mb-4 flex gap-2"><input id="imageSearchInput" type="text" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" placeholder="Search images..."><button id="imageSearchBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Search</button><button id="clearImageSearch" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear</button></div>
@@ -753,7 +758,9 @@
                 <p class="text-sm text-gray-500 mb-4">Give your new board a name.</p>
                 <label class="block text-sm font-medium text-gray-700 mb-1" for="cbwBoardName">Board Name <span class="text-red-500">*</span></label>
                 <input type="text" id="cbwBoardName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Morning Routine, Feelings, School">
-                <p class="text-xs text-gray-400 mt-1 mb-5">Tip: choose a short, descriptive name the user will recognize in the menu.</p>
+                <p class="text-xs text-gray-400 mt-1 mb-1">Tip: choose a short, descriptive name the user will recognize in the menu.</p>
+                <p id="cbwDupNameWarn" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mb-4"><i class="fas fa-exclamation-triangle mr-1"></i>A board with this name already exists. Rename it to create a new board, or continue to replace the existing one.</p>
+                <div id="cbwDupNameWarnSpacer" class="mb-4"></div>
                 <p class="text-sm font-medium text-gray-700 mb-3">Would you like Bravo AI to create the buttons?</p>
                 <div class="flex gap-3">
                     <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-gray-200 rounded-lg cursor-pointer transition-all hover:border-indigo-300" id="cbwAiYesLabel">
@@ -882,6 +889,15 @@
                     </label>
                 </div>
                 <div id="cbwMenuLoadErr" class="hidden text-xs text-red-500 mt-2">Could not load the menu — you can assign this board via Menu Settings after creation.</div>
+                <!-- Duplicate name warning -->
+                <div id="cbwDuplicateWarning" class="hidden mt-3 p-3 bg-amber-50 border border-amber-300 rounded-md">
+                    <p class="text-sm font-semibold text-amber-800 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>A board named "<span id="cbwDupName"></span>" already exists.</p>
+                    <p class="text-xs text-amber-700 mb-3">Would you like to replace it, or go back and use a different name?</p>
+                    <div class="flex gap-2">
+                        <button id="cbwDupReplaceBtn" class="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700">Replace existing board</button>
+                        <button id="cbwDupCancelBtn" class="px-3 py-1.5 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300">Use a different name</button>
+                    </div>
+                </div>
                 <div class="flex justify-between gap-2 mt-5">
                     <button id="cbwStep5BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
                     <button id="cbwCreateBoardBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-check"></i> Create Board</button>
@@ -1118,8 +1134,20 @@
             document.getElementById('cbwStep4BackBtn').addEventListener('click', () => { _cbwStep = 3; _cbwUpdateStepUI(); _cbwRenderOptionsList(); });
             document.getElementById('cbwStep4NextBtn').addEventListener('click', _cbwGoToStep5);
             document.getElementById('cbwAssignImagesBtn').addEventListener('click', _cbwAssignImages);
-            document.getElementById('cbwStep5BackBtn').addEventListener('click', () => { _cbwStep = _cbwUseAi ? 4 : 1; _cbwUpdateStepUI(); });
+            document.getElementById('cbwStep5BackBtn').addEventListener('click', () => {
+                document.getElementById('cbwDuplicateWarning').classList.add('hidden');
+                _cbwStep = _cbwUseAi ? 4 : 1; _cbwUpdateStepUI();
+            });
             document.getElementById('cbwCreateBoardBtn').addEventListener('click', _cbwCreateBoard);
+            document.getElementById('cbwDupReplaceBtn').addEventListener('click', () => {
+                document.getElementById('cbwDuplicateWarning').classList.add('hidden');
+                _cbwCreateBoard(true);
+            });
+            document.getElementById('cbwDupCancelBtn').addEventListener('click', () => {
+                document.getElementById('cbwDuplicateWarning').classList.add('hidden');
+                _cbwStep = 1; _cbwUpdateStepUI();
+                setTimeout(() => document.getElementById('cbwBoardName').focus(), 50);
+            });
             // Enter on board name advances step
             document.getElementById('cbwBoardName').addEventListener('keydown', (e) => { if (e.key === 'Enter') _cbwStep1Next(); });
             // AI toggle visual feedback
@@ -1133,6 +1161,10 @@
                     document.getElementById('cbwAiNoLabel').classList.toggle('bg-indigo-50', !useAi);
                     document.getElementById('cbwAiNoLabel').classList.toggle('border-gray-200', useAi);
                 });
+            });
+            document.getElementById('cbwBoardName').addEventListener('input', () => {
+                document.getElementById('cbwDupNameWarn').classList.add('hidden');
+                document.getElementById('cbwDupNameWarnSpacer').classList.remove('hidden');
             });
             // Menu placement radio wiring
             document.querySelectorAll('input[name="cbwMenuPlacement"]').forEach(radio => {
@@ -1310,6 +1342,8 @@
         let _cbwEditableOptions = [];
         let _cbwDisplayButtons = [];
         let _cbwImagesAssigned = false;
+        let _cbwPendingAutoAssign = false;
+        let _cbwDraftBoardId = null; // ID of board created during wizard (Assign Images)
 
         // ── aiBulk 3-step modal state ────────────────────────────────────────
         let _abiStep = 1;
@@ -1327,6 +1361,8 @@
             _cbwEditableOptions = [];
             _cbwDisplayButtons = [];
             _cbwImagesAssigned = false;
+            _cbwPendingAutoAssign = false;
+            _cbwDraftBoardId = null;
             document.getElementById('cbwBoardName').value = '';
             document.querySelector('input[name="cbwUseAi"][value="no"]').checked = true;
             document.getElementById('cbwAiYesLabel').classList.remove('border-violet-500', 'bg-violet-50');
@@ -1344,11 +1380,16 @@
             document.getElementById('cbwMenuParent').disabled = true;
             document.getElementById('cbwMenuParentWarning').classList.add('hidden');
             document.getElementById('cbwMenuLoadErr').classList.add('hidden');
+            document.getElementById('cbwDuplicateWarning').classList.add('hidden');
+            document.getElementById('cbwDupNameWarn').classList.add('hidden');
+            document.getElementById('cbwDupNameWarnSpacer').classList.remove('hidden');
             document.getElementById('cbwRootPositionWrapper').classList.add('hidden');
             document.getElementById('cbwRootPositionAfter').innerHTML = '<option value="">— Beginning of list —</option>';
             document.getElementById('cbwRootPositionAfter').disabled = true;
             document.getElementById('cbwDisplayGrid').innerHTML = '';
             document.getElementById('cbwStep4Status').innerHTML = '';
+            const assignBtn = document.getElementById('cbwAssignImagesBtn');
+            assignBtn.disabled = false; assignBtn.innerHTML = '<i class="fas fa-images"></i> Assign Images';
             _cbwUpdateStepUI();
             document.getElementById('createBoardWizardModal').classList.remove('hidden');
             setTimeout(() => document.getElementById('cbwBoardName').focus(), 100);
@@ -1396,6 +1437,17 @@
         function _cbwStep1Next() {
             const name = document.getElementById('cbwBoardName').value.trim();
             if (!name) { document.getElementById('cbwBoardName').focus(); showNotification('Enter a board name to continue', 'error'); return; }
+            const warnEl = document.getElementById('cbwDupNameWarn');
+            const spacerEl = document.getElementById('cbwDupNameWarnSpacer');
+            const duplicate = allBoards.find(b => b.label.trim().toLowerCase() === name.toLowerCase());
+            if (duplicate && warnEl.classList.contains('hidden')) {
+                // First click: show warning, require second click to proceed anyway
+                warnEl.classList.remove('hidden');
+                spacerEl.classList.add('hidden');
+                return;
+            }
+            warnEl.classList.add('hidden');
+            spacerEl.classList.remove('hidden');
             _cbwUseAi = document.getElementById('cbwAiYes').checked;
             if (_cbwUseAi) {
                 _cbwStep = 2;
@@ -1431,35 +1483,7 @@
         }
 
         function _cbwRenderOptionsList() {
-            const list = document.getElementById('cbwOptionsList');
-            document.getElementById('cbwOptionsCount').textContent = _cbwEditableOptions.filter(o => o.label.trim()).length;
-            if (!_cbwEditableOptions.length) {
-                list.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">No options. Add items with the button above.</p>';
-                return;
-            }
-            list.innerHTML = _cbwEditableOptions.map((opt, i) =>
-                `<div class="flex items-center gap-2 p-1.5 bg-white border border-gray-200 rounded-md">
-                    <span class="text-xs text-gray-400 w-5 flex-shrink-0 text-right">${i + 1}.</span>
-                    <input type="text" data-cbw-idx="${i}" value="${escapeHtml(opt.label)}"
-                        class="flex-1 px-2 py-1 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:border-indigo-400"
-                        placeholder="Enter label">
-                    <button type="button" data-cbw-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs"><i class="fas fa-times"></i></button>
-                </div>`
-            ).join('');
-            list.querySelectorAll('input[data-cbw-idx]').forEach(inp => {
-                inp.addEventListener('change', () => {
-                    const idx = parseInt(inp.dataset.cbwIdx, 10);
-                    if (_cbwEditableOptions[idx]) _cbwEditableOptions[idx].label = inp.value;
-                    document.getElementById('cbwOptionsCount').textContent = _cbwEditableOptions.filter(o => o.label.trim()).length;
-                });
-            });
-            list.querySelectorAll('button[data-cbw-del]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const idx = parseInt(btn.dataset.cbwDel, 10);
-                    _cbwEditableOptions.splice(idx, 1);
-                    _cbwRenderOptionsList();
-                });
-            });
+            _renderEditableOptionsList('cbwOptionsList', 'cbwOptionsCount', _cbwEditableOptions, _cbwRenderOptionsList);
         }
 
         function _cbwAddOption() {
@@ -1495,14 +1519,22 @@
         async function _cbwAssignImages() {
             const btn = document.getElementById('cbwAssignImagesBtn');
             btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working…';
-            document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-spinner fa-spin text-violet-500"></i> Creating board & assigning images…';
+            document.getElementById('cbwStep4Status').innerHTML = '<i class="fas fa-spinner fa-spin text-violet-500"></i> Saving board & assigning images…';
             try {
                 const boardName = document.getElementById('cbwBoardName').value.trim() || 'New Board';
-                createNewBoardDraft(boardName);
+                // Reuse the wizard's own draft board if already created, otherwise always start fresh.
+                // Never reuse whatever board was previously selected in the main board list.
+                const draftInBoards = _cbwDraftBoardId && allBoards.find(b => b.id === _cbwDraftBoardId);
+                if (draftInBoards) {
+                    currentBoardData = JSON.parse(JSON.stringify(draftInBoards));
+                } else {
+                    createNewBoardDraft(boardName);
+                }
                 document.getElementById('boardLabel').value = boardName;
                 _cbwApplyOptionsToBoard();
                 await saveBoard();
                 const savedId = currentBoardData?.id;
+                if (savedId) _cbwDraftBoardId = savedId;
                 const imgResp = await fetch('/api/tap-interface/boards/assign-all-images', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
                 if (imgResp.ok && savedId) {
                     await loadBoards();
@@ -1554,6 +1586,7 @@
         function _cbwGoToStep5() {
             _cbwStep = 5;
             _cbwUpdateStepUI();
+            document.getElementById('cbwDuplicateWarning').classList.add('hidden');
             _cbwLoadMenuForStep5();
         }
 
@@ -1587,22 +1620,47 @@
             }
         }
 
-        async function _cbwCreateBoard() {
+        async function _cbwCreateBoard(forceReplace = false) {
             const btn = document.getElementById('cbwCreateBoardBtn');
-            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Creating…';
             const boardName = document.getElementById('cbwBoardName').value.trim() || 'New Board';
+
+            // Duplicate name check
+            if (!forceReplace) {
+                const duplicate = allBoards.find(b => b.label.trim().toLowerCase() === boardName.toLowerCase());
+                if (duplicate) {
+                    document.getElementById('cbwDupName').textContent = boardName;
+                    document.getElementById('cbwDuplicateWarning').classList.remove('hidden');
+                    return;
+                }
+            }
+
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Creating…';
             const menuPlacement = document.querySelector('input[name="cbwMenuPlacement"]:checked')?.value || 'none';
             const menuParentId = document.getElementById('cbwMenuParent').value;
             const menuPositionAfterId = document.getElementById('cbwRootPositionAfter').value;
             try {
-                let savedId = currentBoardData?.id && allBoards.find(b => b.id === currentBoardData.id) ? currentBoardData.id : null;
-                if (!savedId) {
-                    createNewBoardDraft(boardName);
+                // Board may already be saved if Admin clicked "Assign Images" in step 4
+                const draftInBoards = _cbwDraftBoardId && allBoards.find(b => b.id === _cbwDraftBoardId);
+                if (draftInBoards) {
+                    // Draft already saved — restore it as current so we save to the right place
+                    currentBoardData = JSON.parse(JSON.stringify(draftInBoards));
+                    document.getElementById('boardLabel').value = boardName;
+                } else {
+                    // No draft yet — create fresh or replace existing
+                    const existingBoard = forceReplace
+                        ? allBoards.find(b => b.label.trim().toLowerCase() === boardName.toLowerCase())
+                        : null;
+                    if (existingBoard) {
+                        currentBoardData = JSON.parse(JSON.stringify(existingBoard));
+                    } else {
+                        createNewBoardDraft(boardName);
+                    }
                     document.getElementById('boardLabel').value = boardName;
                     if (_cbwUseAi && aiBulkPreviewOptions.length) { _cbwApplyOptionsToBoard(); }
                     await saveBoard();
-                    savedId = currentBoardData?.id;
                 }
+                const savedId = currentBoardData?.id;
+
                 if (menuPlacement !== 'none' && savedId) {
                     try {
                         const menuResp = await fetch('/api/tap-interface/boards-menu', { headers: getAuthHeaders() });
@@ -1621,6 +1679,9 @@
                             else menuTree.push(newMenuItem);
                         }
                         await fetch('/api/tap-interface/boards-menu', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ boards_menu: menuTree }) });
+                        // Refresh menu iframe so it reflects the new structure immediately
+                        const menuIframe = document.querySelector('#tap-section-menu iframe');
+                        if (menuIframe) menuIframe.contentWindow.location.reload();
                     } catch (menuErr) {
                         console.error('[cbwCreateBoard] menu error:', menuErr);
                         showNotification('Board created but menu assignment failed — add it via Menu Settings', 'error');
@@ -1628,7 +1689,13 @@
                 }
                 _cbwClose();
                 showNotification(`"${boardName}" created successfully`, 'success');
-                // Background image assignment if not yet done
+                // Refresh board list and select the new board
+                await loadBoards();
+                if (savedId) {
+                    document.getElementById('selectBoard').value = savedId;
+                    handleBoardSelected();
+                }
+                // Background image assignment — only if not already done in step 4
                 if (_cbwUseAi && !_cbwImagesAssigned && savedId && (currentBoardData?.buttons || []).length > 0) {
                     (async () => {
                         try {
@@ -2748,7 +2815,7 @@
                 let enhancedPrompt = `Generate UP TO ${maxPool} UNIQUE board button labels for AAC communication: ${prompt}\n`;
                 if (examples) enhancedPrompt += `Examples of the type of options to generate: ${examples}\n`;
                 if (exclusions) enhancedPrompt += `Do NOT include any of these: ${exclusions}\n`;
-                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate as many distinct, practical options as possible (up to ${maxPool})\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with these keys:\n   - "option": the label text\n   - "plural": plural form if it is a NOUN (e.g. "apple"->"apples", "cookie"->"cookies"), otherwise null\n   - "past_tense": past tense if it is an ACTION VERB (e.g. "run"->"ran", "eat"->"ate", "swing"->"swung"), otherwise null\n5. Set both "plural" and "past_tense" to null if neither applies (e.g. adjectives, prepositions)\n\nReturn ONLY the JSON array - nothing else.`;
+                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate as many distinct, practical options as possible (up to ${maxPool})\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Use the BASE form of each word only — do NOT include both a word and its variant (e.g. include "eat" OR "ate" but NOT both; include "apple" OR "apples" but NOT both)\n5. Return as JSON array of objects with these keys:\n   - "option": the base-form label text\n   - "plural": plural form if it is a NOUN (e.g. "apple"->"apples"), otherwise null\n   - "past_tense": past tense if it is an ACTION VERB (e.g. "eat"->"ate", "run"->"ran"), otherwise null\n6. Set both "plural" and "past_tense" to null if neither applies (e.g. adjectives, prepositions)\n\nReturn ONLY the JSON array - nothing else.`;
                 const response = await fetch('/llm', {
                     method: 'POST',
                     headers: getAuthHeaders(),
@@ -2895,36 +2962,74 @@
             }
         }
 
-        function _abiRenderOptionsList() {
-            const list = document.getElementById('abiOptionsList');
-            document.getElementById('abiOptionsCount').textContent = _abiEditableOptions.filter(o => o.label.trim()).length;
-            if (!_abiEditableOptions.length) {
+        // Shared drag-and-drop editable options list renderer
+        function _renderEditableOptionsList(listId, countId, optionsArr, rerender) {
+            const list = document.getElementById(listId);
+            if (countId) document.getElementById(countId).textContent = optionsArr.filter(o => o.label.trim()).length;
+            if (!optionsArr.length) {
                 list.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">No options. Add items with the button above.</p>';
                 return;
             }
-            list.innerHTML = _abiEditableOptions.map((opt, i) =>
-                `<div class="flex items-center gap-2 p-1.5 bg-white border border-gray-200 rounded-md">
+            list.innerHTML = optionsArr.map((opt, i) =>
+                `<div class="ai-opt-row" draggable="true" data-opt-idx="${i}">
+                    <span class="ai-opt-drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                     <span class="text-xs text-gray-400 w-5 flex-shrink-0 text-right">${i + 1}.</span>
-                    <input type="text" data-abi-idx="${i}" value="${escapeHtml(opt.label)}"
+                    <input type="text" data-opt-input="${i}" value="${escapeHtml(opt.label)}"
                         class="flex-1 px-2 py-1 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:border-indigo-400"
                         placeholder="Enter label">
-                    <button type="button" data-abi-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs"><i class="fas fa-times"></i></button>
+                    <button type="button" data-opt-del="${i}" class="text-red-400 hover:text-red-600 flex-shrink-0 px-1.5 py-1 text-xs" title="Delete"><i class="fas fa-times"></i></button>
                 </div>`
             ).join('');
-            list.querySelectorAll('input[data-abi-idx]').forEach(inp => {
+
+            // Sync input changes to array
+            list.querySelectorAll('input[data-opt-input]').forEach(inp => {
                 inp.addEventListener('change', () => {
-                    const idx = parseInt(inp.dataset.abiIdx, 10);
-                    if (_abiEditableOptions[idx]) _abiEditableOptions[idx].label = inp.value;
-                    document.getElementById('abiOptionsCount').textContent = _abiEditableOptions.filter(o => o.label.trim()).length;
+                    const idx = parseInt(inp.dataset.optInput, 10);
+                    if (optionsArr[idx]) optionsArr[idx].label = inp.value;
+                    if (countId) document.getElementById(countId).textContent = optionsArr.filter(o => o.label.trim()).length;
                 });
             });
-            list.querySelectorAll('button[data-abi-del]').forEach(btn => {
+
+            // Delete buttons
+            list.querySelectorAll('button[data-opt-del]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const idx = parseInt(btn.dataset.abiDel, 10);
-                    _abiEditableOptions.splice(idx, 1);
-                    _abiRenderOptionsList();
+                    const idx = parseInt(btn.dataset.optDel, 10);
+                    optionsArr.splice(idx, 1);
+                    rerender();
                 });
             });
+
+            // Drag-and-drop reordering
+            let dragSrcIdx = null;
+            list.querySelectorAll('.ai-opt-row').forEach(row => {
+                row.addEventListener('dragstart', e => {
+                    // First sync current input values so we move the right data
+                    list.querySelectorAll('input[data-opt-input]').forEach(inp => {
+                        const i = parseInt(inp.dataset.optInput, 10);
+                        if (optionsArr[i]) optionsArr[i].label = inp.value;
+                    });
+                    dragSrcIdx = parseInt(row.dataset.optIdx, 10);
+                    row.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                row.addEventListener('dragend', () => row.classList.remove('dragging'));
+                row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
+                row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+                row.addEventListener('drop', e => {
+                    e.preventDefault();
+                    row.classList.remove('drag-over');
+                    const destIdx = parseInt(row.dataset.optIdx, 10);
+                    if (dragSrcIdx === null || dragSrcIdx === destIdx) return;
+                    const [moved] = optionsArr.splice(dragSrcIdx, 1);
+                    optionsArr.splice(destIdx, 0, moved);
+                    dragSrcIdx = null;
+                    rerender();
+                });
+            });
+        }
+
+        function _abiRenderOptionsList() {
+            _renderEditableOptionsList('abiOptionsList', 'abiOptionsCount', _abiEditableOptions, _abiRenderOptionsList);
         }
 
         function _abiAddOption() {

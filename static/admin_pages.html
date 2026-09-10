@@ -236,6 +236,9 @@
     .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
     .sselect { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 2rem 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background-color: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; min-width: 180px; }
     .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+    .cbw-step-dot { width:2rem; height:2rem; border-radius:9999px; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:700; flex-shrink:0; background:#e5e7eb; color:#6b7280; transition:background 0.2s,color 0.2s; }
+    .cbw-step-dot.active { background:#7c3aed; color:#fff; }
+    .cbw-step-dot.done { background:#16a34a; color:#fff; }
   </style>
 </head>
 <body>
@@ -2172,6 +2175,9 @@
             <button type="button" id="helpWizardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
                 <i class="fas fa-question-circle mr-2"></i>New Button Wizard
             </button>
+            <button type="button" id="bravoButtonWizardBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500">
+                <i class="fas fa-wand-magic-sparkles mr-2"></i>Use Bravo to Create Static Buttons
+            </button>
         </div>
         
         <div id="buttonGrid" class="grid grid-cols-10 auto-rows-auto gap-2 p-2 border border-gray-300 rounded-md bg-gray-100 overflow-x-auto min-h-[500px]">
@@ -2420,6 +2426,203 @@
         </div>
     </div>
 
+    <!-- Create New Page Wizard Modal -->
+    <div id="createPageWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index:5600;">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-lg shadow-lg rounded-md bg-white">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-plus-circle text-green-600 mr-2"></i>Create New Page</h3>
+                <button id="closeCreatePageWizard" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <!-- Step indicator (shown for AI path) -->
+            <div id="cpwStepIndicator" class="hidden mb-5">
+                <div class="flex items-center gap-1.5">
+                    <div id="cpwDot1" class="cbw-step-dot active">1</div>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <div id="cpwDot2" class="cbw-step-dot">2</div>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <div id="cpwDot3" class="cbw-step-dot">3</div>
+                </div>
+                <div class="flex mt-1 text-xs">
+                    <span id="cpwLbl1" class="flex-1 text-center font-medium text-green-600">Name</span>
+                    <span id="cpwLbl2" class="flex-1 text-center text-gray-400">Prompt</span>
+                    <span id="cpwLbl3" class="flex-1 text-center text-gray-400">Review</span>
+                </div>
+            </div>
+
+            <!-- Step 1: Page name + AI/Manual choice -->
+            <div id="cpw-step1">
+                <div class="mb-5">
+                    <label for="cpwDisplayName" class="block text-sm font-medium text-gray-700 mb-1">Page Display Name <span class="text-red-500">*</span></label>
+                    <input type="text" id="cpwDisplayName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500" placeholder='e.g. Morning Routine, Feelings, School'>
+                    <p id="cpwDupWarn" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mt-2"><i class="fas fa-exclamation-triangle mr-1"></i>A page with this name already exists. Choose a different name.</p>
+                </div>
+                <p class="text-sm font-medium text-gray-700 mb-3">Would you like Bravo AI to create the buttons?</p>
+                <div class="flex gap-3">
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-violet-300 transition-all" id="cpwAiYesLabel">
+                        <input type="radio" name="cpwUseAi" value="yes" id="cpwAiYes" class="sr-only">
+                        <i class="fas fa-wand-magic-sparkles text-violet-600 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">Yes, use Bravo AI</span>
+                        <span class="text-xs text-gray-500 text-center">AI generates static buttons from a topic you describe</span>
+                    </label>
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-green-300 bg-green-50 rounded-lg cursor-pointer hover:border-green-400 transition-all" id="cpwAiNoLabel">
+                        <input type="radio" name="cpwUseAi" value="no" id="cpwAiNo" class="sr-only" checked>
+                        <i class="fas fa-hand-pointer text-gray-500 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">No, I'll add buttons manually</span>
+                        <span class="text-xs text-gray-500 text-center">Start with a blank page and add buttons yourself</span>
+                    </label>
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button id="cpwStep1NextBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 2: AI Prompt (AI path only) -->
+            <div id="cpw-step2" class="hidden">
+                <div class="space-y-4">
+                    <div>
+                        <label for="cpwTopic" class="block text-sm font-medium text-gray-700 mb-1">What should the buttons be about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-500 mb-2">e.g. Morning routine, Feelings, School activities, Foods I like</p>
+                        <input type="text" id="cpwTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Describe the topic or theme">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="cpwExamples" class="block text-sm font-medium text-gray-700 mb-1">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cpwExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play">
+                        </div>
+                        <div>
+                            <label for="cpwExclusions" class="block text-sm font-medium text-gray-700 mb-1">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cpwExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. yes, no, more">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label for="cpwCount" class="block text-sm font-medium text-gray-700 mb-1">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="cpwCount" min="5" max="50" value="20" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+                <div class="flex justify-between gap-2 mt-6">
+                    <button id="cpwStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cpwGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5">
+                        <i class="fas fa-wand-magic-sparkles"></i>Generate Options
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Review / Edit Options + Create Page -->
+            <div id="cpw-step3" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="cpwOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, reorder, or add items below</p>
+                    <button id="cpwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div id="cpwOptionsList" class="max-h-64 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="cpwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cpwCreateBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-plus-circle"></i> Create Page</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bravo Button Wizard Modal -->
+    <div id="bravoButtonWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index:5500;">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
+            <!-- Header + step indicator -->
+            <div class="flex justify-between items-start mb-4">
+                <div class="flex-1 mr-4">
+                    <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-wand-magic-sparkles text-violet-600 mr-2"></i>Use Bravo to Create Static Buttons</h3>
+                    <div class="flex items-center gap-1.5 mt-3">
+                        <div id="bbwDot1" class="cbw-step-dot active">1</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="bbwDot2" class="cbw-step-dot">2</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="bbwDot3" class="cbw-step-dot">3</div>
+                    </div>
+                    <div class="flex mt-1 text-xs">
+                        <span id="bbwLbl1" class="flex-1 text-center font-medium text-violet-600">Prompt</span>
+                        <span id="bbwLbl2" class="flex-1 text-center text-gray-400">Review</span>
+                        <span id="bbwLbl3" class="flex-1 text-center text-gray-400">Save</span>
+                    </div>
+                </div>
+                <button id="closeBravoButtonWizard" class="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-1">&times;</button>
+            </div>
+
+            <!-- Step 1: Topic / Examples / Exclusions / Count -->
+            <div id="bbw-step1">
+                <div class="space-y-4">
+                    <div>
+                        <label for="bbwTopic" class="block text-sm font-medium text-gray-700 mb-1">What should the buttons be about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-500 mb-2">e.g. Morning routine, Feelings, School activities, Foods I like</p>
+                        <input type="text" id="bbwTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Describe the topic or theme">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="bbwExamples" class="block text-sm font-medium text-gray-700 mb-1">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="bbwExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play">
+                        </div>
+                        <div>
+                            <label for="bbwExclusions" class="block text-sm font-medium text-gray-700 mb-1">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="bbwExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. yes, no, more">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label for="bbwCount" class="block text-sm font-medium text-gray-700 mb-1">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="bbwCount" min="5" max="50" value="20" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="bbwCancelBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</button>
+                    <button id="bbwGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5">
+                        <i class="fas fa-wand-magic-sparkles"></i>Generate Options
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Review / Edit Options -->
+            <div id="bbw-step2" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="bbwOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, reorder, or add items below</p>
+                    <button id="bbwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div id="bbwOptionsList" class="max-h-72 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="bbwStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="bbwStep2NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 3: Replace/Append + Target Page + Save -->
+            <div id="bbw-step3" class="hidden">
+                <div class="space-y-4">
+                    <div id="bbwReplaceSection">
+                        <p class="text-sm font-medium text-gray-700 mb-2">This page already has buttons. What should happen?</p>
+                        <div class="flex flex-col gap-2">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="bbwMode" value="replace" id="bbwModeReplace" class="accent-violet-600" checked>
+                                <span class="text-sm text-gray-700">Replace all existing buttons</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="bbwMode" value="append" id="bbwModeAppend" class="accent-violet-600">
+                                <span class="text-sm text-gray-700">Append to the end</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="bbwTargetPage" class="block text-sm font-medium text-gray-700 mb-1">Target Page <span class="text-gray-400 font-normal">(optional — applied to all new buttons)</span></label>
+                        <select id="bbwTargetPage" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">No page navigation</option>
+                        </select>
+                    </div>
+                    <div id="bbwSummary" class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2"></div>
+                </div>
+                <div class="flex justify-between gap-2 mt-6">
+                    <button id="bbwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="bbwSaveBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-check"></i> Save Buttons</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Help Wizard Modal -->
     <div id="helpWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
@@ -2437,8 +2640,9 @@
                     <h4 class="text-lg font-semibold mb-4">Step 1: What do you want to name the button?</h4>
                     <input type="text" id="wizardButtonName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Enter button name">
                     <p class="text-sm text-gray-600 mt-2">This is the text that will appear on the button.</p>
+                    <button onclick="startComprehensiveGuide()" class="mt-4 text-sm text-green-600 underline hover:text-green-800 bg-transparent border-none cursor-pointer p-0">Show Guide</button>
                 </div>
-                
+
                 <!-- Step 2: Speech Phrase -->
                 <div id="wizardStep2" class="wizard-step hidden">
                     <h4 class="text-lg font-semibold mb-4">Step 2: Do you want the button to say something before any action?</h4>

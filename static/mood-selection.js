@@ -63,6 +63,7 @@ class MoodSelection {
         this.emotionalCombinations = null;
         this.useAvatars = true; // Flag to enable/disable avatar integration
         this.userLanguage = 'en-US';
+        this.customMoodOptions = null; // set from settings when loaded
         this.localizedMoodNames = new Map();
         this.localizedUiText = {
             title: 'How are you feeling today?',
@@ -72,6 +73,14 @@ class MoodSelection {
             startScanningPrompt: 'How are you feeling today?',
             pressSwitchPrompt: 'Press switch to begin scanning'
         };
+    }
+
+    // Returns the active list of mood options — custom from settings if set, else the module defaults
+    getActiveMoodOptions() {
+        if (Array.isArray(this.customMoodOptions) && this.customMoodOptions.length) {
+            return this.customMoodOptions;
+        }
+        return MOOD_OPTIONS;
     }
 
     getAuthHeaders(extraHeaders = {}) {
@@ -297,6 +306,9 @@ class MoodSelection {
 
     applyInteractionSettings(settings = {}) {
         this.userLanguage = String(settings.userLanguage || this.userLanguage || 'en-US').trim() || 'en-US';
+        if (Array.isArray(settings.customMoodOptions) && settings.customMoodOptions.length) {
+            this.customMoodOptions = settings.customMoodOptions;
+        }
         this.useTapInterface = settings.useTapInterface === true;
 
         if (this.useTapInterface) {
@@ -318,13 +330,14 @@ class MoodSelection {
     async localizeMoodSelectionText() {
         this.localizedMoodNames = new Map();
 
+        const activeMoods = this.getActiveMoodOptions();
         if (this.userLanguage.toLowerCase() === 'en-us') {
-            MOOD_OPTIONS.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
+            activeMoods.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
             return;
         }
 
         const textKeys = Object.keys(this.localizedUiText);
-        const moodNames = MOOD_OPTIONS.map((mood) => mood.name);
+        const moodNames = activeMoods.map((mood) => mood.name);
         const lines = [...textKeys.map((key) => this.localizedUiText[key]), ...moodNames];
 
         try {
@@ -340,7 +353,7 @@ class MoodSelection {
             });
 
             if (!response.ok) {
-                MOOD_OPTIONS.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
+                activeMoods.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
                 return;
             }
 
@@ -361,7 +374,7 @@ class MoodSelection {
             });
         } catch (error) {
             console.warn('Failed to localize mood selection text:', error);
-            MOOD_OPTIONS.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
+            activeMoods.forEach((mood) => this.localizedMoodNames.set(mood.name, mood.name));
         }
     }
 
@@ -422,7 +435,7 @@ class MoodSelection {
         }
         
         const imageMap = new Map();
-        const moodNames = MOOD_OPTIONS.map(m => m.name);
+        const moodNames = this.getActiveMoodOptions().map(m => m.name);
         
         console.log('🎨 Pre-fetching mood images in batch...');
         
@@ -553,7 +566,7 @@ class MoodSelection {
             moodGrid.className = 'mood-grid';
 
         // Add mood buttons with pre-fetched images
-        for (const mood of MOOD_OPTIONS) {
+        for (const mood of this.getActiveMoodOptions()) {
             const button = document.createElement('button');
             button.className = 'mood-button';
             button.setAttribute('data-mood', mood.name);
