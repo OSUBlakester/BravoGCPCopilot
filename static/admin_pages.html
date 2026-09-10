@@ -849,8 +849,8 @@
         id: 'button-grid',
         steps: [
             {
-                title: 'Button Grid Overview',
-                content: 'This 10x10 grid displays all communication buttons for the currently selected page. Each cell can contain a button with text, images, and actions.',
+                title: 'Page Buttons List',
+                content: 'Buttons for the selected page are displayed as a scrollable list. Each row shows the button label, type badges, and action controls. The order here is the order buttons appear on the scan/grid interface.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -865,8 +865,8 @@
                 }
             },
             {
-                title: 'Click to Edit Buttons',
-                content: 'Click on any button in the grid to open the Button Editor. You can edit the button\'s text, speech output, images, and other properties.',
+                title: 'Row Dividers',
+                content: 'Horizontal "Row 1", "Row 2" dividers show how buttons will wrap onto rows on the actual scan/grid interface, based on the Buttons Per Row setting. Hidden buttons appear in the list in their position but don\'t count toward the row fill — so a row might show more than "Buttons Per Row" entries if some are hidden.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -881,18 +881,33 @@
                 }
             },
             {
-                title: 'Purple Buttons = AI',
-                content: 'Buttons with a purple gradient background and "AI" badge contain AI queries. These generate dynamic, context-aware responses when pressed.',
+                title: 'Buttons Per Row Setting',
+                content: 'This global setting (the orange card above the list) controls how many visible buttons appear in each row on the scan/grid interface. Changing it and clicking Save immediately updates the row dividers in the list.',
+                highlight: '#gridColumnsInput',
+                action: function() {
+                    const inp = document.getElementById('gridColumnsInput');
+                    if (inp) {
+                        inp.classList.add('guide-highlight-target');
+                        inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const inp = document.getElementById('gridColumnsInput');
+                    if (inp) inp.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Edit or Delete a Button',
+                content: 'Each button row has an Edit button (opens the Button Editor) and a Delete button. Click Edit to change text, image, speech, navigation, AI query, or hidden status. Delete removes the button permanently from the page (after confirming).',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        // Try to find and highlight a purple AI button if it exists
-                        const aiButton = grid.querySelector('.btn-list-row.has-ai');
-                        if (aiButton) {
-                            aiButton.classList.add('guide-highlight-target');
-                            aiButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const firstRow = grid.querySelector('.btn-list-row');
+                        if (firstRow) {
+                            firstRow.classList.add('guide-highlight-target');
+                            firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         } else {
                             grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
@@ -902,23 +917,23 @@
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.remove('guide-highlight-target');
-                        const aiButton = grid.querySelector('.btn-list-row.has-ai');
-                        if (aiButton) aiButton.classList.remove('guide-highlight-target');
+                        const firstRow = grid.querySelector('.btn-list-row');
+                        if (firstRow) firstRow.classList.remove('guide-highlight-target');
                     }
                 }
             },
             {
-                title: 'Orange Buttons = Navigation',
-                content: 'Buttons with an orange/yellow gradient and arrow icon are navigation buttons. They take users to different pages when clicked.',
+                title: 'AI Badge (Purple)',
+                content: 'Buttons with a purple left border and "AI" badge have an AI query. On the scan interface they generate dynamic, context-aware phrase options when pressed.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        const navButton = grid.querySelector('.btn-list-row.has-nav');
-                        if (navButton) {
-                            navButton.classList.add('guide-highlight-target');
-                            navButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const aiRow = grid.querySelector('.btn-list-row.has-ai');
+                        if (aiRow) {
+                            aiRow.classList.add('guide-highlight-target');
+                            aiRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         } else {
                             grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
@@ -928,46 +943,66 @@
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.remove('guide-highlight-target');
-                        const navButton = grid.querySelector('.btn-list-row.has-nav');
-                        if (navButton) navButton.classList.remove('guide-highlight-target');
+                        const aiRow = grid.querySelector('.btn-list-row.has-ai');
+                        if (aiRow) aiRow.classList.remove('guide-highlight-target');
                     }
                 }
             },
             {
-                title: 'Green Accent = Custom Speech',
-                content: 'Buttons with a green border or music note icon have custom speech phrases configured. They say exactly what you\'ve programmed every time.',
+                title: 'Navigation Badge (Orange)',
+                content: 'Buttons with an orange left border and "→ page" badge navigate to another page when pressed. The badge shows the destination page name.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const navRow = grid.querySelector('.btn-list-row.has-nav');
+                        if (navRow) {
+                            navRow.classList.add('guide-highlight-target');
+                            navRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
                     }
                 },
                 cleanup: function() {
                     const grid = document.getElementById('buttonGrid');
-                    if (grid) grid.classList.remove('guide-highlight-target');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const navRow = grid.querySelector('.btn-list-row.has-nav');
+                        if (navRow) navRow.classList.remove('guide-highlight-target');
+                    }
                 }
             },
             {
-                title: 'Faded Buttons = Hidden',
-                content: 'Buttons that appear faded or with reduced opacity are hidden from users. Only admins can see them in this view.',
+                title: 'Speech (♪) and Hidden Badges',
+                content: 'A ♪ badge means the button has a custom audio recording attached. A grey "Hidden" badge (with an eye-slash icon) means the button is invisible to users on the scan interface — it still occupies its grid position but is skipped when displaying.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const hiddenRow = grid.querySelector('.btn-list-row.has-hidden');
+                        if (hiddenRow) {
+                            hiddenRow.classList.add('guide-highlight-target');
+                            hiddenRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
                     }
                 },
                 cleanup: function() {
                     const grid = document.getElementById('buttonGrid');
-                    if (grid) grid.classList.remove('guide-highlight-target');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const hiddenRow = grid.querySelector('.btn-list-row.has-hidden');
+                        if (hiddenRow) hiddenRow.classList.remove('guide-highlight-target');
+                    }
                 }
             },
             {
                 title: 'Drag & Drop to Rearrange',
-                content: 'You can drag buttons to different positions on the grid to reorganize them. This helps you group related concepts and place frequently used buttons in accessible positions.',
+                content: 'Grab the grip handle (⠿) on the left of any button row and drag it to a new position. The list order determines the order buttons appear on the scan/grid interface. Row dividers update automatically after you drop.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -982,8 +1017,40 @@
                 }
             },
             {
+                title: 'Add New Button',
+                content: 'Click "Add New Button" to open a 2-step wizard. Step 1 lets you choose where to insert the new button — at the end, at the top, or before a specific existing button. Step 2 lets you use the Button Wizard for guided setup or create the button manually in the editor.',
+                highlight: '#addNewButtonBtn',
+                action: function() {
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Use Bravo to Create Static Buttons',
+                content: 'Click this button to let Bravo AI generate a set of static buttons for this page. You describe the topic (with optional examples and exclusions), Bravo generates options for you to review and edit, and then you choose whether to replace existing buttons or append the new ones.',
+                highlight: '#bravoButtonWizardBtn',
+                action: function() {
+                    const btn = document.getElementById('bravoButtonWizardBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('bravoButtonWizardBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
                 title: 'Save Your Changes',
-                content: 'After making changes to buttons or rearranging them, always click the "Save Button Changes" button to save your work. Changes are not saved automatically!',
+                content: 'After editing, rearranging, adding, or deleting buttons, click "Save Button Changes" to save to the database. Changes are not saved automatically!',
                 highlight: '#saveButtonsBtn',
                 action: function() {
                     const saveBtn = document.getElementById('saveButtonsBtn');
@@ -1228,24 +1295,48 @@
         id: 'button-wizard',
         steps: [
             {
-                title: 'Opening the Button Wizard',
-                content: 'Click the "New Button Wizard" button to start the guided button creation process. The wizard helps you create buttons step-by-step without needing to know all the technical details.',
-                highlight: '#helpWizardBtn',
+                title: 'Opening the Add New Button Wizard',
+                content: 'Click the "Add New Button" button to start a 2-step wizard for adding a button. Step 1 asks where to place it; Step 2 asks how to create it — via the guided Button Wizard or the manual editor.',
+                highlight: '#addNewButtonBtn',
                 action: function() {
-                    const wizardBtn = document.getElementById('helpWizardBtn');
-                    if (wizardBtn) {
-                        wizardBtn.classList.add('guide-highlight-target');
-                        wizardBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 },
                 cleanup: function() {
-                    const wizardBtn = document.getElementById('helpWizardBtn');
-                    if (wizardBtn) wizardBtn.classList.remove('guide-highlight-target');
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
                 }
             },
             {
-                title: 'Step 1: Button Name',
-                content: 'Enter the text that will appear on the button. This is what users will see and read. Choose clear, simple text that describes what the button does.',
+                title: 'Step 1: Choose Placement',
+                content: 'Select where the new button should appear: End of list (default), Top of list, or Before a specific existing button. This controls where the button sits in the scan/grid order.',
+                highlight: '#addNewButtonModal',
+                action: function() {
+                    const modal = document.getElementById('addNewButtonModal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        setTimeout(() => {
+                            const list = document.getElementById('anbPlacementList');
+                            if (list) {
+                                list.classList.add('guide-highlight-target');
+                                list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const list = document.getElementById('anbPlacementList');
+                    if (list) list.classList.remove('guide-highlight-target');
+                    const modal = document.getElementById('addNewButtonModal');
+                    if (modal) modal.classList.add('hidden');
+                }
+            },
+            {
+                title: 'Button Wizard: Button Name',
+                content: 'After choosing placement and selecting "Use Button Wizard", enter the text that will appear on the button. Choose clear, simple text that describes what the button does.',
                 highlight: '#wizardButtonName',
                 action: function() {
                     // Open the wizard modal
@@ -1267,7 +1358,7 @@
                 }
             },
             {
-                title: 'Step 2: Speech Phrase (Optional)',
+                title: 'Button Wizard: Speech Phrase (Optional)',
                 content: 'Enter a custom phrase that Bravo will say when this button is pressed. This is optional - you can leave it blank if you just want navigation or AI actions.',
                 highlight: '#wizardSpeechPhrase',
                 action: function() {
@@ -1289,7 +1380,7 @@
                 }
             },
             {
-                title: 'Step 3: Target Page (Optional)',
+                title: 'Button Wizard: Target Page (Optional)',
                 content: 'Select a page to navigate to when this button is pressed. Choose "No, stay on current page" if you don\'t want navigation. If you set a Speech Phrase, Bravo will announce it first, then navigate.',
                 highlight: '#wizardTargetPage',
                 action: function() {
@@ -1311,7 +1402,7 @@
                 }
             },
             {
-                title: 'Step 4: AI Generation (Optional)',
+                title: 'Button Wizard: AI Generation (Optional)',
                 content: 'Describe what you want the AI to help with in simple terms. The wizard will convert your description into an optimized AI query. Remember to use the #LLMOptions placeholder if you want to control how many response options the AI provides.',
                 highlight: '#wizardAiDescription',
                 action: function() {
