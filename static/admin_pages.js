@@ -874,59 +874,6 @@ function clearAllButtons() {
     }
 }
 
-// --- Comprehensive Guide Integration ---
-function startComprehensiveGuide() {
-    console.log('startComprehensiveGuide called');
-    console.log('window.guideInstance:', window.guideInstance);
-    
-    // Check if the comprehensive guide is available
-    if (window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function') {
-        console.log('guideInstance found, checking properties...');
-        console.log('guideInstance.smartHelp:', window.guideInstance.smartHelp);
-        console.log('guideInstance.multimedia:', window.guideInstance.multimedia);
-        
-        // Check if the guide is fully initialized
-        if (window.guideInstance.smartHelp && window.guideInstance.multimedia) {
-            console.log('Comprehensive guide fully initialized, starting...');
-            try {
-                window.guideInstance.startComprehensiveGuide();
-            } catch (error) {
-                console.error('Error starting comprehensive guide:', error);
-                openHelpWizard();
-            }
-        } else {
-            // Wait a bit for initialization to complete
-            console.log('Waiting for comprehensive guide to initialize...');
-            setTimeout(() => {
-                if (window.guideInstance && window.guideInstance.smartHelp && window.guideInstance.multimedia) {
-                    console.log('Comprehensive guide now ready, starting...');
-                    try {
-                        window.guideInstance.startComprehensiveGuide();
-                    } catch (error) {
-                        console.error('Error starting comprehensive guide after wait:', error);
-                        openHelpWizard();
-                    }
-                } else {
-                    console.warn('Comprehensive guide still not ready after wait, falling back to old help wizard');
-                    console.log('Final state - guideInstance:', window.guideInstance);
-                    if (window.guideInstance) {
-                        console.log('Final state - smartHelp:', window.guideInstance.smartHelp);
-                        console.log('Final state - multimedia:', window.guideInstance.multimedia);
-                    }
-                    openHelpWizard();
-                }
-            }, 1000); // Wait longer (1 second)
-        }
-    } else {
-        // Fallback to old help wizard if comprehensive guide is not available
-        console.warn('Comprehensive guide not available, falling back to old help wizard');
-        console.log('window.guideInstance exists:', !!window.guideInstance);
-        if (window.guideInstance) {
-            console.log('startComprehensiveGuide method exists:', typeof window.guideInstance.startComprehensiveGuide);
-        }
-        openHelpWizard();
-    }
-}
 
 // --- Help Wizard Functions ---
 let wizardStep = 1;
