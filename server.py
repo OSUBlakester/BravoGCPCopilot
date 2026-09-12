@@ -3967,7 +3967,7 @@ async def add_aac_user_to_account(
             raise HTTPException(
                 status_code=403,
                 detail=(
-                    f"Profile limit reached. Individual accounts may have up to {FREE_PROFILE_LIMIT} profiles. "
+                    f"Profile limit reached ({effective_limit} max). "
                     f"To delete an existing profile, return to the profile list. "
                     f"To request additional profiles, contact admin@talkwithbravo.com."
                 )

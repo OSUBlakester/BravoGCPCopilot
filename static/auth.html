@@ -2675,8 +2675,11 @@
                     console.error("Error adding user:", error);
                     const isLimitError = error.message && error.message.includes('Profile limit reached');
                     if (isLimitError) {
+                        const limitMatch = error.message.match(/\((\d+) max\)/);
+                        const limitNum = limitMatch ? limitMatch[1] : '';
+                        const limitLabel = limitNum ? ` (${limitNum} max)` : '';
                         addUserStatus.innerHTML = `
-                            <span class="font-semibold">Profile limit reached (5 max).</span>
+                            <span class="font-semibold">Profile limit reached${limitLabel}.</span>
                             Delete an existing profile, or
                             <a href="mailto:admin@talkwithbravo.com" class="underline text-blue-600">contact admin@talkwithbravo.com</a>
                             to request additional profiles.`;
