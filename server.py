@@ -22066,9 +22066,9 @@ class ProfileLimitRequestData(BaseModel):
 @app.post("/api/account/request-profile-limit")
 async def request_profile_limit(
     request_data: ProfileLimitRequestData,
-    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
-    account_id = current_ids["account_id"]
+    account_id = token_info["account_id"]
     contact_email = request_data.contact_email.strip() or request_data.account_email.strip()
     body = (
         f"Profile Limit Request\n"
