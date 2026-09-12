@@ -5421,10 +5421,22 @@ registerForm.addEventListener('submit', async (e) => {
                             return fetch(url, options);
                         };
 
-                        if (typeof AudioInterviewSystem !== 'undefined') {
+                        try {
+                            if (typeof AudioInterviewSystem === 'undefined') {
+                                throw new Error('AudioInterviewSystem not loaded');
+                            }
                             // Always create a fresh instance for each new profile
                             window.interviewSystem = new AudioInterviewSystem();
-                            window.interviewSystem.openInterviewModal();
+
+                            // Make the modal visible directly in case openInterviewModal throws
+                            const interviewModal = document.getElementById('audioInterviewModal');
+                            if (interviewModal) interviewModal.classList.remove('hidden');
+
+                            await window.interviewSystem.openInterviewModal();
+                        } catch (interviewErr) {
+                            console.error('Failed to launch interview:', interviewErr);
+                            // Fall back to the grid so the user is not stranded
+                            await redirectToPreferredInterface();
                         }
                     } else {
                         await redirectToPreferredInterface();
