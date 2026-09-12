@@ -3173,6 +3173,10 @@ registerForm.addEventListener('submit', async (e) => {
 
     authErrorMessage.textContent = ''; // Clear previous errors
     loadingIndicator.style.display = 'flex';
+    // Prevent onAuthStateChanged from running its auto-login flow while registration is in progress.
+    // Firebase auth events fire as soon as createUser/signIn resolves, before the backend
+    // has created the Firestore account, which would cause a 404 race condition.
+    sessionStorage.setItem('bravoRegistrationInProgress', 'true');
 
     try {
         let userCredential;
@@ -3239,6 +3243,7 @@ registerForm.addEventListener('submit', async (e) => {
         // Store token for subsequent API calls
         sessionStorage.setItem('firebaseIdToken', idToken);
         window.currentIdToken = idToken;
+        sessionStorage.removeItem('bravoRegistrationInProgress');
 
         // Fetch the newly created profile(s) and show profile selection directly —
         // do NOT auto-redirect to the grid; admin must select a profile and run the setup wizard.
@@ -3252,6 +3257,7 @@ registerForm.addEventListener('submit', async (e) => {
     } catch (error) {
         console.error('Overall registration/backend error:', error);
         authErrorMessage.textContent = error.message || 'An unexpected error occurred during setup. Please try again.';
+        sessionStorage.removeItem('bravoRegistrationInProgress');
         // If Firebase user was created (variable 'user' is defined) but backend failed,
         // sign out the Firebase user to prevent an inconsistent state.
         if (user && auth.currentUser && auth.currentUser.uid === user.uid) {
@@ -3268,6 +3274,13 @@ registerForm.addEventListener('submit', async (e) => {
 
         // Check if user is already logged in (Firebase session persistence)
         auth.onAuthStateChanged(async (user) => {
+            // If registration is in progress, the register form handler owns the auth flow.
+            // Stand down to avoid racing against the backend account creation.
+            if (sessionStorage.getItem('bravoRegistrationInProgress') === 'true') {
+                console.log('onAuthStateChanged: registration in progress, skipping auto-login');
+                return;
+            }
+
             // Check if user intentionally logged out - if so, sign out and show login form
             const intentionalLogout = localStorage.getItem('bravoIntentionalLogout') === 'true';
             console.log('onAuthStateChanged - intentionalLogout flag:', intentionalLogout, 'user:', user ? user.uid : 'null');
