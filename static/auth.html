@@ -3642,7 +3642,7 @@ registerForm.addEventListener('submit', async (e) => {
             wakeWordInterjection: '',
             wakeWordName: '',
             llmOptions: 12,
-            freestyleOptions: 4,
+            freestyleOptions: 10,
             partnerLanguage: 'en-US',
             partnerVoice: '',
             voiceStyle: 'adult',
@@ -3745,7 +3745,7 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.wakeWordInterjection = s.wakeWordInterjection || '';
                     wizardState.wakeWordName = s.wakeWordName || '';
                     wizardState.llmOptions = s.LLMOptions !== undefined ? s.LLMOptions : 12;
-                    wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 4;
+                    wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 10;
                     wizardState.partnerLanguage = s.defaultPartnerLanguage || 'en-US';
                     wizardState.partnerVoice = s.defaultPartnerVoice || s.selected_tts_voice_name || '';
                     wizardState.voiceStyle = s.voice_style || 'adult';
