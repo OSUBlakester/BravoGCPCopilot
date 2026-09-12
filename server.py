@@ -14588,8 +14588,8 @@ async def register_account(
 
             logging.info(f"Account '{account_id}' ({email}) created successfully in Firestore.")
 
-            # 4. Create the requested number of individual AAC user profiles
-            num_users_to_create = request_data.num_users_allowed
+            # 4. Create exactly 1 profile at registration; num_users_allowed sets the limit, not the initial count
+            num_users_to_create = 1
             first_aac_user_id = None # To store the ID of the first user created
 
             for i in range(num_users_to_create):

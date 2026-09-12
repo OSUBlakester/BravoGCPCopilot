@@ -3236,13 +3236,12 @@ registerForm.addEventListener('submit', async (e) => {
         const backendResult = await backendResponse.json();
         console.log('Backend account creation/idempotency successful:', backendResult);
         
-        // Store token and initial AAC user ID
+        // Store token so the profile selection screen can use it
         sessionStorage.setItem('firebaseIdToken', idToken);
-        sessionStorage.setItem('currentAacUserId', backendResult.first_aac_user_id);
-        sessionStorage.setItem('selectedDisplayName', `${account_name}'s Device 1`); // Use provided account_name
-
-        alert('Account setup complete! Redirecting to your grid.');
-        await redirectToPreferredInterface();
+        // Do NOT set bravoDefaultUserId or auto-redirect — the admin must select a profile first
+        // and complete the new-profile setup wizard before the grid is usable.
+        alert('Account setup complete! Please select your profile to continue.');
+        window.location.reload();
 
     } catch (error) {
         console.error('Overall registration/backend error:', error);
