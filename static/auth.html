@@ -3236,12 +3236,18 @@ registerForm.addEventListener('submit', async (e) => {
         const backendResult = await backendResponse.json();
         console.log('Backend account creation/idempotency successful:', backendResult);
         
-        // Store token so the profile selection screen can use it
+        // Store token for subsequent API calls
         sessionStorage.setItem('firebaseIdToken', idToken);
-        // Do NOT set bravoDefaultUserId or auto-redirect — the admin must select a profile first
-        // and complete the new-profile setup wizard before the grid is usable.
-        alert('Account setup complete! Please select your profile to continue.');
-        window.location.reload();
+        window.currentIdToken = idToken;
+
+        // Fetch the newly created profile(s) and show profile selection directly —
+        // do NOT auto-redirect to the grid; admin must select a profile and run the setup wizard.
+        const profilesResp = await fetch('/api/account/users', {
+            headers: { 'Authorization': `Bearer ${idToken}` }
+        });
+        if (!profilesResp.ok) throw new Error('Account created but failed to load profiles. Please log in.');
+        const newProfiles = await profilesResp.json();
+        showProfileSelection(newProfiles, idToken);
 
     } catch (error) {
         console.error('Overall registration/backend error:', error);
