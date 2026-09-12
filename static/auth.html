@@ -761,7 +761,17 @@
             </div>
 
             <div class="mt-8 pt-6 border-t border-gray-200">
-                <h3 class="text-xl font-semibold text-center text-gray-700 mb-4">Add a New User Profile</h3>
+                <h3 class="text-xl font-semibold text-center text-gray-700 mb-3">Add a New User Profile</h3>
+                <!-- Profile usage summary -->
+                <div id="profile-limit-summary" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <span class="font-medium text-gray-700">Profile Limit: <span id="pls-limit" class="font-bold">—</span></span>
+                        <span class="text-gray-400">|</span>
+                        <span class="text-gray-600">Used: <span id="pls-used" class="font-semibold">—</span></span>
+                        <span class="text-gray-400">|</span>
+                        <span class="text-gray-600">Available: <span id="pls-available" class="font-semibold">—</span></span>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="newUserDisplayName" class="sr-only">New User Display Name</label>
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
@@ -2582,9 +2592,40 @@
                     const userProfiles = await response.json();
                     window.currentUserProfiles = userProfiles;
                     displayUserProfiles(userProfiles);
+                    updateProfileLimitSummary(userProfiles.length);
                 }
             } catch (error) {
                 console.error('Error loading user profiles:', error);
+            }
+        }
+
+        async function updateProfileLimitSummary(usedCount) {
+            const summary = document.getElementById('profile-limit-summary');
+            if (!summary) return;
+            try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = { 'Authorization': `Bearer ${window.currentIdToken}` };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+                const resp = await fetch('/api/account/details', { headers });
+                if (!resp.ok) return;
+                const details = await resp.json();
+                const limit = details.num_users_allowed ?? 5;
+                const available = Math.max(0, limit - usedCount);
+
+                document.getElementById('pls-limit').textContent = limit;
+                document.getElementById('pls-used').textContent = usedCount;
+                document.getElementById('pls-available').textContent = available;
+
+                const atLimit = available === 0;
+                summary.className = atLimit
+                    ? 'mb-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm flex items-center justify-between gap-4'
+                    : 'mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm flex items-center justify-between gap-4';
+                document.getElementById('pls-available').className = atLimit
+                    ? 'font-semibold text-orange-600'
+                    : 'font-semibold text-green-600';
+                summary.classList.remove('hidden');
+            } catch (err) {
+                console.warn('Could not load profile limit info:', err);
             }
         }
 

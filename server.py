@@ -10110,6 +10110,7 @@ async def get_account_details(
             "therapist_email": account_data.get("therapist_email", ""),
             "is_therapist": account_data.get("is_therapist", False),
             "allow_admin_access": account_data.get("allow_admin_access", False),
+            "num_users_allowed": max(int(account_data.get("num_users_allowed", 5)), 5),
         }
     except HTTPException:
         raise
