@@ -730,22 +730,6 @@
                     <input type="text" id="register-account-name" name="account_name" required>
                 </div>
                 <div class="form-group">
-                    <label for="register-num-users">Number of Users (1 or more)</label>
-                    <input type="number" id="register-num-users" name="num_users_allowed" value="1" min="1" required>
-                </div>
-                <div class="form-group">
-                    <label for="register-promo-code">Promo Code (Optional)</label>
-                    <input type="text" id="register-promo-code" name="promo_code">
-                </div>
-                <div class="form-group">
-                    <label for="register-address">Address (Optional)</label>
-                    <input type="text" id="register-address" name="address">
-                </div>
-                <div class="form-group">
-                    <label for="register-phone">Phone (Optional)</label>
-                    <input type="tel" id="register-phone" name="phone">
-                </div>
-                <div class="form-group">
                     <label for="register-therapist-email">Therapist/Admin Email (Optional)</label>
                     <input type="email" id="register-therapist-email" name="therapist_email">
                 </div>
@@ -2689,8 +2673,18 @@
 
                 } catch (error) {
                     console.error("Error adding user:", error);
-                    addUserStatus.textContent = error.message;
-                    addUserStatus.className = 'text-sm text-center mt-2 h-4 text-red-500';
+                    const isLimitError = error.message && error.message.includes('Profile limit reached');
+                    if (isLimitError) {
+                        addUserStatus.innerHTML = `
+                            <span class="font-semibold">Profile limit reached (5 max).</span>
+                            Delete an existing profile, or
+                            <a href="mailto:admin@talkwithbravo.com" class="underline text-blue-600">contact admin@talkwithbravo.com</a>
+                            to request additional profiles.`;
+                        addUserStatus.className = 'text-sm text-center mt-2 text-red-600';
+                    } else {
+                        addUserStatus.textContent = error.message;
+                        addUserStatus.className = 'text-sm text-center mt-2 h-4 text-red-500';
+                    }
                 } finally {
                     addUserButton.disabled = false;
                     addUserButton.dataset.processing = 'false';
@@ -3127,10 +3121,6 @@ registerForm.addEventListener('submit', async (e) => {
     const email = registerForm['register-email'].value;
     const password = registerForm['register-password'].value;
     const account_name = registerForm['register-account-name'].value;
-    const num_users_allowed = parseInt(registerForm['register-num-users'].value);
-    const promo_code = registerForm['register-promo-code'].value || null;
-    const address = registerForm['register-address'].value || null;
-    const phone = registerForm['register-phone'].value || null;
     const therapist_email = registerForm['register-therapist-email'].value || null;
     const is_therapist = registerForm['register-is-therapist'].checked;  // NEW
     const allow_admin_access = registerForm['register-allow-admin-access'].checked;  // NEW
@@ -3185,15 +3175,11 @@ registerForm.addEventListener('submit', async (e) => {
                 'Authorization': `Bearer ${idToken}` // Send token for backend validation
             },
             body: JSON.stringify({
-                email: email, // Always send email as part of the request data
+                email: email,
                 account_name,
-                num_users_allowed,
-                promo_code,
-                address,
-                phone,
                 therapist_email,
-                is_therapist,           // NEW
-                allow_admin_access      // NEW
+                is_therapist,
+                allow_admin_access
             })
         });
 

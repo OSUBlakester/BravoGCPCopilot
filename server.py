@@ -3953,21 +3953,25 @@ async def add_aac_user_to_account(
             raise HTTPException(status_code=404, detail="Account not found.")
 
         account_data = account_doc.to_dict()
-        num_users_allowed = account_data.get("num_users_allowed", 1)
+        num_users_allowed = account_data.get("num_users_allowed", 5)
 
         # Count existing AAC users under this account
         users_collection_ref = account_doc_ref.collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
         existing_users = await asyncio.to_thread(users_collection_ref.stream)
         current_user_count = len(list(existing_users))
 
-        # 2. Auto-upgrade if limit reached (increment by 1)
-        if current_user_count >= num_users_allowed:
-            new_user_limit = num_users_allowed + 1
-            await asyncio.to_thread(account_doc_ref.update, {
-                "num_users_allowed": new_user_limit,
-                "last_updated": dt.now().isoformat()
-            })
-            logging.info(f"Auto-upgraded account '{account_id}' user limit from {num_users_allowed} to {new_user_limit}.")
+        # 2. Enforce profile limit (5 for individual accounts; higher for school/company accounts)
+        FREE_PROFILE_LIMIT = 5
+        effective_limit = max(num_users_allowed, FREE_PROFILE_LIMIT)
+        if current_user_count >= effective_limit:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Profile limit reached. Individual accounts may have up to {FREE_PROFILE_LIMIT} profiles. "
+                    f"To delete an existing profile, return to the profile list. "
+                    f"To request additional profiles, contact admin@talkwithbravo.com."
+                )
+            )
 
         # 3. Generate a new unique ID for the AAC user
         new_aac_user_id = str(uuid.uuid4())
@@ -14447,7 +14451,7 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
 # --- Request Body Model for User Registration ---
 class CreateAccountRequest(BaseModel):
     account_name: str
-    num_users_allowed: int = Field(default=1, ge=1)  # Default to 1, minimum 1
+    num_users_allowed: int = Field(default=5, ge=1)  # Default to 5 (free individual limit)
     promo_code: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
