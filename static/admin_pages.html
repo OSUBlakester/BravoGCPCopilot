@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="/static/interactive-guide.js?v=20250901-fix3" defer></script>
     <script src="/static/admin-pages-guide-fixed.js?v=20250901-fix5" defer></script>
-    <script src="/static/admin-pages-comprehensive-guide.js?v=20250901-fix5" defer></script>
         <script src="/static/admin_interface_navigation.js" defer></script>
     <script src="/static/admin_pages.js?v=20251021-mp3-feature" defer></script>
   <style>
@@ -16,105 +15,34 @@
     body {
       font-family: 'Inter', sans-serif;
     }
-    /* Style for the button grid cells */
-    #buttonGrid {
-      display: grid;
-      grid-template-columns: repeat(10, minmax(120px, 1fr));
-      gap: 8px;
-      width: 100%;
-      border: 1px solid #ccc;
-      margin-top: 1rem;
-      margin-bottom: 1rem;
-      background-color: #f0f0f0;
-      overflow-x: auto;
-      padding: 8px;
-    }
-
-    .visual-button {
-      border: 2px solid #d1d5db;
-      border-radius: 8px;
-      padding: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: white;
-      min-height: 80px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      font-size: 0.875rem;
-      font-weight: 500;
-      text-align: center;
-      word-wrap: break-word;
-      position: relative;
-    }
-
-    .visual-button:hover {
-      border-color: #3b82f6;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      transform: translateY(-1px);
-    }
-
-    .visual-button.undefined {
-      background-color: #f9fafb;
-      color: #6b7280;
-      border-style: dashed;
-      font-style: italic;
-    }
-
-    .visual-button.has-content {
-      background-color: #ffffff;
-      color: #1f2937;
-      border-color: #059669;
-    }
-
-    .visual-button.has-ai {
-      background: linear-gradient(135deg, #ddd6fe 0%, #e0e7ff 100%);
-      border-color: #7c3aed;
-    }
-
-    .visual-button.has-navigation {
-      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-      border-color: #d97706;
-    }
-
-    .visual-button.dragging {
-      opacity: 0.5;
-      transform: rotate(5deg);
-    }
-
-    .visual-button.drop-target {
-      border-color: #ef4444;
-      border-width: 3px;
-      background-color: #fef2f2;
-    }
-
-    .button-indicator {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      font-size: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .indicator-ai {
-      background-color: #7c3aed;
-      color: white;
-    }
-
-    .indicator-nav {
-      background-color: #d97706;
-      color: white;
-    }
-
-    .indicator-speech {
-      background-color: #059669;
-      color: white;
-    }
+    /* Button list styles */
+    #buttonGrid { display:flex; flex-direction:column; gap:4px; padding:8px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb; min-height:60px; }
+    .btn-list-empty { text-align:center; color:#9ca3af; font-size:0.875rem; padding:2rem; font-style:italic; }
+    .btn-list-row { display:flex; align-items:center; gap:8px; background:white; border:1px solid #d1d5db; border-left:3px solid #d1d5db; border-radius:6px; padding:7px 10px; transition:border-color 0.15s,box-shadow 0.15s; user-select:none; }
+    .btn-list-row:hover { border-color:#3b82f6; border-left-color:#3b82f6; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+    .btn-list-row.dragging { opacity:0.4; }
+    .btn-list-row.drag-over { background:#eff6ff; border-color:#3b82f6; border-left-color:#3b82f6; }
+    .btn-list-row.has-ai { border-left-color:#7c3aed; }
+    .btn-list-row.has-nav { border-left-color:#d97706; }
+    .btn-list-handle { cursor:grab; color:#9ca3af; font-size:0.85rem; flex-shrink:0; }
+    .btn-list-handle:active { cursor:grabbing; }
+    .btn-list-label { flex:1; font-size:0.875rem; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+    .btn-list-badges { display:flex; gap:4px; flex-shrink:0; align-items:center; }
+    .btn-list-badge { padding:1px 6px; border-radius:9999px; font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; }
+    .badge-ai { background:#ede9fe; color:#6d28d9; }
+    .badge-nav { background:#fef3c7; color:#92400e; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; }
+    .badge-speech { background:#d1fae5; color:#065f46; }
+    .badge-hidden { background:#f3f4f6; color:#6b7280; border:1px solid #d1d5db; }
+    .btn-list-row.has-hidden { opacity:0.65; border-left-color:#9ca3af !important; border-left-style:dashed; }
+    .btn-list-row.has-hidden .btn-list-label { color:#6b7280; }
+    .btn-list-actions { display:flex; gap:4px; flex-shrink:0; }
+    .btn-list-edit { padding:3px 9px; background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:4px; font-size:0.75rem; cursor:pointer; }
+    .btn-list-edit:hover { background:#dbeafe; }
+    .btn-list-del { padding:3px 9px; background:#fff1f2; color:#e11d48; border:1px solid #fecdd3; border-radius:4px; font-size:0.75rem; cursor:pointer; }
+    .btn-list-del:hover { background:#ffe4e6; }
+    .btn-row-divider { display:flex; align-items:center; gap:8px; margin:6px 0 2px; pointer-events:none; }
+    .btn-row-divider-line { flex:1; height:1px; background:#d1d5db; }
+    .btn-row-divider-label { font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#9ca3af; white-space:nowrap; }
 
     /* Wizard styles */
     .wizard-step {
@@ -236,6 +164,9 @@
     .sinput:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
     .sselect { border: 1px solid #d1d5db !important; border-radius: 0.375rem !important; padding: 0.35rem 2rem 0.35rem 0.6rem !important; font-size: 0.875rem !important; color: #111827 !important; background-color: white !important; box-shadow: none !important; width: auto !important; margin-top: 0 !important; display: inline-block !important; min-width: 180px; }
     .sselect:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.18) !important; outline: none !important; }
+    .cbw-step-dot { width:2rem; height:2rem; border-radius:9999px; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:700; flex-shrink:0; background:#e5e7eb; color:#6b7280; transition:background 0.2s,color 0.2s; }
+    .cbw-step-dot.active { background:#7c3aed; color:#fff; }
+    .cbw-step-dot.done { background:#16a34a; color:#fff; }
   </style>
 </head>
 <body>
@@ -547,53 +478,59 @@
                         </div>
                     </div>
 
-                    <!-- Page & Button Settings — Button Grid -->
+                    <!-- Page & Button Settings — Button List -->
                     <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-th text-purple-600 text-lg"></i>
+                                <i class="fas fa-list text-purple-600 text-lg"></i>
                             </div>
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">Page &amp; Button Settings — Button Grid</div>
+                                    <div class="font-semibold text-gray-900">Page &amp; Button Settings — Page Buttons</div>
                                     <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-3">
-                                        <p><strong>Purpose:</strong> View and manage all 100 button slots on the selected page (10 columns × 10 rows).</p>
+                                        <p><strong>Purpose:</strong> View, arrange, add, and edit all buttons for the selected page. The list order is the order buttons appear on the scan/grid interface.</p>
+                                        <div class="bg-orange-50 border-l-4 border-orange-400 p-3 rounded">
+                                            <p class="text-sm font-semibold text-orange-900 mb-1">Buttons Per Row (Global Setting)</p>
+                                            <p class="text-xs text-gray-700">Controls how many visible buttons fill each row on the scan/grid interface. The orange card above the list lets you change this and save it. Row dividers in the list update immediately to reflect the new value.</p>
+                                        </div>
+                                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
+                                            <p class="text-sm font-semibold text-gray-800 mb-1">Row Dividers</p>
+                                            <p class="text-xs text-gray-700">Horizontal "Row 1", "Row 2" etc. dividers show where rows start and end on the actual interface. Hidden buttons appear in the list but don't count toward the row fill, so a row may contain more entries than the "Buttons Per Row" value if some are hidden.</p>
+                                        </div>
                                         <div class="space-y-2">
-                                            <div class="bg-gradient-to-r from-purple-100 to-purple-50 border-l-4 border-purple-500 p-3 rounded">
-                                                <span class="font-semibold text-purple-900">🤖 AI Buttons (purple)</span>
-                                                <p class="text-xs text-gray-700 mt-1">Contains an AI Query — generates context-aware responses each time the button is tapped.</p>
+                                            <div class="border-l-4 border-purple-500 bg-purple-50 p-3 rounded">
+                                                <span class="font-semibold text-purple-900">AI badge (purple border)</span>
+                                                <p class="text-xs text-gray-700 mt-1">Button has an AI Query — generates context-aware responses each time it is pressed.</p>
                                             </div>
-                                            <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-l-4 border-orange-500 p-3 rounded">
-                                                <span class="font-semibold text-orange-900">🧭 Navigation Buttons (orange)</span>
-                                                <p class="text-xs text-gray-700 mt-1">Tapping moves the user to a different page in the Auditory Scanning interface.</p>
+                                            <div class="border-l-4 border-amber-500 bg-amber-50 p-3 rounded">
+                                                <span class="font-semibold text-amber-900">Navigation badge → (orange border)</span>
+                                                <p class="text-xs text-gray-700 mt-1">Pressing navigates to a different page. The badge shows the destination page name.</p>
                                             </div>
-                                            <div class="bg-gradient-to-r from-green-100 to-green-50 border-l-4 border-green-500 p-3 rounded">
-                                                <span class="font-semibold text-green-900">💬 Speech Buttons (green)</span>
-                                                <p class="text-xs text-gray-700 mt-1">Has a custom announcement phrase — says exactly the same thing every time.</p>
+                                            <div class="border-l-4 border-green-500 bg-green-50 p-3 rounded">
+                                                <span class="font-semibold text-green-900">♪ Speech badge</span>
+                                                <p class="text-xs text-gray-700 mt-1">Button has a custom audio recording attached that plays after the announcement.</p>
                                             </div>
-                                            <div class="bg-gray-100 border-l-4 border-gray-400 p-3 rounded opacity-75">
-                                                <span class="font-semibold text-gray-700">🫥 Hidden Buttons (faded)</span>
-                                                <p class="text-xs text-gray-600 mt-1">Not visible to users — admin-only. Shown with reduced opacity in the grid.</p>
-                                            </div>
-                                            <div class="bg-white border border-dashed border-gray-400 p-3 rounded">
-                                                <span class="font-semibold text-gray-500">⬜ Empty slots</span>
-                                                <p class="text-xs text-gray-500 mt-1">Unoccupied positions. Click to create a new button here.</p>
+                                            <div class="border-l-4 border-dashed border-gray-400 bg-gray-100 p-3 rounded opacity-75">
+                                                <span class="font-semibold text-gray-700">Hidden badge (eye-slash icon)</span>
+                                                <p class="text-xs text-gray-600 mt-1">Not visible to users on the scan interface — admin-only. Shown with reduced opacity and a dashed left border. Hidden buttons still occupy a data position but are skipped when displaying.</p>
                                             </div>
                                         </div>
                                         <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded">
-                                            <p class="text-sm font-semibold text-gray-800 mb-1">Grid Actions</p>
+                                            <p class="text-sm font-semibold text-gray-800 mb-1">Button List Actions</p>
                                             <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                <li>• <strong>Click any button</strong> to open the Button Editor panel and modify its properties.</li>
-                                                <li>• <strong>Drag and drop</strong> buttons to rearrange them within the grid.</li>
-                                                <li>• <strong>New Button Wizard:</strong> Guided step-by-step creation for new buttons — useful when adding AI query buttons or standard phrases.</li>
-                                                <li>• <strong>Save Button Changes:</strong> Saves all button edits and position changes. Changes are <em>not</em> saved automatically.</li>
+                                                <li>• <strong>Edit</strong> — opens the Button Editor for that button.</li>
+                                                <li>• <strong>Delete</strong> — permanently removes the button (with confirmation).</li>
+                                                <li>• <strong>Drag the ⠿ handle</strong> to reorder. Row dividers update automatically after dropping.</li>
+                                                <li>• <strong>Add New Button</strong> — 2-step wizard: choose placement (end, top, or before a specific button), then choose guided wizard or manual editor.</li>
+                                                <li>• <strong>Use Bravo to Create Static Buttons</strong> — AI generates a set of buttons for the page based on a topic you describe.</li>
+                                                <li>• <strong>Save Button Changes</strong> — saves all edits and reorders to the database. Changes are <em>not</em> saved automatically.</li>
                                             </ul>
                                         </div>
                                         <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
-                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> Group related buttons together and place the most frequently used options near the top — users reach them first during scanning.</p>
+                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> Place the most frequently used buttons near the top — users reach them first during scanning. Use the Bravo wizard to quickly fill a page with AI-generated static options.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -917,8 +854,8 @@
         id: 'button-grid',
         steps: [
             {
-                title: 'Button Grid Overview',
-                content: 'This 10x10 grid displays all communication buttons for the currently selected page. Each cell can contain a button with text, images, and actions.',
+                title: 'Page Buttons List',
+                content: 'Buttons for the selected page are displayed as a scrollable list. Each row shows the button label, type badges, and action controls. The order here is the order buttons appear on the scan/grid interface.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -933,8 +870,8 @@
                 }
             },
             {
-                title: 'Click to Edit Buttons',
-                content: 'Click on any button in the grid to open the Button Editor. You can edit the button\'s text, speech output, images, and other properties.',
+                title: 'Row Dividers',
+                content: 'Horizontal "Row 1", "Row 2" dividers show how buttons will wrap onto rows on the actual scan/grid interface, based on the Buttons Per Row setting. Hidden buttons appear in the list in their position but don\'t count toward the row fill — so a row might show more than "Buttons Per Row" entries if some are hidden.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -949,18 +886,33 @@
                 }
             },
             {
-                title: 'Purple Buttons = AI',
-                content: 'Buttons with a purple gradient background and "AI" badge contain AI queries. These generate dynamic, context-aware responses when pressed.',
+                title: 'Buttons Per Row Setting',
+                content: 'This global setting (the orange card above the list) controls how many visible buttons appear in each row on the scan/grid interface. Changing it and clicking Save immediately updates the row dividers in the list.',
+                highlight: '#gridColumnsInput',
+                action: function() {
+                    const inp = document.getElementById('gridColumnsInput');
+                    if (inp) {
+                        inp.classList.add('guide-highlight-target');
+                        inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const inp = document.getElementById('gridColumnsInput');
+                    if (inp) inp.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Edit or Delete a Button',
+                content: 'Each button row has an Edit button (opens the Button Editor) and a Delete button. Click Edit to change text, image, speech, navigation, AI query, or hidden status. Delete removes the button permanently from the page (after confirming).',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        // Try to find and highlight a purple AI button if it exists
-                        const aiButton = grid.querySelector('.visual-button.has-ai');
-                        if (aiButton) {
-                            aiButton.classList.add('guide-highlight-target');
-                            aiButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const firstRow = grid.querySelector('.btn-list-row');
+                        if (firstRow) {
+                            firstRow.classList.add('guide-highlight-target');
+                            firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         } else {
                             grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
@@ -970,23 +922,23 @@
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.remove('guide-highlight-target');
-                        const aiButton = grid.querySelector('.visual-button.has-ai');
-                        if (aiButton) aiButton.classList.remove('guide-highlight-target');
+                        const firstRow = grid.querySelector('.btn-list-row');
+                        if (firstRow) firstRow.classList.remove('guide-highlight-target');
                     }
                 }
             },
             {
-                title: 'Orange Buttons = Navigation',
-                content: 'Buttons with an orange/yellow gradient and arrow icon are navigation buttons. They take users to different pages when clicked.',
+                title: 'AI Badge (Purple)',
+                content: 'Buttons with a purple left border and "AI" badge have an AI query. On the scan interface they generate dynamic, context-aware phrase options when pressed.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        const navButton = grid.querySelector('.visual-button.has-navigation');
-                        if (navButton) {
-                            navButton.classList.add('guide-highlight-target');
-                            navButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const aiRow = grid.querySelector('.btn-list-row.has-ai');
+                        if (aiRow) {
+                            aiRow.classList.add('guide-highlight-target');
+                            aiRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         } else {
                             grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
@@ -996,46 +948,66 @@
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.remove('guide-highlight-target');
-                        const navButton = grid.querySelector('.visual-button.has-navigation');
-                        if (navButton) navButton.classList.remove('guide-highlight-target');
+                        const aiRow = grid.querySelector('.btn-list-row.has-ai');
+                        if (aiRow) aiRow.classList.remove('guide-highlight-target');
                     }
                 }
             },
             {
-                title: 'Green Accent = Custom Speech',
-                content: 'Buttons with a green border or music note icon have custom speech phrases configured. They say exactly what you\'ve programmed every time.',
+                title: 'Navigation Badge (Orange)',
+                content: 'Buttons with an orange left border and "→ page" badge navigate to another page when pressed. The badge shows the destination page name.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const navRow = grid.querySelector('.btn-list-row.has-nav');
+                        if (navRow) {
+                            navRow.classList.add('guide-highlight-target');
+                            navRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
                     }
                 },
                 cleanup: function() {
                     const grid = document.getElementById('buttonGrid');
-                    if (grid) grid.classList.remove('guide-highlight-target');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const navRow = grid.querySelector('.btn-list-row.has-nav');
+                        if (navRow) navRow.classList.remove('guide-highlight-target');
+                    }
                 }
             },
             {
-                title: 'Faded Buttons = Hidden',
-                content: 'Buttons that appear faded or with reduced opacity are hidden from users. Only admins can see them in this view.',
+                title: 'Speech (♪) and Hidden Badges',
+                content: 'A ♪ badge means the button has a custom audio recording attached. A grey "Hidden" badge (with an eye-slash icon) means the button is invisible to users on the scan interface — it still occupies its grid position but is skipped when displaying.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
                     if (grid) {
                         grid.classList.add('guide-highlight-target');
-                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const hiddenRow = grid.querySelector('.btn-list-row.has-hidden');
+                        if (hiddenRow) {
+                            hiddenRow.classList.add('guide-highlight-target');
+                            hiddenRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
                     }
                 },
                 cleanup: function() {
                     const grid = document.getElementById('buttonGrid');
-                    if (grid) grid.classList.remove('guide-highlight-target');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const hiddenRow = grid.querySelector('.btn-list-row.has-hidden');
+                        if (hiddenRow) hiddenRow.classList.remove('guide-highlight-target');
+                    }
                 }
             },
             {
                 title: 'Drag & Drop to Rearrange',
-                content: 'You can drag buttons to different positions on the grid to reorganize them. This helps you group related concepts and place frequently used buttons in accessible positions.',
+                content: 'Grab the grip handle (⠿) on the left of any button row and drag it to a new position. The list order determines the order buttons appear on the scan/grid interface. Row dividers update automatically after you drop.',
                 highlight: '#buttonGrid',
                 action: function() {
                     const grid = document.getElementById('buttonGrid');
@@ -1050,8 +1022,40 @@
                 }
             },
             {
+                title: 'Add New Button',
+                content: 'Click "Add New Button" to open a 2-step wizard. Step 1 lets you choose where to insert the new button — at the end, at the top, or before a specific existing button. Step 2 lets you use the Button Wizard for guided setup or create the button manually in the editor.',
+                highlight: '#addNewButtonBtn',
+                action: function() {
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Use Bravo to Create Static Buttons',
+                content: 'Click this button to let Bravo AI generate a set of static buttons for this page. You describe the topic (with optional examples and exclusions), Bravo generates options for you to review and edit, and then you choose whether to replace existing buttons or append the new ones.',
+                highlight: '#bravoButtonWizardBtn',
+                action: function() {
+                    const btn = document.getElementById('bravoButtonWizardBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('bravoButtonWizardBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
                 title: 'Save Your Changes',
-                content: 'After making changes to buttons or rearranging them, always click the "Save Button Changes" button to save your work. Changes are not saved automatically!',
+                content: 'After editing, rearranging, adding, or deleting buttons, click "Save Button Changes" to save to the database. Changes are not saved automatically!',
                 highlight: '#saveButtonsBtn',
                 action: function() {
                     const saveBtn = document.getElementById('saveButtonsBtn');
@@ -1296,24 +1300,48 @@
         id: 'button-wizard',
         steps: [
             {
-                title: 'Opening the Button Wizard',
-                content: 'Click the "New Button Wizard" button to start the guided button creation process. The wizard helps you create buttons step-by-step without needing to know all the technical details.',
-                highlight: '#helpWizardBtn',
+                title: 'Opening the Add New Button Wizard',
+                content: 'Click the "Add New Button" button to start a 2-step wizard for adding a button. Step 1 asks where to place it; Step 2 asks how to create it — via the guided Button Wizard or the manual editor.',
+                highlight: '#addNewButtonBtn',
                 action: function() {
-                    const wizardBtn = document.getElementById('helpWizardBtn');
-                    if (wizardBtn) {
-                        wizardBtn.classList.add('guide-highlight-target');
-                        wizardBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 },
                 cleanup: function() {
-                    const wizardBtn = document.getElementById('helpWizardBtn');
-                    if (wizardBtn) wizardBtn.classList.remove('guide-highlight-target');
+                    const btn = document.getElementById('addNewButtonBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
                 }
             },
             {
-                title: 'Step 1: Button Name',
-                content: 'Enter the text that will appear on the button. This is what users will see and read. Choose clear, simple text that describes what the button does.',
+                title: 'Step 1: Choose Placement',
+                content: 'Select where the new button should appear: End of list (default), Top of list, or Before a specific existing button. This controls where the button sits in the scan/grid order.',
+                highlight: '#addNewButtonModal',
+                action: function() {
+                    const modal = document.getElementById('addNewButtonModal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        setTimeout(() => {
+                            const list = document.getElementById('anbPlacementList');
+                            if (list) {
+                                list.classList.add('guide-highlight-target');
+                                list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const list = document.getElementById('anbPlacementList');
+                    if (list) list.classList.remove('guide-highlight-target');
+                    const modal = document.getElementById('addNewButtonModal');
+                    if (modal) modal.classList.add('hidden');
+                }
+            },
+            {
+                title: 'Button Wizard: Button Name',
+                content: 'After choosing placement and selecting "Use Button Wizard", enter the text that will appear on the button. Choose clear, simple text that describes what the button does.',
                 highlight: '#wizardButtonName',
                 action: function() {
                     // Open the wizard modal
@@ -1335,7 +1363,7 @@
                 }
             },
             {
-                title: 'Step 2: Speech Phrase (Optional)',
+                title: 'Button Wizard: Speech Phrase (Optional)',
                 content: 'Enter a custom phrase that Bravo will say when this button is pressed. This is optional - you can leave it blank if you just want navigation or AI actions.',
                 highlight: '#wizardSpeechPhrase',
                 action: function() {
@@ -1357,7 +1385,7 @@
                 }
             },
             {
-                title: 'Step 3: Target Page (Optional)',
+                title: 'Button Wizard: Target Page (Optional)',
                 content: 'Select a page to navigate to when this button is pressed. Choose "No, stay on current page" if you don\'t want navigation. If you set a Speech Phrase, Bravo will announce it first, then navigate.',
                 highlight: '#wizardTargetPage',
                 action: function() {
@@ -1379,7 +1407,7 @@
                 }
             },
             {
-                title: 'Step 4: AI Generation (Optional)',
+                title: 'Button Wizard: AI Generation (Optional)',
                 content: 'Describe what you want the AI to help with in simple terms. The wizard will convert your description into an optimized AI query. Remember to use the #LLMOptions placeholder if you want to control how many response options the AI provides.',
                 highlight: '#wizardAiDescription',
                 action: function() {
@@ -2163,19 +2191,35 @@
             </div>
         </form>
 
-        <h3 class="text-xl font-semibold mb-3">Page Buttons (10x10 Grid)</h3>
+        <!-- Global Layout Setting -->
+        <div class="mb-6 p-4 border border-orange-200 rounded-md bg-orange-50 flex items-center gap-4 flex-wrap">
+            <div class="flex-1 min-w-0">
+                <label for="gridColumnsInput" class="block text-sm font-medium text-gray-700">Buttons Per Row <span class="text-xs font-normal text-gray-500">(Global Setting — applies to all pages)</span></label>
+                <p class="mt-0.5 text-xs text-gray-500">Controls how many buttons appear in each row on the grid/scan interface and the row indicators below</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <input type="number" id="gridColumnsInput" min="2" max="18" step="1" value="6" class="w-20 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-center focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                <button type="button" id="saveGridColumnsBtn" class="px-3 py-2 bg-orange-500 text-white rounded-md shadow-sm hover:bg-orange-600 text-sm font-medium">Save</button>
+                <span id="gridColumnsSaveStatus" class="text-xs hidden"></span>
+            </div>
+        </div>
+
+        <h3 class="text-xl font-semibold mb-3">Page Buttons</h3>
         <p class="text-gray-600 mb-4">Click on any button to edit its configuration. Drag and drop to rearrange buttons.</p>
-        
+
         <!-- Button Grid Controls -->
         <div class="flex space-x-3 mb-4">
             <button type="button" id="saveButtonsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Save Button Changes</button>
-            <button type="button" id="helpWizardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-                <i class="fas fa-question-circle mr-2"></i>New Button Wizard
+            <button type="button" id="addNewButtonBtn" class="px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                <i class="fas fa-plus-circle mr-2"></i>Add New Button
+            </button>
+            <button type="button" id="bravoButtonWizardBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md shadow-sm hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500">
+                <i class="fas fa-wand-magic-sparkles mr-2"></i>Use Bravo to Create Static Buttons
             </button>
         </div>
         
-        <div id="buttonGrid" class="grid grid-cols-10 auto-rows-auto gap-2 p-2 border border-gray-300 rounded-md bg-gray-100 overflow-x-auto min-h-[500px]">
-            <!-- Visual buttons will be rendered here by JavaScript -->
+        <div id="buttonGrid">
+            <!-- Button list rendered by JavaScript -->
         </div>
                 </div><!-- end pagebutton inner -->
             </div><!-- end scan-section-pagebutton -->
@@ -2420,6 +2464,227 @@
         </div>
     </div>
 
+    <!-- Create New Page Wizard Modal -->
+    <div id="createPageWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index:5600;">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-lg shadow-lg rounded-md bg-white">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-plus-circle text-green-600 mr-2"></i>Create New Page</h3>
+                <button id="closeCreatePageWizard" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <!-- Step indicator (shown for AI path) -->
+            <div id="cpwStepIndicator" class="hidden mb-5">
+                <div class="flex items-center gap-1.5">
+                    <div id="cpwDot1" class="cbw-step-dot active">1</div>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <div id="cpwDot2" class="cbw-step-dot">2</div>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <div id="cpwDot3" class="cbw-step-dot">3</div>
+                </div>
+                <div class="flex mt-1 text-xs">
+                    <span id="cpwLbl1" class="flex-1 text-center font-medium text-green-600">Name</span>
+                    <span id="cpwLbl2" class="flex-1 text-center text-gray-400">Prompt</span>
+                    <span id="cpwLbl3" class="flex-1 text-center text-gray-400">Review</span>
+                </div>
+            </div>
+
+            <!-- Step 1: Page name + AI/Manual choice -->
+            <div id="cpw-step1">
+                <div class="mb-5">
+                    <label for="cpwDisplayName" class="block text-sm font-medium text-gray-700 mb-1">Page Display Name <span class="text-red-500">*</span></label>
+                    <input type="text" id="cpwDisplayName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500" placeholder='e.g. Morning Routine, Feelings, School'>
+                    <p id="cpwDupWarn" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mt-2"></p>
+                </div>
+                <p class="text-sm font-medium text-gray-700 mb-3">Would you like Bravo AI to create the buttons?</p>
+                <div class="flex gap-3">
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-violet-300 transition-all" id="cpwAiYesLabel">
+                        <input type="radio" name="cpwUseAi" value="yes" id="cpwAiYes" class="sr-only">
+                        <i class="fas fa-wand-magic-sparkles text-violet-600 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">Yes, use Bravo AI</span>
+                        <span class="text-xs text-gray-500 text-center">AI generates static buttons from a topic you describe</span>
+                    </label>
+                    <label class="flex-1 flex flex-col items-center justify-center gap-1 p-3 border-2 border-green-300 bg-green-50 rounded-lg cursor-pointer hover:border-green-400 transition-all" id="cpwAiNoLabel">
+                        <input type="radio" name="cpwUseAi" value="no" id="cpwAiNo" class="sr-only" checked>
+                        <i class="fas fa-hand-pointer text-gray-500 text-xl"></i>
+                        <span class="font-semibold text-sm text-gray-800">No, I'll add buttons manually</span>
+                        <span class="text-xs text-gray-500 text-center">Start with a blank page and add buttons yourself</span>
+                    </label>
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button id="cpwStep1NextBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 2: AI Prompt (AI path only) -->
+            <div id="cpw-step2" class="hidden">
+                <div class="space-y-4">
+                    <div>
+                        <label for="cpwTopic" class="block text-sm font-medium text-gray-700 mb-1">What should the buttons be about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-500 mb-2">e.g. Morning routine, Feelings, School activities, Foods I like</p>
+                        <input type="text" id="cpwTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Describe the topic or theme">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="cpwExamples" class="block text-sm font-medium text-gray-700 mb-1">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cpwExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play">
+                        </div>
+                        <div>
+                            <label for="cpwExclusions" class="block text-sm font-medium text-gray-700 mb-1">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="cpwExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. yes, no, more">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label for="cpwCount" class="block text-sm font-medium text-gray-700 mb-1">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="cpwCount" min="5" max="50" value="20" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+                <div class="flex justify-between gap-2 mt-6">
+                    <button id="cpwStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cpwGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5">
+                        <i class="fas fa-wand-magic-sparkles"></i>Generate Options
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Review / Edit Options + Create Page -->
+            <div id="cpw-step3" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="cpwOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, reorder, or add items below</p>
+                    <button id="cpwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div id="cpwOptionsList" class="max-h-64 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="mt-3 border border-gray-200 rounded-md p-3 bg-white">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="cpwAddNavBtn" class="accent-green-600">
+                        <span class="text-sm font-medium text-gray-700">Add a navigation button at the start</span>
+                    </label>
+                    <div id="cpwNavBtnOptions" class="hidden mt-3 pl-1 space-y-2">
+                        <div class="flex gap-3">
+                            <div class="flex-1">
+                                <label for="cpwNavBtnName" class="block text-xs text-gray-500 mb-1">Button name</label>
+                                <input type="text" id="cpwNavBtnName" value="Home" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500">
+                            </div>
+                            <div class="flex-1">
+                                <label for="cpwNavBtnTarget" class="block text-xs text-gray-500 mb-1">Navigate to</label>
+                                <select id="cpwNavBtnTarget" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500">
+                                    <option value="home">Home Page</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-between gap-2 mt-4">
+                    <button id="cpwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="cpwCreateBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-plus-circle"></i> Create Page</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bravo Button Wizard Modal -->
+    <div id="bravoButtonWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index:5500;">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
+            <!-- Header + step indicator -->
+            <div class="flex justify-between items-start mb-4">
+                <div class="flex-1 mr-4">
+                    <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-wand-magic-sparkles text-violet-600 mr-2"></i>Use Bravo to Create Static Buttons</h3>
+                    <div class="flex items-center gap-1.5 mt-3">
+                        <div id="bbwDot1" class="cbw-step-dot active">1</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="bbwDot2" class="cbw-step-dot">2</div>
+                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div id="bbwDot3" class="cbw-step-dot">3</div>
+                    </div>
+                    <div class="flex mt-1 text-xs">
+                        <span id="bbwLbl1" class="flex-1 text-center font-medium text-violet-600">Prompt</span>
+                        <span id="bbwLbl2" class="flex-1 text-center text-gray-400">Review</span>
+                        <span id="bbwLbl3" class="flex-1 text-center text-gray-400">Save</span>
+                    </div>
+                </div>
+                <button id="closeBravoButtonWizard" class="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-1">&times;</button>
+            </div>
+
+            <!-- Step 1: Topic / Examples / Exclusions / Count -->
+            <div id="bbw-step1">
+                <div class="space-y-4">
+                    <div>
+                        <label for="bbwTopic" class="block text-sm font-medium text-gray-700 mb-1">What should the buttons be about? <span class="text-red-500">*</span></label>
+                        <p class="text-xs text-gray-500 mb-2">e.g. Morning routine, Feelings, School activities, Foods I like</p>
+                        <input type="text" id="bbwTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Describe the topic or theme">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="bbwExamples" class="block text-sm font-medium text-gray-700 mb-1">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="bbwExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play">
+                        </div>
+                        <div>
+                            <label for="bbwExclusions" class="block text-sm font-medium text-gray-700 mb-1">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <input type="text" id="bbwExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. yes, no, more">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label for="bbwCount" class="block text-sm font-medium text-gray-700 mb-1">Max Buttons <span class="text-gray-400 font-normal text-xs">(5–50)</span></label>
+                        <input type="number" id="bbwCount" min="5" max="50" value="20" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="bbwCancelBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</button>
+                    <button id="bbwGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5">
+                        <i class="fas fa-wand-magic-sparkles"></i>Generate Options
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Review / Edit Options -->
+            <div id="bbw-step2" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-sm text-gray-600"><span id="bbwOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, reorder, or add items below</p>
+                    <button id="bbwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div id="bbwOptionsList" class="max-h-72 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
+                <div class="flex justify-between gap-2 mt-5">
+                    <button id="bbwStep2BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="bbwStep2NextBtn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-semibold text-sm flex items-center gap-1.5">Next <i class="fas fa-arrow-right text-xs"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 3: Replace/Append + Target Page + Save -->
+            <div id="bbw-step3" class="hidden">
+                <div class="space-y-4">
+                    <div id="bbwReplaceSection">
+                        <p class="text-sm font-medium text-gray-700 mb-2">This page already has buttons. What should happen?</p>
+                        <div class="flex flex-col gap-2">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="bbwMode" value="replace" id="bbwModeReplace" class="accent-violet-600" checked>
+                                <span class="text-sm text-gray-700">Replace all existing buttons</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="bbwMode" value="append" id="bbwModeAppend" class="accent-violet-600">
+                                <span class="text-sm text-gray-700">Append to the end</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="bbwTargetPage" class="block text-sm font-medium text-gray-700 mb-1">Target Page <span class="text-gray-400 font-normal">(optional — applied to all new buttons)</span></label>
+                        <select id="bbwTargetPage" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">No page navigation</option>
+                        </select>
+                    </div>
+                    <div id="bbwSummary" class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2"></div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="bbwAddHomeBtn" class="accent-violet-600">
+                        <span class="text-sm text-gray-700">Also add a <strong>Home</strong> button at the end</span>
+                    </label>
+                </div>
+                <div class="flex justify-between gap-2 mt-6">
+                    <button id="bbwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>
+                    <button id="bbwSaveBtn" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-check"></i> Save Buttons</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Help Wizard Modal -->
     <div id="helpWizardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
@@ -2438,7 +2703,7 @@
                     <input type="text" id="wizardButtonName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Enter button name">
                     <p class="text-sm text-gray-600 mt-2">This is the text that will appear on the button.</p>
                 </div>
-                
+
                 <!-- Step 2: Speech Phrase -->
                 <div id="wizardStep2" class="wizard-step hidden">
                     <h4 class="text-lg font-semibold mb-4">Step 2: Do you want the button to say something before any action?</h4>
@@ -2481,6 +2746,51 @@
                     <button id="wizardRejectBtn" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 hidden">Reject</button>
                     <button id="wizardNextBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Next</button>
                     <button id="wizardAcceptBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 hidden">Accept</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add New Button Wizard Modal -->
+    <div id="addNewButtonModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index:5450;">
+        <div class="relative top-16 mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Add New Button</h3>
+                <button onclick="closeAddNewButtonWizard()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <!-- Step dots -->
+            <div class="flex items-center gap-2 mb-5">
+                <div class="cbw-step-dot active" id="anbDot1">1</div>
+                <div class="flex-1 h-px bg-gray-200"></div>
+                <div class="cbw-step-dot" id="anbDot2">2</div>
+            </div>
+            <!-- Step 1: Placement -->
+            <div id="anbStep1">
+                <p class="text-sm font-medium text-gray-700 mb-3">Where should the new button be added?</p>
+                <div id="anbPlacementList" class="space-y-2 max-h-72 overflow-y-auto pr-1"></div>
+                <div class="flex justify-end mt-5">
+                    <button onclick="_anbNextStep()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Next →</button>
+                </div>
+            </div>
+            <!-- Step 2: Method -->
+            <div id="anbStep2" class="hidden">
+                <p class="text-sm font-medium text-gray-700 mb-4">How would you like to create the button?</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="_anbProceed('wizard')" class="flex flex-col items-center gap-2 p-4 border-2 border-gray-200 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors text-center">
+                        <i class="fas fa-question-circle text-3xl text-green-600"></i>
+                        <span class="font-semibold text-sm text-gray-800">Use Button Wizard</span>
+                        <span class="text-xs text-gray-500">Step-by-step guided setup</span>
+                    </button>
+                    <button onclick="_anbProceed('manual')" class="flex flex-col items-center gap-2 p-4 border-2 border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-colors text-center">
+                        <i class="fas fa-edit text-3xl text-indigo-600"></i>
+                        <span class="font-semibold text-sm text-gray-800">Create Manually</span>
+                        <span class="text-xs text-gray-500">Fill in all fields directly</span>
+                    </button>
+                </div>
+                <div class="flex justify-start mt-5">
+                    <button onclick="_anbGoToStep(1)" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">← Back</button>
                 </div>
             </div>
         </div>
