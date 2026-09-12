@@ -5212,7 +5212,8 @@ No markdown, no code blocks, no commentary. Return ONLY the JSON array.
 Example: ["hello everyone", "good to see you", "what's going on"]"""
         else:
             # Standard fast path: include option + summary so buttons show meaningful labels.
-            estimated_max_output_tokens = min(1024, max(400, requested_options_count * 42 + 120))
+            # Use 80 tokens/option so verbose prompts (conversation starters, etc.) aren't truncated.
+            estimated_max_output_tokens = min(2048, max(512, requested_options_count * 80 + 150))
             json_format_instructions = f"""
 {vocab_instruction}
 
