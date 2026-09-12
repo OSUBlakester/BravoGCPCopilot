@@ -761,9 +761,9 @@
             </div>
 
             <div class="mt-8 pt-6 border-t border-gray-200">
-                <h3 class="text-xl font-semibold text-center text-gray-700 mb-3">Add a New User Profile</h3>
+                <h3 class="text-xl font-semibold text-center text-gray-700 mb-3">Add a New Profile</h3>
                 <!-- Profile usage summary -->
-                <div id="profile-limit-summary" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm flex items-center justify-between gap-4">
+                <div id="profile-limit-summary" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm flex items-center justify-between gap-4 flex-wrap">
                     <div class="flex items-center gap-3 flex-wrap">
                         <span class="font-medium text-gray-700">Profile Limit: <span id="pls-limit" class="font-bold">—</span></span>
                         <span class="text-gray-400">|</span>
@@ -771,6 +771,10 @@
                         <span class="text-gray-400">|</span>
                         <span class="text-gray-600">Available: <span id="pls-available" class="font-semibold">—</span></span>
                     </div>
+                    <button onclick="openProfileLimitRequestModal()"
+                        class="text-xs font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-300 hover:border-indigo-500 rounded px-2 py-1 whitespace-nowrap transition-colors">
+                        Request More Profiles
+                    </button>
                 </div>
                 <div class="form-group">
                     <label for="newUserDisplayName" class="sr-only">New User Display Name</label>
@@ -2197,12 +2201,14 @@
                         <button id="editUserBtn" class="control-btn edit-btn">Edit</button>
                         <button id="copyUserBtn" class="control-btn copy-btn">Copy</button>
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
-                        <button id="downloadMyDataBtn" class="control-btn download-btn" title="Download a full copy of this user's data">Download Data</button>
-                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                     </div>
                     <div style="display:flex;gap:8px;margin-top:15px;">
-                        <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected User</button>
-                        <button id="setupWizardBtn" style="flex:1;">New User Setup Wizard</button>
+                        <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected Profile</button>
+                        <button id="setupWizardBtn" style="flex:1;">New Profile Setup Wizard</button>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+                        <button id="downloadMyDataBtn" class="control-btn download-btn" title="Download a full copy of this profile's data">Download Data</button>
+                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete Profile</button>
                     </div>
                 </div>
             `;
@@ -2619,12 +2625,26 @@
 
                 const atLimit = available === 0;
                 summary.className = atLimit
-                    ? 'mb-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm flex items-center justify-between gap-4'
-                    : 'mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm flex items-center justify-between gap-4';
+                    ? 'mb-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm flex items-center justify-between gap-4 flex-wrap'
+                    : 'mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm flex items-center justify-between gap-4 flex-wrap';
                 document.getElementById('pls-available').className = atLimit
                     ? 'font-semibold text-orange-600'
                     : 'font-semibold text-green-600';
                 summary.classList.remove('hidden');
+
+                // Disable add-profile controls when at limit
+                const addBtn = document.getElementById('add-user-button');
+                const nameInput = document.getElementById('newUserDisplayName');
+                if (addBtn) {
+                    addBtn.disabled = atLimit;
+                    addBtn.title = atLimit ? 'Profile limit reached — request more profiles to add new ones.' : '';
+                }
+                if (nameInput) {
+                    nameInput.disabled = atLimit;
+                    nameInput.placeholder = atLimit
+                        ? 'Profile limit reached'
+                        : 'Enter new profile display name';
+                }
             } catch (err) {
                 console.warn('Could not load profile limit info:', err);
             }
@@ -5523,5 +5543,142 @@ registerForm.addEventListener('submit', async (e) => {
             </div>
         </div>
     </div>
+
+    <!-- Profile Limit Request Modal -->
+    <div id="profile-limit-request-modal"
+         class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black bg-opacity-50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold text-gray-800">Request More Profiles</h2>
+                <button onclick="closeProfileLimitRequestModal()"
+                        class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <p class="text-sm text-gray-500 mb-4">
+                Fill in the form below and we'll reach out to discuss expanding your profile limit.
+            </p>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Account Email</label>
+                    <input id="plr-account-email" type="email" readonly
+                           class="w-full border border-gray-200 bg-gray-50 rounded-md px-3 py-2 text-sm text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email <span class="text-gray-400 font-normal">(if different)</span></label>
+                    <input id="plr-contact-email" type="email" placeholder="Leave blank to use account email"
+                           class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Contact Name <span class="text-red-500">*</span></label>
+                    <input id="plr-contact-name" type="text" placeholder="Your name"
+                           class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Total Profiles Needed <span class="text-red-500">*</span></label>
+                    <input id="plr-total-needed" type="number" min="1" placeholder="e.g. 10"
+                           class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+                    <textarea id="plr-comment" rows="3" placeholder="Any additional details…"
+                              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"></textarea>
+                </div>
+            </div>
+
+            <p id="plr-status" class="text-sm mt-3 h-5"></p>
+
+            <div class="flex gap-3 mt-5 justify-end">
+                <button onclick="closeProfileLimitRequestModal()"
+                        class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+                    Cancel
+                </button>
+                <button onclick="submitProfileLimitRequest()"
+                        id="plr-submit-btn"
+                        class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">
+                    Send Request
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function openProfileLimitRequestModal() {
+        // Pre-populate account email from Firebase current user
+        const user = typeof firebase !== 'undefined' && firebase.auth().currentUser;
+        if (user) document.getElementById('plr-account-email').value = user.email || '';
+        document.getElementById('plr-contact-email').value = '';
+        document.getElementById('plr-contact-name').value = '';
+        document.getElementById('plr-total-needed').value = '';
+        document.getElementById('plr-comment').value = '';
+        document.getElementById('plr-status').textContent = '';
+        document.getElementById('plr-submit-btn').disabled = false;
+        document.getElementById('profile-limit-request-modal').classList.remove('hidden');
+    }
+
+    function closeProfileLimitRequestModal() {
+        document.getElementById('profile-limit-request-modal').classList.add('hidden');
+    }
+
+    async function submitProfileLimitRequest() {
+        const accountEmail = document.getElementById('plr-account-email').value.trim();
+        const contactEmail = document.getElementById('plr-contact-email').value.trim();
+        const contactName  = document.getElementById('plr-contact-name').value.trim();
+        const totalNeeded  = parseInt(document.getElementById('plr-total-needed').value, 10);
+        const comment      = document.getElementById('plr-comment').value.trim();
+        const statusEl     = document.getElementById('plr-status');
+        const submitBtn    = document.getElementById('plr-submit-btn');
+
+        if (!contactName) {
+            statusEl.textContent = 'Please enter a contact name.';
+            statusEl.className = 'text-sm mt-3 h-5 text-red-600';
+            return;
+        }
+        if (!totalNeeded || totalNeeded < 1) {
+            statusEl.textContent = 'Please enter the number of profiles needed.';
+            statusEl.className = 'text-sm mt-3 h-5 text-red-600';
+            return;
+        }
+
+        submitBtn.disabled = true;
+        statusEl.textContent = 'Sending…';
+        statusEl.className = 'text-sm mt-3 h-5 text-gray-500';
+
+        try {
+            const token = window.currentIdToken || sessionStorage.getItem('firebaseIdToken');
+            const resp = await fetch('/api/account/request-profile-limit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    account_email: accountEmail,
+                    contact_email: contactEmail,
+                    contact_name: contactName,
+                    total_profiles_needed: totalNeeded,
+                    comment
+                })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `Server error ${resp.status}`);
+            }
+            statusEl.textContent = 'Request sent! We\'ll be in touch soon.';
+            statusEl.className = 'text-sm mt-3 h-5 text-green-600';
+            submitBtn.textContent = 'Sent';
+            setTimeout(closeProfileLimitRequestModal, 2500);
+        } catch (err) {
+            statusEl.textContent = err.message || 'Failed to send. Please email admin@talkwithbravo.com directly.';
+            statusEl.className = 'text-sm mt-3 h-5 text-red-600';
+            submitBtn.disabled = false;
+        }
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('profile-limit-request-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeProfileLimitRequestModal();
+    });
+    </script>
 </body>
 </html>

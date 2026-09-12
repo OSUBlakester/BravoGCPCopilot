@@ -22056,6 +22056,42 @@ async def set_account_profile_limit(
         raise HTTPException(status_code=500, detail="Failed to update profile limit.")
 
 
+class ProfileLimitRequestData(BaseModel):
+    account_email: str
+    contact_email: str = ""
+    contact_name: str
+    total_profiles_needed: int = Field(..., ge=1)
+    comment: str = ""
+
+@app.post("/api/account/request-profile-limit")
+async def request_profile_limit(
+    request_data: ProfileLimitRequestData,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    contact_email = request_data.contact_email.strip() or request_data.account_email.strip()
+    body = (
+        f"Profile Limit Request\n"
+        f"{'=' * 40}\n"
+        f"Account Email:         {request_data.account_email}\n"
+        f"Contact Name:          {request_data.contact_name}\n"
+        f"Contact Email:         {contact_email}\n"
+        f"Total Profiles Needed: {request_data.total_profiles_needed}\n"
+        f"Account ID:            {account_id}\n"
+    )
+    if request_data.comment.strip():
+        body += f"\nComment:\n{request_data.comment.strip()}\n"
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject="Profile Limit Request",
+        body_text=body,
+    )
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send request email. Please contact admin@talkwithbravo.com directly.")
+    logging.info(f"Profile limit request sent for account '{account_id}' by {request_data.account_email}.")
+    return JSONResponse(content={"message": "Request sent successfully."})
+
+
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
     user_id: str,
