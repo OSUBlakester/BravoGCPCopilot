@@ -156,12 +156,12 @@
         }
 
         .copy-btn {
-            background-color: #28a745;
+            background-color: #0891b2;
             color: white;
         }
 
         .copy-btn:hover:not(:disabled) {
-            background-color: #218838;
+            background-color: #0e7490;
         }
 
         .download-btn {
@@ -266,13 +266,17 @@
         #selectUserBtn {
             background-color: #28a745;
             color: white;
-            padding: 12px 24px;
+            padding: 12px 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 500;
-            margin-top: 15px;
+            transition: background-color 0.2s;
+        }
+
+        #selectUserBtn:hover:not(:disabled) {
+            background-color: #218838;
         }
 
         #selectUserBtn:disabled {
@@ -349,18 +353,25 @@
         }
 
         .set-default-btn {
-            background-color: #28a745;
+            background-color: #d97706;
             color: white;
             padding: 8px 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
-            margin-left: 10px;
+            font-weight: 500;
+            transition: background-color 0.2s;
         }
 
-        .set-default-btn:hover {
-            background-color: #218838;
+        .set-default-btn:hover:not(:disabled) {
+            background-color: #b45309;
+        }
+
+        .set-default-btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.5;
         }
 
         .default-user-indicator {
@@ -372,18 +383,23 @@
         #setupWizardBtn {
             background-color: #6366f1;
             color: white;
-            padding: 12px 24px;
+            padding: 12px 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 500;
-            margin-top: 8px;
-            width: 100%;
+            transition: background-color 0.2s;
         }
 
-        #setupWizardBtn:hover {
+        #setupWizardBtn:hover:not(:disabled) {
             background-color: #4f46e5;
+        }
+
+        #setupWizardBtn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.5;
         }
 
         .wizard-modal-overlay {
@@ -2203,7 +2219,7 @@
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
                     </div>
                     <div style="display:flex;gap:8px;margin-top:15px;">
-                        <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected Profile</button>
+                        <button id="selectUserBtn" style="flex:1;">Continue with Selected Profile</button>
                         <button id="setupWizardBtn" style="flex:1;">New Profile Setup Wizard</button>
                     </div>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
