@@ -3953,21 +3953,25 @@ async def add_aac_user_to_account(
             raise HTTPException(status_code=404, detail="Account not found.")
 
         account_data = account_doc.to_dict()
-        num_users_allowed = account_data.get("num_users_allowed", 1)
+        num_users_allowed = account_data.get("num_users_allowed", 5)
 
         # Count existing AAC users under this account
         users_collection_ref = account_doc_ref.collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
         existing_users = await asyncio.to_thread(users_collection_ref.stream)
         current_user_count = len(list(existing_users))
 
-        # 2. Auto-upgrade if limit reached (increment by 1)
-        if current_user_count >= num_users_allowed:
-            new_user_limit = num_users_allowed + 1
-            await asyncio.to_thread(account_doc_ref.update, {
-                "num_users_allowed": new_user_limit,
-                "last_updated": dt.now().isoformat()
-            })
-            logging.info(f"Auto-upgraded account '{account_id}' user limit from {num_users_allowed} to {new_user_limit}.")
+        # 2. Enforce profile limit (5 for individual accounts; higher for school/company accounts)
+        FREE_PROFILE_LIMIT = 5
+        effective_limit = max(num_users_allowed, FREE_PROFILE_LIMIT)
+        if current_user_count >= effective_limit:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Profile limit reached ({effective_limit} max). "
+                    f"To delete an existing profile, return to the profile list. "
+                    f"To request additional profiles, contact admin@talkwithbravo.com."
+                )
+            )
 
         # 3. Generate a new unique ID for the AAC user
         new_aac_user_id = str(uuid.uuid4())
@@ -5212,7 +5216,8 @@ No markdown, no code blocks, no commentary. Return ONLY the JSON array.
 Example: ["hello everyone", "good to see you", "what's going on"]"""
         else:
             # Standard fast path: include option + summary so buttons show meaningful labels.
-            estimated_max_output_tokens = min(1024, max(400, requested_options_count * 42 + 120))
+            # Use 80 tokens/option so verbose prompts (conversation starters, etc.) aren't truncated.
+            estimated_max_output_tokens = min(2048, max(512, requested_options_count * 80 + 150))
             json_format_instructions = f"""
 {vocab_instruction}
 
@@ -10105,6 +10110,7 @@ async def get_account_details(
             "therapist_email": account_data.get("therapist_email", ""),
             "is_therapist": account_data.get("is_therapist", False),
             "allow_admin_access": account_data.get("allow_admin_access", False),
+            "num_users_allowed": max(int(account_data.get("num_users_allowed", 5)), 5),
         }
     except HTTPException:
         raise
@@ -14446,7 +14452,7 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
 # --- Request Body Model for User Registration ---
 class CreateAccountRequest(BaseModel):
     account_name: str
-    num_users_allowed: int = Field(default=1, ge=1)  # Default to 1, minimum 1
+    num_users_allowed: int = Field(default=5, ge=1)  # Default to 5 (free individual limit)
     promo_code: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
@@ -14582,8 +14588,8 @@ async def register_account(
 
             logging.info(f"Account '{account_id}' ({email}) created successfully in Firestore.")
 
-            # 4. Create the requested number of individual AAC user profiles
-            num_users_to_create = request_data.num_users_allowed
+            # 4. Create exactly 1 profile at registration; num_users_allowed sets the limit, not the initial count
+            num_users_to_create = 1
             first_aac_user_id = None # To store the ID of the first user created
 
             for i in range(num_users_to_create):
@@ -21978,6 +21984,113 @@ async def get_admin_users(current_ids: Annotated[Dict[str, str], Depends(get_cur
             status_code=500,
             content={"error": "Failed to load users", "details": str(e)}
         )
+
+
+# ---------------------------------------------------------------------------
+# Bravo admin: account profile-limit management
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/accounts/profile-limits")
+async def get_accounts_profile_limits(
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """List all accounts with their profile count and limit (Bravo admin only)."""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Bravo admin access required.")
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore unavailable.")
+    try:
+        accounts_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+        account_docs = await asyncio.to_thread(accounts_ref.stream)
+        results = []
+        for doc in account_docs:
+            data = doc.to_dict() or {}
+            account_id = doc.id
+            users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+            user_docs = await asyncio.to_thread(users_ref.stream)
+            profile_count = len(list(user_docs))
+            results.append({
+                "account_id": account_id,
+                "account_name": data.get("account_name", account_id),
+                "email": data.get("email", ""),
+                "profile_count": profile_count,
+                "profile_limit": data.get("num_users_allowed", 5),
+            })
+        results.sort(key=lambda x: x["account_name"].lower())
+        return JSONResponse(content={"accounts": results})
+    except Exception as e:
+        logging.error(f"Error listing accounts for admin: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list accounts.")
+
+
+class SetProfileLimitRequest(BaseModel):
+    profile_limit: int = Field(..., ge=1, le=500)
+
+
+@app.put("/api/admin/accounts/{account_id}/profile-limit")
+async def set_account_profile_limit(
+    account_id: str,
+    request_data: SetProfileLimitRequest,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Set the profile limit for a specific account (Bravo admin only)."""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Bravo admin access required.")
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore unavailable.")
+    try:
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        account_doc = await asyncio.to_thread(account_doc_ref.get)
+        if not account_doc.exists:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        await asyncio.to_thread(account_doc_ref.update, {
+            "num_users_allowed": request_data.profile_limit,
+            "last_updated": dt.now().isoformat(),
+        })
+        logging.info(f"Bravo admin set profile_limit={request_data.profile_limit} for account '{account_id}'.")
+        return JSONResponse(content={"message": "Profile limit updated.", "profile_limit": request_data.profile_limit})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error setting profile limit for account {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update profile limit.")
+
+
+class ProfileLimitRequestData(BaseModel):
+    account_email: str
+    contact_email: str = ""
+    contact_name: str
+    total_profiles_needed: int = Field(..., ge=1)
+    comment: str = ""
+
+@app.post("/api/account/request-profile-limit")
+async def request_profile_limit(
+    request_data: ProfileLimitRequestData,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+):
+    account_id = token_info["account_id"]
+    contact_email = request_data.contact_email.strip() or request_data.account_email.strip()
+    body = (
+        f"Profile Limit Request\n"
+        f"{'=' * 40}\n"
+        f"Account Email:         {request_data.account_email}\n"
+        f"Contact Name:          {request_data.contact_name}\n"
+        f"Contact Email:         {contact_email}\n"
+        f"Total Profiles Needed: {request_data.total_profiles_needed}\n"
+        f"Account ID:            {account_id}\n"
+    )
+    if request_data.comment.strip():
+        body += f"\nComment:\n{request_data.comment.strip()}\n"
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject="Profile Limit Request",
+        body_text=body,
+    )
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send request email. Please contact admin@talkwithbravo.com directly.")
+    logging.info(f"Profile limit request sent for account '{account_id}' by {request_data.account_email}.")
+    return JSONResponse(content={"message": "Request sent successfully."})
+
 
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
