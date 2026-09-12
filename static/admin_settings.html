@@ -530,6 +530,11 @@
                 <i class="fas fa-shield-alt nav-icon" style="color:#dc2626"></i>
                 <span>Security</span>
             </div>
+            <!-- Bravo admin only -->
+            <div class="settings-nav-item hidden" id="nav-account-limits" data-target="section-account-limits">
+                <i class="fas fa-users-cog nav-icon" style="color:#7c3aed"></i>
+                <span>Account Limits</span>
+            </div>
         </nav>
 
         <!-- ── Main content area ─────────────────────────── -->
@@ -857,6 +862,43 @@
                 <i class="fas fa-save mr-2"></i> Save Global Settings
             </button>
             <p id="settings-status" class="text-sm text-green-600 mt-2 h-4"></p>
+        </div>
+
+        <!-- ── Account Limits (Bravo admin only) ────────────────── -->
+        <div id="section-account-limits" class="settings-section hidden bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-users-cog mr-2 text-purple-700"></i>Account Profile Limits
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Individual accounts default to <strong>5 profiles</strong>. Adjust the limit here for school or company accounts.
+            </p>
+
+            <div class="mb-4 flex items-center gap-3">
+                <input type="text" id="accountLimitSearch" placeholder="Search by name or email…"
+                    class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                <button onclick="loadAccountLimits()" class="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700">
+                    <i class="fas fa-sync-alt mr-1"></i> Refresh
+                </button>
+            </div>
+
+            <div id="accountLimitsStatus" class="text-sm text-gray-500 mb-3 h-4"></div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50 border-b border-gray-200">
+                            <th class="text-left px-4 py-2 font-semibold text-gray-600">Account Name</th>
+                            <th class="text-left px-4 py-2 font-semibold text-gray-600">Email</th>
+                            <th class="text-center px-4 py-2 font-semibold text-gray-600">Profiles</th>
+                            <th class="text-center px-4 py-2 font-semibold text-gray-600">Limit</th>
+                            <th class="text-center px-4 py-2 font-semibold text-gray-600">Save</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountLimitsBody">
+                        <tr><td colspan="5" class="text-center text-gray-400 py-8">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         </div><!-- /.settings-content -->
@@ -4384,6 +4426,122 @@
             }
         }, 500);
     });
+
+    // ── Bravo admin: Account Limits ─────────────────────────────────────────
+
+    (async function initBravoAdminSection() {
+        const user = await new Promise(resolve => {
+            const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
+        });
+        if (!user || user.email !== 'admin@talkwithbravo.com') return;
+
+        // Show the nav item
+        document.getElementById('nav-account-limits').classList.remove('hidden');
+
+        // Auto-load when the section becomes visible
+        const navItem = document.getElementById('nav-account-limits');
+        navItem.addEventListener('click', () => {
+            if (!document.getElementById('accountLimitsBody').dataset.loaded) {
+                loadAccountLimits();
+            }
+        });
+    })();
+
+    let _allAccountRows = [];
+
+    async function loadAccountLimits() {
+        const tbody = document.getElementById('accountLimitsBody');
+        const status = document.getElementById('accountLimitsStatus');
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">Loading…</td></tr>';
+        status.textContent = '';
+        try {
+            const user = firebase.auth().currentUser;
+            const token = await user.getIdToken();
+            const resp = await fetch('/api/admin/accounts/profile-limits', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            _allAccountRows = data.accounts;
+            tbody.dataset.loaded = '1';
+            renderAccountLimitRows(_allAccountRows);
+            status.textContent = `${_allAccountRows.length} accounts loaded.`;
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-red-500 py-8">Error: ${err.message}</td></tr>`;
+        }
+    }
+
+    function renderAccountLimitRows(rows) {
+        const search = (document.getElementById('accountLimitSearch')?.value || '').toLowerCase();
+        const filtered = rows.filter(r =>
+            r.account_name.toLowerCase().includes(search) ||
+            r.email.toLowerCase().includes(search)
+        );
+        const tbody = document.getElementById('accountLimitsBody');
+        if (!filtered.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-6">No accounts found.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = filtered.map(r => {
+            const over = r.profile_count >= r.profile_limit;
+            const countClass = over ? 'font-bold text-red-600' : 'text-gray-700';
+            return `
+            <tr class="border-b border-gray-100 hover:bg-gray-50" data-account-id="${r.account_id}">
+                <td class="px-4 py-3 text-gray-800">${escHtml(r.account_name)}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs">${escHtml(r.email)}</td>
+                <td class="px-4 py-3 text-center ${countClass}">${r.profile_count}</td>
+                <td class="px-4 py-3 text-center">
+                    <input type="number" min="1" max="500" value="${r.profile_limit}"
+                        class="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-purple-400 account-limit-input">
+                </td>
+                <td class="px-4 py-3 text-center">
+                    <button onclick="saveAccountLimit('${r.account_id}', this)"
+                        class="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700">Save</button>
+                    <span class="account-limit-save-status text-xs ml-1"></span>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function saveAccountLimit(accountId, btn) {
+        const row = btn.closest('tr');
+        const input = row.querySelector('.account-limit-input');
+        const statusEl = row.querySelector('.account-limit-save-status');
+        const newLimit = parseInt(input.value);
+        if (!newLimit || newLimit < 1) { statusEl.textContent = 'Invalid'; statusEl.className = 'account-limit-save-status text-xs ml-1 text-red-500'; return; }
+        btn.disabled = true;
+        statusEl.textContent = 'Saving…';
+        statusEl.className = 'account-limit-save-status text-xs ml-1 text-gray-500';
+        try {
+            const user = firebase.auth().currentUser;
+            const token = await user.getIdToken();
+            const resp = await fetch(`/api/admin/accounts/${accountId}/profile-limit`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_limit: newLimit })
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            const idx = _allAccountRows.findIndex(r => r.account_id === accountId);
+            if (idx !== -1) _allAccountRows[idx].profile_limit = newLimit;
+            statusEl.textContent = '✓ Saved';
+            statusEl.className = 'account-limit-save-status text-xs ml-1 text-green-600';
+        } catch (err) {
+            statusEl.textContent = 'Error';
+            statusEl.className = 'account-limit-save-status text-xs ml-1 text-red-500';
+            console.error('Failed to save profile limit:', err);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function escHtml(str) {
+        return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    document.getElementById('accountLimitSearch')?.addEventListener('input', () => {
+        renderAccountLimitRows(_allAccountRows);
+    });
+
     </script>
 
     <script>
@@ -4400,7 +4558,8 @@
     (function () {
         const VALID_SECTIONS = [
             'section-security', 'section-ui', 'section-tap', 'section-scan',
-            'section-language', 'section-audio', 'section-email', 'section-profile-transfer'
+            'section-language', 'section-audio', 'section-email', 'section-profile-transfer',
+            'section-account-limits'
         ];
 
         function showSection(id) {

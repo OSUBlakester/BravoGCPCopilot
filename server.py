@@ -21984,6 +21984,77 @@ async def get_admin_users(current_ids: Annotated[Dict[str, str], Depends(get_cur
             content={"error": "Failed to load users", "details": str(e)}
         )
 
+
+# ---------------------------------------------------------------------------
+# Bravo admin: account profile-limit management
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/accounts/profile-limits")
+async def get_accounts_profile_limits(
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """List all accounts with their profile count and limit (Bravo admin only)."""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Bravo admin access required.")
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore unavailable.")
+    try:
+        accounts_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+        account_docs = await asyncio.to_thread(accounts_ref.stream)
+        results = []
+        for doc in account_docs:
+            data = doc.to_dict() or {}
+            account_id = doc.id
+            users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+            user_docs = await asyncio.to_thread(users_ref.stream)
+            profile_count = len(list(user_docs))
+            results.append({
+                "account_id": account_id,
+                "account_name": data.get("account_name", account_id),
+                "email": data.get("email", ""),
+                "profile_count": profile_count,
+                "profile_limit": data.get("num_users_allowed", 5),
+            })
+        results.sort(key=lambda x: x["account_name"].lower())
+        return JSONResponse(content={"accounts": results})
+    except Exception as e:
+        logging.error(f"Error listing accounts for admin: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list accounts.")
+
+
+class SetProfileLimitRequest(BaseModel):
+    profile_limit: int = Field(..., ge=1, le=500)
+
+
+@app.put("/api/admin/accounts/{account_id}/profile-limit")
+async def set_account_profile_limit(
+    account_id: str,
+    request_data: SetProfileLimitRequest,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Set the profile limit for a specific account (Bravo admin only)."""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Bravo admin access required.")
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore unavailable.")
+    try:
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        account_doc = await asyncio.to_thread(account_doc_ref.get)
+        if not account_doc.exists:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        await asyncio.to_thread(account_doc_ref.update, {
+            "num_users_allowed": request_data.profile_limit,
+            "last_updated": dt.now().isoformat(),
+        })
+        logging.info(f"Bravo admin set profile_limit={request_data.profile_limit} for account '{account_id}'.")
+        return JSONResponse(content={"message": "Profile limit updated.", "profile_limit": request_data.profile_limit})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error setting profile limit for account {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update profile limit.")
+
+
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
     user_id: str,
