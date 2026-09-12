@@ -2151,7 +2151,8 @@
             displayUserProfiles(userProfiles);
             setupAddUserButton(idToken);
             setupLogoutButton();
-            setupEditAccountButton(idToken);  // NEW
+            setupEditAccountButton(idToken);
+            updateProfileLimitSummary(userProfiles.length);
         }
 
         function displayUserProfiles(profiles) {
