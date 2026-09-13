@@ -4473,6 +4473,9 @@
             document.querySelectorAll('.settings-nav-item').forEach(function (item) {
                 item.classList.toggle('active', item.dataset.target === id);
             });
+            // Hide the global save bar on sections that have their own save button
+            const saveBar = document.querySelector('.settings-save-bar');
+            if (saveBar) saveBar.style.display = id === 'section-account' ? 'none' : '';
             // Scroll content area to top
             const content = document.querySelector('.settings-content');
             if (content) content.scrollTop = 0;
