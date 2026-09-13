@@ -530,6 +530,10 @@
                 <i class="fas fa-shield-alt nav-icon" style="color:#dc2626"></i>
                 <span>Security</span>
             </div>
+            <div class="settings-nav-item" data-target="section-account">
+                <i class="fas fa-user-cog nav-icon" style="color:#7c3aed"></i>
+                <span>Account Settings</span>
+            </div>
         </nav>
 
         <!-- ── Main content area ─────────────────────────── -->
@@ -857,6 +861,62 @@
                 <i class="fas fa-save mr-2"></i> Save Global Settings
             </button>
             <p id="settings-status" class="text-sm text-green-600 mt-2 h-4"></p>
+        </div>
+
+        <!-- Account Settings Section -->
+        <div id="section-account" class="settings-section bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-user-cog mr-2 text-purple-600"></i>Account Settings
+            </h2>
+
+            <div class="sgroup">
+                <div class="sgroup-header"><i class="fas fa-user-md"></i> Therapist / Professional</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Therapist Email</span>
+                        <span class="srow-desc">Email of the therapist or healthcare professional associated with this account (optional)</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <input type="email" id="acct-therapist-email" class="sinput" style="width:260px;" placeholder="therapist@example.com">
+                    </div>
+                </div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">I am a therapist</span>
+                        <span class="srow-desc">Mark this account as belonging to a therapist or healthcare professional</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="acct-is-therapist" class="w-4 h-4 accent-purple-600">
+                            <span class="text-sm text-gray-600">Yes, I am a therapist</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sgroup mt-4">
+                <div class="sgroup-header"><i class="fas fa-headset"></i> Support Access</div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Allow Bravo Admin Access</span>
+                        <span class="srow-desc">Permit Bravo staff to access this account for support purposes. Data is kept confidential and never shared.</span>
+                    </div>
+                    <div class="srow-ctrl">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="acct-allow-admin-access" class="w-4 h-4 accent-purple-600">
+                            <span class="text-sm text-gray-600">Allow access</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex items-center gap-4">
+                <button id="acct-save-btn"
+                    class="bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-all">
+                    <i class="fas fa-save mr-2"></i>Save Account Settings
+                </button>
+                <p id="acct-save-status" class="text-sm h-4"></p>
+            </div>
         </div>
 
         </div><!-- /.settings-content -->
@@ -4400,7 +4460,8 @@
     (function () {
         const VALID_SECTIONS = [
             'section-security', 'section-ui', 'section-tap', 'section-scan',
-            'section-language', 'section-audio', 'section-email', 'section-profile-transfer'
+            'section-language', 'section-audio', 'section-email', 'section-profile-transfer',
+            'section-account'
         ];
 
         function showSection(id) {

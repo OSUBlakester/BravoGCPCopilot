@@ -1914,6 +1914,55 @@ async function saveToolbarPIN(newPIN) {
     }
 }
 
+async function loadAccountSettings() {
+    try {
+        const resp = await window.authenticatedFetch('/api/account/details');
+        if (!resp.ok) throw new Error(`${resp.status}`);
+        const data = await resp.json();
+        const emailEl  = document.getElementById('acct-therapist-email');
+        const therapEl = document.getElementById('acct-is-therapist');
+        const adminEl  = document.getElementById('acct-allow-admin-access');
+        if (emailEl)  emailEl.value   = data.therapist_email || '';
+        if (therapEl) therapEl.checked = !!data.is_therapist;
+        if (adminEl)  adminEl.checked  = !!data.allow_admin_access;
+    } catch (err) {
+        console.error('Error loading account settings:', err);
+    }
+}
+
+async function saveAccountSettings() {
+    const emailEl  = document.getElementById('acct-therapist-email');
+    const therapEl = document.getElementById('acct-is-therapist');
+    const adminEl  = document.getElementById('acct-allow-admin-access');
+    const statusEl = document.getElementById('acct-save-status');
+    const btn      = document.getElementById('acct-save-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'text-sm h-4 text-gray-400'; }
+    try {
+        const resp = await window.authenticatedFetch('/api/account/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                therapist_email:  emailEl  ? (emailEl.value.trim() || null) : null,
+                is_therapist:     therapEl ? therapEl.checked : undefined,
+                allow_admin_access: adminEl ? adminEl.checked : undefined,
+            })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `${resp.status}`);
+        }
+        if (statusEl) { statusEl.textContent = '✓ Saved'; statusEl.className = 'text-sm h-4 text-green-600'; }
+        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+    } catch (err) {
+        console.error('Error saving account settings:', err);
+        if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.className = 'text-sm h-4 text-red-600'; }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // --- Initialization Function ---
 async function initializePage() {
     if (isAuthContextReady && isDomContentLoaded) {
@@ -1988,12 +2037,17 @@ async function initializePage() {
         if (tapDynamicRowsInput) tapDynamicRowsInput.addEventListener('change', updateStaticRowsDisplay);
 
 
+        // Wire account settings save button
+        const acctSaveBtn = document.getElementById('acct-save-btn');
+        if (acctSaveBtn) acctSaveBtn.addEventListener('click', saveAccountSettings);
+
         // Initial data loading
         populateLanguageSelectors();
         await loadVoices();
         // Static provider selection - no need to populate dropdown
         await loadSettings();
         await loadToolbarPIN(); // Load the toolbar PIN on page initialization
+        await loadAccountSettings();
     }
 }
 

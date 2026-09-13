@@ -797,18 +797,18 @@
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
                 </div>
                 <div class="mt-3">
-                    <p class="text-sm font-medium text-gray-700 mb-2">Is this user under 13 years old?</p>
+                    <p class="text-sm font-medium text-gray-700 mb-2">Age Setting</p>
                     <div class="flex gap-4">
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="radio" name="newUserAgeGroup" value="minor" class="accent-indigo-500">
-                            <span class="text-sm text-gray-700">Yes, under 13</span>
+                            <span class="text-sm text-gray-700">Under 13</span>
                         </label>
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="radio" name="newUserAgeGroup" value="adult" class="accent-indigo-500">
-                            <span class="text-sm text-gray-700">No, 13 or older</span>
+                            <span class="text-sm text-gray-700">13 or older</span>
                         </label>
                     </div>
-                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select whether the user is under 13.</p>
+                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select an age setting.</p>
                 </div>
                 <button id="add-user-button" class="w-full mt-3 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
                 <p id="add-user-status" class="text-sm text-center mt-2 h-4"></p>
@@ -3890,28 +3890,18 @@ registerForm.addEventListener('submit', async (e) => {
             const isLastStep = (isTap && step === 10) || (isScan && step === 11);
 
             if (isAgeStep) {
-                titleEl.textContent = 'Age & Parental Consent';
+                titleEl.textContent = 'Age Setting';
                 const isMinor = wizardState.isMinorUnder13;
                 const emailVal = wizardState.parentEmail || '';
                 contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
-                        Is the user under 13 years old? This determines whether parental consent is required
-                        before enabling personalised learning.
-                    </p>
                     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === true ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === true ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardAgeGroup" value="minor" ${isMinor === true ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Yes, under 13</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">A parent or guardian email is required before enabling personalised learning</div>
-                            </div>
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;background:${isMinor === true ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === true ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="minor" ${isMinor === true ? 'checked' : ''} style="accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">Under 13</div>
                         </label>
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === false ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === false ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardAgeGroup" value="adult" ${isMinor === false ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">No, 13 or older</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">No parental consent required</div>
-                            </div>
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;background:${isMinor === false ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === false ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="adult" ${isMinor === false ? 'checked' : ''} style="accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">13 or older</div>
                         </label>
                     </div>
                     <div id="wizardAgeEmailRow" style="display:${isMinor === true ? 'block' : 'none'};margin-top:4px;">
