@@ -370,29 +370,43 @@ function getVoicesForLocale(locale) {
     });
 }
 
-function filterVoicesByStyle(voices, voiceStyle) {
+function getSelectedVoiceGender() {
+    const el = document.querySelector('input[name="voiceGender"]:checked');
+    return el ? el.value : 'any';
+}
+
+function filterVoicesByStyle(voices, voiceStyle, voiceGender) {
     if (!Array.isArray(voices) || voices.length === 0) return [];
     let style = ['adult', 'child'].includes(voiceStyle) ? voiceStyle : 'adult';
     if (voiceStyle === 'teen') style = 'child';
 
-    let filtered = [];
-    if (style === 'child') {
-        filtered = voices.filter(v => v.provider === 'azure');
-    } else {
-        filtered = voices.filter(v => v.provider === 'google');
+    let filtered = style === 'child'
+        ? voices.filter(v => v.provider === 'azure')
+        : voices.filter(v => v.provider === 'google');
+
+    // Never strand the user with an empty list from the style filter.
+    if (filtered.length === 0) filtered = voices;
+
+    // Apply gender filter on top of style filter.
+    const gender = ['female', 'male'].includes(voiceGender) ? voiceGender : 'any';
+    if (gender !== 'any') {
+        const genderFiltered = filtered.filter(v =>
+            String(v.ssml_gender || '').toLowerCase() === gender
+        );
+        if (genderFiltered.length > 0) filtered = genderFiltered;
     }
 
-    // Never strand the user with an empty list.
-    return filtered.length > 0 ? filtered : voices;
+    return filtered;
 }
 
 function fillVoiceSelect(selectEl, locale, selectedVoice = '', options = {}) {
     if (!selectEl) return;
     const applyStyleFilter = options.applyStyleFilter === true;
     const voiceStyle = options.voiceStyle || getSelectedVoiceStyle();
+    const voiceGender = options.voiceGender || getSelectedVoiceGender();
 
     const localeVoices = getVoicesForLocale(locale);
-    const voices = applyStyleFilter ? filterVoicesByStyle(localeVoices, voiceStyle) : localeVoices;
+    const voices = applyStyleFilter ? filterVoicesByStyle(localeVoices, voiceStyle, voiceGender) : localeVoices;
 
     selectEl.innerHTML = '<option value="">-- Select a Voice --</option>';
     voices.forEach(voice => {
@@ -1991,6 +2005,9 @@ async function initializePage() {
         if (testDefaultPartnerVoiceButton) testDefaultPartnerVoiceButton.addEventListener('click', testDefaultPartnerVoice);
         if (defaultPartnerLanguageSelect) defaultPartnerLanguageSelect.addEventListener('change', refreshLanguageDependentVoiceControls);
         voiceStyleInputs.forEach((input) => {
+            input.addEventListener('change', refreshLanguageDependentVoiceControls);
+        });
+        document.querySelectorAll('input[name="voiceGender"]').forEach(input => {
             input.addEventListener('change', refreshLanguageDependentVoiceControls);
         });
         if (addLocationOverrideRowButton) addLocationOverrideRowButton.addEventListener('click', addLocationOverrideRow);

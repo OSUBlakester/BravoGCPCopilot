@@ -3646,6 +3646,7 @@ registerForm.addEventListener('submit', async (e) => {
             partnerLanguage: 'en-US',
             partnerVoice: '',
             voiceStyle: 'adult',
+            voiceGender: 'any',
             gridColumns: 6,
             scanMode: 'auto',
             waitForSwitch: false,
@@ -4688,6 +4689,20 @@ registerForm.addEventListener('submit', async (e) => {
                                 </label>
                             </div>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Gender</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="any" ${(wizardState.voiceGender || 'any') === 'any' ? 'checked' : ''}> Any
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="female" ${wizardState.voiceGender === 'female' ? 'checked' : ''}> ♀ Female
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="male" ${wizardState.voiceGender === 'male' ? 'checked' : ''}> ♂ Male
+                                </label>
+                            </div>
+                        </div>
                         <div>
                             <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -4706,6 +4721,9 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                     document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
                         r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceGender"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceGender = this.value; wizardFillVoiceSelect(); });
                     });
                 } else {
                     // scan step 7 = Partner Language & Voice
@@ -4730,6 +4748,20 @@ registerForm.addEventListener('submit', async (e) => {
                                 </label>
                             </div>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Gender</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="any" ${(wizardState.voiceGender || 'any') === 'any' ? 'checked' : ''}> Any
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="female" ${wizardState.voiceGender === 'female' ? 'checked' : ''}> ♀ Female
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="male" ${wizardState.voiceGender === 'male' ? 'checked' : ''}> ♂ Male
+                                </label>
+                            </div>
+                        </div>
                         <div>
                             <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -4748,6 +4780,9 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                     document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
                         r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceGender"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceGender = this.value; wizardFillVoiceSelect(); });
                     });
                 }
 
@@ -4840,6 +4875,12 @@ registerForm.addEventListener('submit', async (e) => {
             } else {
                 const adultVoices = voices.filter(v => v.provider === 'google');
                 if (adultVoices.length > 0) voices = adultVoices;
+            }
+            // Apply gender filter on top of style filter
+            const gender = wizardState.voiceGender || 'any';
+            if (gender !== 'any') {
+                const gFiltered = voices.filter(v => String(v.ssml_gender || '').toLowerCase() === gender);
+                if (gFiltered.length > 0) voices = gFiltered;
             }
             voiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>';
             voices.forEach(v => {
