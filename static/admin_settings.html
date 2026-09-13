@@ -695,18 +695,6 @@
                 </div>
                 <div class="srow">
                     <div class="srow-meta">
-                        <span class="srow-label">Partner Voice</span>
-                        <span class="srow-desc">Voice used for announcements — options update based on selected partner language</span>
-                    </div>
-                    <div class="srow-ctrl flex items-center gap-2">
-                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="sselect" style="min-width:180px;"></select>
-                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors" title="Preview voice">
-                            <i class="fas fa-volume-up"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="srow">
-                    <div class="srow-meta">
                         <span class="srow-label">Voice Age / Style</span>
                         <span class="srow-desc">Higher pitch and rate for younger-sounding voices — test to find the best fit</span>
                     </div>
@@ -719,6 +707,18 @@
                             <input type="radio" name="voiceStyle" value="adult" class="w-4 h-4" checked>
                             <span class="text-sm">🧑 Adult</span>
                         </label>
+                    </div>
+                </div>
+                <div class="srow">
+                    <div class="srow-meta">
+                        <span class="srow-label">Partner Voice</span>
+                        <span class="srow-desc">Voice used for announcements — options update based on selected partner language</span>
+                    </div>
+                    <div class="srow-ctrl flex items-center gap-2">
+                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="sselect" style="min-width:180px;"></select>
+                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors" title="Preview voice">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
                     </div>
                 </div>
             </div>
