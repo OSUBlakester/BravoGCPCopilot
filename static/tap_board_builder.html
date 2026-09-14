@@ -527,12 +527,74 @@
 
     <div id="imagePickerModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 7000;">
         <div class="relative top-8 mx-auto p-5 border w-11/12 max-w-6xl shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-900">Browse Images</h3><button id="closeImagePicker" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button></div>
-            <div class="mb-4 flex gap-2"><input id="imageSearchInput" type="text" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" placeholder="Search images..."><button id="imageSearchBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Search</button><button id="clearImageSearch" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear</button></div>
-            <div class="mb-2 flex items-center justify-between text-sm text-gray-600"><div id="imageResultsInfo">Loading...</div><div class="flex items-center gap-2"><button id="imagePrevPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Prev</button><span id="imagePageInfo">Page 1 of 1</span><button id="imageNextPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Next</button></div></div>
+            <!-- Header -->
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-lg font-bold text-gray-900">Browse Images</h3>
+                <div class="flex items-center gap-2">
+                    <button id="uploadCustomImageBtn" class="px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 flex items-center gap-1"><i class="fas fa-upload"></i> Upload Custom</button>
+                    <button id="requestImageBtn" class="px-3 py-1.5 bg-amber-500 text-white text-sm font-medium rounded-md hover:bg-amber-600 flex items-center gap-1"><i class="fas fa-envelope"></i> Request Image</button>
+                    <button id="closeImagePicker" class="ml-2 text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                </div>
+            </div>
+            <!-- Library / My Images tabs -->
+            <div class="flex gap-1 mb-3 border-b border-gray-200">
+                <button id="imgTabLibrary" class="px-4 py-1.5 text-sm font-medium rounded-t-md bg-blue-600 text-white">Image Library</button>
+                <button id="imgTabCustom" class="px-4 py-1.5 text-sm font-medium rounded-t-md bg-gray-100 text-gray-600 hover:bg-gray-200">My Custom Images</button>
+            </div>
+            <!-- Search row (library only) -->
+            <div id="imageSearchRow" class="mb-3 flex gap-2"><input id="imageSearchInput" type="text" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" placeholder="Search images..."><button id="imageSearchBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Search</button><button id="clearImageSearch" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear</button></div>
+            <div class="mb-2 flex items-center justify-between text-sm text-gray-600"><div id="imageResultsInfo">Loading...</div><div id="imagePageControls" class="flex items-center gap-2"><button id="imagePrevPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Prev</button><span id="imagePageInfo">Page 1 of 1</span><button id="imageNextPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Next</button></div></div>
             <div id="imageLoadingIndicator" class="hidden text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Loading...</div>
             <div id="imageGrid" class="grid grid-cols-6 gap-3 max-h-[420px] overflow-y-auto"></div>
             <div class="flex justify-end gap-2 mt-4"><button id="cancelImageSelection" class="px-4 py-2 bg-gray-300 rounded-md">Cancel</button><button id="selectImageBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>Select Image</button></div>
+        </div>
+    </div>
+
+    <!-- Upload Custom Image modal -->
+    <div id="uploadCustomImageModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 8000;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-upload mr-2 text-indigo-600"></i>Upload Custom Image</h3>
+                <button id="closeUploadCustomModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Upload an image for this profile only. It will appear in "My Custom Images" and can be used for any button.</p>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Image Label <span class="text-red-500">*</span></label>
+                <input type="text" id="customImageLabel" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="e.g. Peanut butter and jelly sandwich">
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Image File <span class="text-red-500">*</span></label>
+                <input type="file" id="customImageFile" accept="image/*" class="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+            </div>
+            <div id="uploadCustomStatus" class="text-sm mb-3 min-h-[1.25rem]"></div>
+            <div class="flex justify-end gap-2">
+                <button id="cancelUploadCustomBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm">Cancel</button>
+                <button id="submitUploadCustomBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium">Upload</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Image modal -->
+    <div id="requestImageModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 8000;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-envelope mr-2 text-amber-500"></i>Request New Image</h3>
+                <button id="closeRequestImageModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Describe the image you need and we'll add it to the shared library. This may take a few days.</p>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Button Label</label>
+                <input type="text" id="requestImageLabel" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="e.g. Peanut butter and jelly sandwich">
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Description / Additional detail</label>
+                <textarea id="requestImageDesc" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="Describe what the image should look like..."></textarea>
+            </div>
+            <div id="requestImageStatus" class="text-sm mb-3 min-h-[1.25rem]"></div>
+            <div class="flex justify-end gap-2">
+                <button id="cancelRequestImageBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm">Cancel</button>
+                <button id="submitRequestImageBtn" class="px-4 py-2 bg-amber-500 text-white rounded-md hover:bg-amber-600 text-sm font-medium">Send Request</button>
+            </div>
         </div>
     </div>
 
@@ -1111,6 +1173,29 @@
             document.getElementById('imagePrevPage').addEventListener('click', () => navigateImagePage(-1));
             document.getElementById('imageNextPage').addEventListener('click', () => navigateImagePage(1));
             document.getElementById('imageSearchInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') searchImages(); });
+            // Image library tabs
+            document.getElementById('imgTabLibrary').addEventListener('click', () => switchImageTab('library'));
+            document.getElementById('imgTabCustom').addEventListener('click', () => switchImageTab('custom'));
+            // Upload custom image modal
+            document.getElementById('uploadCustomImageBtn').addEventListener('click', () => {
+                document.getElementById('customImageLabel').value = '';
+                document.getElementById('customImageFile').value = '';
+                document.getElementById('uploadCustomStatus').textContent = '';
+                document.getElementById('uploadCustomImageModal').classList.remove('hidden');
+            });
+            document.getElementById('closeUploadCustomModal').addEventListener('click', () => document.getElementById('uploadCustomImageModal').classList.add('hidden'));
+            document.getElementById('cancelUploadCustomBtn').addEventListener('click', () => document.getElementById('uploadCustomImageModal').classList.add('hidden'));
+            document.getElementById('submitUploadCustomBtn').addEventListener('click', submitCustomImageUpload);
+            // Request image modal
+            document.getElementById('requestImageBtn').addEventListener('click', () => {
+                document.getElementById('requestImageLabel').value = '';
+                document.getElementById('requestImageDesc').value = '';
+                document.getElementById('requestImageStatus').textContent = '';
+                document.getElementById('requestImageModal').classList.remove('hidden');
+            });
+            document.getElementById('closeRequestImageModal').addEventListener('click', () => document.getElementById('requestImageModal').classList.add('hidden'));
+            document.getElementById('cancelRequestImageBtn').addEventListener('click', () => document.getElementById('requestImageModal').classList.add('hidden'));
+            document.getElementById('submitRequestImageBtn').addEventListener('click', submitImageRequest);
             // aiBulk modal (3-step)
             document.getElementById('closeAIBulkBuilder').addEventListener('click', closeAIBulkBuilderModal);
             document.getElementById('aiBulkCancelBtn').addEventListener('click', closeAIBulkBuilderModal);
@@ -3280,8 +3365,21 @@
         }
 
         function clearAssignedImage() { document.getElementById('assignedImageUrl').value = ''; updateAssignedImagePreview(''); updateButtonPreview(); }
-        function openImagePicker() { selectedImageUrl = null; document.getElementById('selectImageBtn').disabled = true; document.getElementById('imagePickerModal').classList.remove('hidden'); loadImages(); }
-        function closeImagePicker() { document.getElementById('imagePickerModal').classList.add('hidden'); document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; selectedImageUrl = null; _aiImagePickCtx = null; }
+        function openImagePicker() {
+            selectedImageUrl = null;
+            document.getElementById('selectImageBtn').disabled = true;
+            document.getElementById('imagePickerModal').classList.remove('hidden');
+            switchImageTab('library');
+        }
+        function closeImagePicker() {
+            document.getElementById('imagePickerModal').classList.add('hidden');
+            document.getElementById('imageSearchInput').value = '';
+            currentImageSearch = ''; currentImagePage = 0;
+            selectedImageUrl = null; _aiImagePickCtx = null;
+            // Reset tabs visually
+            document.getElementById('imageSearchRow').classList.remove('hidden');
+            document.getElementById('imagePageControls').classList.remove('hidden');
+        }
 
         async function loadImages(searchTerm = '', page = 0) {
             const loadingIndicator = document.getElementById('imageLoadingIndicator');
@@ -3370,6 +3468,122 @@
         function searchImages() { currentImageSearch = document.getElementById('imageSearchInput').value.trim(); currentImagePage = 0; loadImages(currentImageSearch, 0); }
         function clearImageSearch() { document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; loadImages('', 0); }
         function navigateImagePage(direction) { const newPage = currentImagePage + direction; if (newPage >= 0 && newPage < totalImagePages) { currentImagePage = newPage; loadImages(currentImageSearch, newPage); } }
+
+        let _imageTab = 'library'; // 'library' | 'custom'
+
+        function switchImageTab(tab) {
+            _imageTab = tab;
+            const libBtn = document.getElementById('imgTabLibrary');
+            const custBtn = document.getElementById('imgTabCustom');
+            const searchRow = document.getElementById('imageSearchRow');
+            const pageControls = document.getElementById('imagePageControls');
+            if (tab === 'library') {
+                libBtn.className = 'px-4 py-1.5 text-sm font-medium rounded-t-md bg-blue-600 text-white';
+                custBtn.className = 'px-4 py-1.5 text-sm font-medium rounded-t-md bg-gray-100 text-gray-600 hover:bg-gray-200';
+                searchRow.classList.remove('hidden');
+                pageControls.classList.remove('hidden');
+                loadImages(currentImageSearch, currentImagePage);
+            } else {
+                custBtn.className = 'px-4 py-1.5 text-sm font-medium rounded-t-md bg-indigo-600 text-white';
+                libBtn.className = 'px-4 py-1.5 text-sm font-medium rounded-t-md bg-gray-100 text-gray-600 hover:bg-gray-200';
+                searchRow.classList.add('hidden');
+                pageControls.classList.add('hidden');
+                loadCustomImages();
+            }
+        }
+
+        async function loadCustomImages() {
+            const loadingIndicator = document.getElementById('imageLoadingIndicator');
+            const imageGrid = document.getElementById('imageGrid');
+            const resultsInfo = document.getElementById('imageResultsInfo');
+            try {
+                loadingIndicator.classList.remove('hidden');
+                imageGrid.innerHTML = '';
+                const response = await fetch('/api/get_custom_images', { headers: getAuthHeaders(null) });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                const images = data.images || [];
+                resultsInfo.textContent = `${images.length} custom image${images.length !== 1 ? 's' : ''}`;
+                if (!images.length) {
+                    imageGrid.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10">No custom images yet. Use "Upload Custom" to add your own.</div>';
+                    return;
+                }
+                images.forEach(image => {
+                    const card = document.createElement('div');
+                    card.className = 'relative cursor-pointer border-2 border-transparent hover:border-blue-500 rounded-md overflow-hidden bg-gray-100';
+                    const label = image.subconcept || image.concept || 'Custom Image';
+                    card.innerHTML = `<img src="${image.image_url}" alt="${escapeHtml(label)}" class="w-full h-20 object-cover" loading="lazy"><div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">${escapeHtml(label)}</div>`;
+                    card.onclick = () => selectImageInGrid(image.image_url, card);
+                    imageGrid.appendChild(card);
+                });
+            } catch (error) {
+                console.error(error);
+                resultsInfo.textContent = 'Error loading custom images';
+                imageGrid.innerHTML = '<div class="col-span-full text-center text-red-500 py-8">Failed to load custom images.</div>';
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        async function submitCustomImageUpload() {
+            const label = document.getElementById('customImageLabel').value.trim();
+            const fileInput = document.getElementById('customImageFile');
+            const statusEl = document.getElementById('uploadCustomStatus');
+            const btn = document.getElementById('submitUploadCustomBtn');
+            if (!label) { statusEl.textContent = 'Please enter an image label.'; statusEl.className = 'text-sm mb-3 text-red-600'; return; }
+            if (!fileInput.files.length) { statusEl.textContent = 'Please select an image file.'; statusEl.className = 'text-sm mb-3 text-red-600'; return; }
+            btn.disabled = true;
+            statusEl.textContent = 'Uploading…';
+            statusEl.className = 'text-sm mb-3 text-gray-500';
+            try {
+                const formData = new FormData();
+                formData.append('image', fileInput.files[0]);
+                formData.append('concept', label);
+                formData.append('subconcept', label);
+                formData.append('tags', label);
+                const headers = getAuthHeaders(null);
+                const resp = await fetch('/api/upload_custom_image', { method: 'POST', headers, body: formData });
+                if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || `Upload failed (${resp.status})`); }
+                statusEl.textContent = '✓ Uploaded! Opening in My Custom Images…';
+                statusEl.className = 'text-sm mb-3 text-green-600';
+                setTimeout(() => {
+                    document.getElementById('uploadCustomImageModal').classList.add('hidden');
+                    switchImageTab('custom');
+                }, 1000);
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'text-sm mb-3 text-red-600';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function submitImageRequest() {
+            const label = document.getElementById('requestImageLabel').value.trim();
+            const desc = document.getElementById('requestImageDesc').value.trim();
+            const statusEl = document.getElementById('requestImageStatus');
+            const btn = document.getElementById('submitRequestImageBtn');
+            if (!label && !desc) { statusEl.textContent = 'Please enter a label or description.'; statusEl.className = 'text-sm mb-3 text-red-600'; return; }
+            btn.disabled = true;
+            statusEl.textContent = 'Sending…';
+            statusEl.className = 'text-sm mb-3 text-gray-500';
+            try {
+                const headers = getAuthHeaders();
+                const resp = await fetch('/api/request-image', {
+                    method: 'POST', headers,
+                    body: JSON.stringify({ button_label: label, description: desc || label })
+                });
+                if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || `Error ${resp.status}`); }
+                statusEl.textContent = '✓ Request sent! We\'ll add it to the library soon.';
+                statusEl.className = 'text-sm mb-3 text-green-600';
+                setTimeout(() => document.getElementById('requestImageModal').classList.add('hidden'), 2000);
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.className = 'text-sm mb-3 text-red-600';
+            } finally {
+                btn.disabled = false;
+            }
+        }
 
         function showNotification(message, type) {
             const notification = document.getElementById('notification');

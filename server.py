@@ -22092,6 +22092,38 @@ async def request_profile_limit(
     return JSONResponse(content={"message": "Request sent successfully."})
 
 
+class ImageRequestData(BaseModel):
+    description: str
+    button_label: str = ""
+    account_email: str = ""
+
+@app.post("/api/request-image")
+async def request_image(
+    request_data: ImageRequestData,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+):
+    account_id = token_info["account_id"]
+    body = (
+        f"Image Library Request\n"
+        f"{'=' * 40}\n"
+        f"Requested Image: {request_data.description}\n"
+    )
+    if request_data.button_label.strip():
+        body += f"Button Label:    {request_data.button_label.strip()}\n"
+    if request_data.account_email.strip():
+        body += f"Account Email:   {request_data.account_email.strip()}\n"
+    body += f"Account ID:      {account_id}\n"
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject="Image Library Request",
+        body_text=body,
+    )
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send request email. Please contact admin@talkwithbravo.com directly.")
+    logging.info(f"Image library request sent for account '{account_id}': {request_data.description[:80]}")
+    return JSONResponse(content={"message": "Request sent successfully."})
+
+
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
     user_id: str,
