@@ -40,6 +40,8 @@ steps:
       - '2Gi'
       - '--cpu'
       - '1'
+      - '--min-instances'
+      - '0'
       - '--max-instances'
       - '10'
       - '--timeout'
