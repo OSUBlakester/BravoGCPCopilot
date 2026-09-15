@@ -22103,7 +22103,7 @@ async def request_image(
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
     account_id = token_info["account_id"]
-    account_email = token_info.get("user_email", "") or request_data.account_email.strip()
+    account_email = token_info.get("email", "") or request_data.account_email.strip()
     body = (
         f"Image Library Request\n"
         f"{'=' * 40}\n"
