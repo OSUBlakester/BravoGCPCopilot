@@ -22103,6 +22103,7 @@ async def request_image(
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
     account_id = token_info["account_id"]
+    account_email = token_info.get("user_email", "") or request_data.account_email.strip()
     body = (
         f"Image Library Request\n"
         f"{'=' * 40}\n"
@@ -22110,8 +22111,7 @@ async def request_image(
     )
     if request_data.button_label.strip():
         body += f"Button Label:    {request_data.button_label.strip()}\n"
-    if request_data.account_email.strip():
-        body += f"Account Email:   {request_data.account_email.strip()}\n"
+    body += f"Account Email:   {account_email}\n"
     body += f"Account ID:      {account_id}\n"
     sent = await send_system_email(
         to_address="admin@talkwithbravo.com",
