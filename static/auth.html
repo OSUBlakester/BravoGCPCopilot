@@ -3669,6 +3669,7 @@ registerForm.addEventListener('submit', async (e) => {
             tapDynamicRows: 1,
             useBravoBuild: true,
             defaultButtonAction: 'do_nothing',
+            disableTapPictograms: false,
             // menuItemVisibility: { sourceButtonId: true/false } — true = visible
             menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
             menuItemsLoaded: [],        // ordered list {id, label} for the step UI
@@ -3773,6 +3774,7 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.useBravoBuild = s.useBravoBuild !== undefined ? s.useBravoBuild : true;
                     wizardState.defaultButtonAction = s.defaultButtonAction || (s.useBravoBuild ? 'use_ai' : 'do_nothing');
                     wizardState.userLanguage = s.userLanguage || 'en-US';
+                    wizardState.disableTapPictograms = s.disableTapPictograms || false;
                 }
 
                 if (voicesRes.ok) {
@@ -4455,24 +4457,40 @@ registerForm.addEventListener('submit', async (e) => {
                     { value: 'bonnie', label: 'Bonnie', desc: 'Girl', img: '/static/images/mascot_bonnie.png' },
                     { value: 'buddy',  label: 'Buddy',  desc: 'Dog',  img: '/static/images/mascot_buddy.png' },
                 ];
+                const isNoImages = wizardState.disableTapPictograms;
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:20px;">Select the mascot character shown in button images throughout the app.</p>
                     <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
                         ${mascots.map(m => `
                         <div class="wizard-mascot-card" data-mascot="${m.value}" style="
-                            cursor:pointer;border-radius:14px;border:3px solid ${wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
-                            background:${wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
+                            cursor:pointer;border-radius:14px;border:3px solid ${!isNoImages && wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
+                            background:${!isNoImages && wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
                             padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
                             <img src="${m.img}" alt="${m.label}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;margin-bottom:8px;">
                             <div style="font-weight:600;color:#111827;font-size:0.95rem;">${m.label}</div>
                             <div style="font-size:0.78rem;color:#6b7280;">${m.desc}</div>
                         </div>`).join('')}
+                        <div class="wizard-mascot-card" data-mascot="none" style="
+                            cursor:pointer;border-radius:14px;border:3px solid ${isNoImages ? '#6366f1' : 'transparent'};
+                            background:${isNoImages ? '#eef2ff' : '#f9fafb'};
+                            padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+                            <div style="width:80px;height:80px;border-radius:10px;margin-bottom:8px;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:2rem;color:#9ca3af;">🚫</div>
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">No Images</div>
+                            <div style="font-size:0.78rem;color:#6b7280;">Text only</div>
+                        </div>
                     </div>`;
                 contentEl.querySelectorAll('.wizard-mascot-card').forEach(card => {
                     card.addEventListener('click', () => {
-                        wizardState.mascot = card.dataset.mascot;
+                        if (card.dataset.mascot === 'none') {
+                            wizardState.disableTapPictograms = true;
+                        } else {
+                            wizardState.mascot = card.dataset.mascot;
+                            wizardState.disableTapPictograms = false;
+                        }
                         contentEl.querySelectorAll('.wizard-mascot-card').forEach(c => {
-                            const active = c.dataset.mascot === wizardState.mascot;
+                            const noImages = wizardState.disableTapPictograms;
+                            const active = noImages ? c.dataset.mascot === 'none'
+                                                     : c.dataset.mascot === wizardState.mascot;
                             c.style.borderColor = active ? '#6366f1' : 'transparent';
                             c.style.background = active ? '#eef2ff' : '#f9fafb';
                         });
@@ -5305,6 +5323,7 @@ registerForm.addEventListener('submit', async (e) => {
                     useBravoBuild: wizardState.interfaceMode === 'tap' ? false : wizardState.useBravoBuild,
                     defaultButtonAction: wizardState.interfaceMode === 'tap' ? 'do_nothing' : wizardState.defaultButtonAction,
                     mascot: wizardState.mascot,
+                    disableTapPictograms: wizardState.disableTapPictograms || false,
                     hasLoggedIn: true,
                     regenerate_boards: true
                 };
