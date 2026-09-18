@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dynamic Grid Page</title>
-    <title>Grid Page - v2.0</title> <!-- Will be updated by JavaScript -->
+    <title>Bravo AAC</title>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#002244">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Bravo AAC">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="/static/splash-screen.css">
@@ -2493,6 +2502,12 @@
         interactiveGuide.start(taskId);
     };
     </script>
-    
+    <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW registration failed:', err));
+        });
+    }
+    </script>
 </body>
 </html>

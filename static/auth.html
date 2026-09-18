@@ -4,6 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bravo AAC - Login/Register</title>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#002244">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Bravo AAC">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/mood-selection.css">
     <link rel="stylesheet" href="/static/splash-screen.css">
@@ -797,18 +807,18 @@
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
                 </div>
                 <div class="mt-3">
-                    <p class="text-sm font-medium text-gray-700 mb-2">Is this user under 13 years old?</p>
+                    <p class="text-sm font-medium text-gray-700 mb-2">Age Setting</p>
                     <div class="flex gap-4">
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="radio" name="newUserAgeGroup" value="minor" class="accent-indigo-500">
-                            <span class="text-sm text-gray-700">Yes, under 13</span>
+                            <span class="text-sm text-gray-700">Under 13</span>
                         </label>
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="radio" name="newUserAgeGroup" value="adult" class="accent-indigo-500">
-                            <span class="text-sm text-gray-700">No, 13 or older</span>
+                            <span class="text-sm text-gray-700">13 or older</span>
                         </label>
                     </div>
-                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select whether the user is under 13.</p>
+                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select an age setting.</p>
                 </div>
                 <button id="add-user-button" class="w-full mt-3 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
                 <p id="add-user-status" class="text-sm text-center mt-2 h-4"></p>
@@ -3642,10 +3652,11 @@ registerForm.addEventListener('submit', async (e) => {
             wakeWordInterjection: '',
             wakeWordName: '',
             llmOptions: 12,
-            freestyleOptions: 4,
+            freestyleOptions: 10,
             partnerLanguage: 'en-US',
             partnerVoice: '',
             voiceStyle: 'adult',
+            voiceGender: 'any',
             gridColumns: 6,
             scanMode: 'auto',
             waitForSwitch: false,
@@ -3658,6 +3669,7 @@ registerForm.addEventListener('submit', async (e) => {
             tapDynamicRows: 1,
             useBravoBuild: true,
             defaultButtonAction: 'do_nothing',
+            disableTapPictograms: false,
             // menuItemVisibility: { sourceButtonId: true/false } — true = visible
             menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
             menuItemsLoaded: [],        // ordered list {id, label} for the step UI
@@ -3745,7 +3757,7 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.wakeWordInterjection = s.wakeWordInterjection || '';
                     wizardState.wakeWordName = s.wakeWordName || '';
                     wizardState.llmOptions = s.LLMOptions !== undefined ? s.LLMOptions : 12;
-                    wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 4;
+                    wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 10;
                     wizardState.partnerLanguage = s.defaultPartnerLanguage || 'en-US';
                     wizardState.partnerVoice = s.defaultPartnerVoice || s.selected_tts_voice_name || '';
                     wizardState.voiceStyle = s.voice_style || 'adult';
@@ -3762,6 +3774,7 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.useBravoBuild = s.useBravoBuild !== undefined ? s.useBravoBuild : true;
                     wizardState.defaultButtonAction = s.defaultButtonAction || (s.useBravoBuild ? 'use_ai' : 'do_nothing');
                     wizardState.userLanguage = s.userLanguage || 'en-US';
+                    wizardState.disableTapPictograms = s.disableTapPictograms || false;
                 }
 
                 if (voicesRes.ok) {
@@ -3890,28 +3903,18 @@ registerForm.addEventListener('submit', async (e) => {
             const isLastStep = (isTap && step === 10) || (isScan && step === 11);
 
             if (isAgeStep) {
-                titleEl.textContent = 'Age & Parental Consent';
+                titleEl.textContent = 'Age Setting';
                 const isMinor = wizardState.isMinorUnder13;
                 const emailVal = wizardState.parentEmail || '';
                 contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
-                        Is the user under 13 years old? This determines whether parental consent is required
-                        before enabling personalised learning.
-                    </p>
                     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === true ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === true ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardAgeGroup" value="minor" ${isMinor === true ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Yes, under 13</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">A parent or guardian email is required before enabling personalised learning</div>
-                            </div>
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;background:${isMinor === true ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === true ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="minor" ${isMinor === true ? 'checked' : ''} style="accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">Under 13</div>
                         </label>
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${isMinor === false ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === false ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardAgeGroup" value="adult" ${isMinor === false ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">No, 13 or older</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">No parental consent required</div>
-                            </div>
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;background:${isMinor === false ? '#eef2ff' : '#f9fafb'};border:2px solid ${isMinor === false ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardAgeGroup" value="adult" ${isMinor === false ? 'checked' : ''} style="accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">13 or older</div>
                         </label>
                     </div>
                     <div id="wizardAgeEmailRow" style="display:${isMinor === true ? 'block' : 'none'};margin-top:4px;">
@@ -4454,24 +4457,40 @@ registerForm.addEventListener('submit', async (e) => {
                     { value: 'bonnie', label: 'Bonnie', desc: 'Girl', img: '/static/images/mascot_bonnie.png' },
                     { value: 'buddy',  label: 'Buddy',  desc: 'Dog',  img: '/static/images/mascot_buddy.png' },
                 ];
+                const isNoImages = wizardState.disableTapPictograms;
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:20px;">Select the mascot character shown in button images throughout the app.</p>
                     <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
                         ${mascots.map(m => `
                         <div class="wizard-mascot-card" data-mascot="${m.value}" style="
-                            cursor:pointer;border-radius:14px;border:3px solid ${wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
-                            background:${wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
+                            cursor:pointer;border-radius:14px;border:3px solid ${!isNoImages && wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
+                            background:${!isNoImages && wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
                             padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
                             <img src="${m.img}" alt="${m.label}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;margin-bottom:8px;">
                             <div style="font-weight:600;color:#111827;font-size:0.95rem;">${m.label}</div>
                             <div style="font-size:0.78rem;color:#6b7280;">${m.desc}</div>
                         </div>`).join('')}
+                        <div class="wizard-mascot-card" data-mascot="none" style="
+                            cursor:pointer;border-radius:14px;border:3px solid ${isNoImages ? '#6366f1' : 'transparent'};
+                            background:${isNoImages ? '#eef2ff' : '#f9fafb'};
+                            padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+                            <div style="width:80px;height:80px;border-radius:10px;margin-bottom:8px;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:2rem;color:#9ca3af;">🚫</div>
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">No Images</div>
+                            <div style="font-size:0.78rem;color:#6b7280;">Text only</div>
+                        </div>
                     </div>`;
                 contentEl.querySelectorAll('.wizard-mascot-card').forEach(card => {
                     card.addEventListener('click', () => {
-                        wizardState.mascot = card.dataset.mascot;
+                        if (card.dataset.mascot === 'none') {
+                            wizardState.disableTapPictograms = true;
+                        } else {
+                            wizardState.mascot = card.dataset.mascot;
+                            wizardState.disableTapPictograms = false;
+                        }
                         contentEl.querySelectorAll('.wizard-mascot-card').forEach(c => {
-                            const active = c.dataset.mascot === wizardState.mascot;
+                            const noImages = wizardState.disableTapPictograms;
+                            const active = noImages ? c.dataset.mascot === 'none'
+                                                     : c.dataset.mascot === wizardState.mascot;
                             c.style.borderColor = active ? '#6366f1' : 'transparent';
                             c.style.background = active ? '#eef2ff' : '#f9fafb';
                         });
@@ -4698,6 +4717,20 @@ registerForm.addEventListener('submit', async (e) => {
                                 </label>
                             </div>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Gender</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="any" ${(wizardState.voiceGender || 'any') === 'any' ? 'checked' : ''}> Any
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="female" ${wizardState.voiceGender === 'female' ? 'checked' : ''}> ♀ Female
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="male" ${wizardState.voiceGender === 'male' ? 'checked' : ''}> ♂ Male
+                                </label>
+                            </div>
+                        </div>
                         <div>
                             <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -4716,6 +4749,9 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                     document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
                         r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceGender"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceGender = this.value; wizardFillVoiceSelect(); });
                     });
                 } else {
                     // scan step 7 = Partner Language & Voice
@@ -4740,6 +4776,20 @@ registerForm.addEventListener('submit', async (e) => {
                                 </label>
                             </div>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Gender</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="any" ${(wizardState.voiceGender || 'any') === 'any' ? 'checked' : ''}> Any
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="female" ${wizardState.voiceGender === 'female' ? 'checked' : ''}> ♀ Female
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceGender" value="male" ${wizardState.voiceGender === 'male' ? 'checked' : ''}> ♂ Male
+                                </label>
+                            </div>
+                        </div>
                         <div>
                             <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -4758,6 +4808,9 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                     document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
                         r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceGender"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceGender = this.value; wizardFillVoiceSelect(); });
                     });
                 }
 
@@ -4850,6 +4903,12 @@ registerForm.addEventListener('submit', async (e) => {
             } else {
                 const adultVoices = voices.filter(v => v.provider === 'google');
                 if (adultVoices.length > 0) voices = adultVoices;
+            }
+            // Apply gender filter on top of style filter
+            const gender = wizardState.voiceGender || 'any';
+            if (gender !== 'any') {
+                const gFiltered = voices.filter(v => String(v.ssml_gender || '').toLowerCase() === gender);
+                if (gFiltered.length > 0) voices = gFiltered;
             }
             voiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>';
             voices.forEach(v => {
@@ -5264,6 +5323,7 @@ registerForm.addEventListener('submit', async (e) => {
                     useBravoBuild: wizardState.interfaceMode === 'tap' ? false : wizardState.useBravoBuild,
                     defaultButtonAction: wizardState.interfaceMode === 'tap' ? 'do_nothing' : wizardState.defaultButtonAction,
                     mascot: wizardState.mascot,
+                    disableTapPictograms: wizardState.disableTapPictograms || false,
                     hasLoggedIn: true,
                     regenerate_boards: true
                 };
@@ -5421,10 +5481,22 @@ registerForm.addEventListener('submit', async (e) => {
                             return fetch(url, options);
                         };
 
-                        if (typeof AudioInterviewSystem !== 'undefined') {
+                        try {
+                            if (typeof AudioInterviewSystem === 'undefined') {
+                                throw new Error('AudioInterviewSystem not loaded');
+                            }
                             // Always create a fresh instance for each new profile
                             window.interviewSystem = new AudioInterviewSystem();
-                            window.interviewSystem.openInterviewModal();
+
+                            // Make the modal visible directly in case openInterviewModal throws
+                            const interviewModal = document.getElementById('audioInterviewModal');
+                            if (interviewModal) interviewModal.classList.remove('hidden');
+
+                            await window.interviewSystem.openInterviewModal();
+                        } catch (interviewErr) {
+                            console.error('Failed to launch interview:', interviewErr);
+                            // Fall back to the grid so the user is not stranded
+                            await redirectToPreferredInterface();
                         }
                     } else {
                         await redirectToPreferredInterface();
@@ -5695,6 +5767,13 @@ registerForm.addEventListener('submit', async (e) => {
     document.getElementById('profile-limit-request-modal').addEventListener('click', function(e) {
         if (e.target === this) closeProfileLimitRequestModal();
     });
+    </script>
+    <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW registration failed:', err));
+        });
+    }
     </script>
 </body>
 </html>

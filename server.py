@@ -771,6 +771,21 @@ async def get_firebase_config():
 async def root():
     return RedirectResponse(url="/auth.html")
 
+@app.get("/manifest.json")
+async def pwa_manifest():
+    return FileResponse(os.path.join(static_file_path, "manifest.json"), media_type="application/manifest+json")
+
+@app.get("/sw.js")
+async def service_worker():
+    response = FileResponse(os.path.join(static_file_path, "sw.js"), media_type="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(os.path.join(static_file_path, "favicon.ico"))
+
 @app.get("/avatar-selector")
 async def avatar_selector():
     """Serve the avatar selector page"""
@@ -22092,6 +22107,38 @@ async def request_profile_limit(
     return JSONResponse(content={"message": "Request sent successfully."})
 
 
+class ImageRequestData(BaseModel):
+    description: str
+    button_label: str = ""
+    account_email: str = ""
+
+@app.post("/api/request-image")
+async def request_image(
+    request_data: ImageRequestData,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+):
+    account_id = token_info["account_id"]
+    account_email = token_info.get("email", "") or request_data.account_email.strip()
+    body = (
+        f"Image Library Request\n"
+        f"{'=' * 40}\n"
+        f"Requested Image: {request_data.description}\n"
+    )
+    if request_data.button_label.strip():
+        body += f"Button Label:    {request_data.button_label.strip()}\n"
+    body += f"Account Email:   {account_email}\n"
+    body += f"Account ID:      {account_id}\n"
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject="Image Library Request",
+        body_text=body,
+    )
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send request email. Please contact admin@talkwithbravo.com directly.")
+    logging.info(f"Image library request sent for account '{account_id}': {request_data.description[:80]}")
+    return JSONResponse(content={"message": "Request sent successfully."})
+
+
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
     user_id: str,
@@ -24464,10 +24511,22 @@ async def _assign_images_to_tap_config(
             if pool_btns and len(pool_btns) == len(pool):
                 continue  # already correctly populated
             max_on_page = static_rows * grid_cols
-            board['buttons'] = [
-                _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
-                for idx, word in enumerate(pool)
-            ]
+            existing_by_pool_idx = {
+                b['pool_index']: b
+                for b in pool_btns
+                if isinstance(b, dict) and b.get('pool_index') is not None
+            }
+            new_buttons = []
+            for idx, word in enumerate(pool):
+                btn = _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
+                ex = existing_by_pool_idx.get(idx)
+                if ex:
+                    for preserve in ('image_url', 'custom_audio_file', 'background_color', 'text_color',
+                                     'after_selection', 'target_board_id'):
+                        if ex.get(preserve) is not None:
+                            btn[preserve] = ex[preserve]
+                new_buttons.append(btn)
+            board['buttons'] = new_buttons
             board['dynamic_rows'] = tap_dynamic_rows
             backfill_changed = True
 
@@ -28954,6 +29013,23 @@ async def get_tap_interface_config(
                         if c.get('words_prompt'):
                             logging.info(f"DEBUG: Loaded child '{c.get('label')}' with words_prompt: {c.get('words_prompt')[:20]}...")
 
+        # Sync dynamic_rows on all boards to the current tapDynamicRows setting.
+        # Boards store dynamic_rows when backfilled, so if the setting was turned
+        # off (dynamic_rows=0 stored) and then re-enabled, the explicit 0 on each
+        # board would override the global tapDynamicRows on the client. Keep the
+        # stored value in sync so the toggle takes effect immediately.
+        tap_dynamic_rows = int(settings.get('tapDynamicRows', 0) or 0)
+        dr_synced = False
+        for board in (config_data.get('boards') or []):
+            if not isinstance(board, dict):
+                continue
+            stored = board.get('dynamic_rows')
+            if stored is not None and int(stored or 0) != tap_dynamic_rows:
+                board['dynamic_rows'] = tap_dynamic_rows
+                dr_synced = True
+        if dr_synced:
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+
         config_response = dict(config_data)
         config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
         _rewrite_image_urls(config_response)
@@ -29294,7 +29370,8 @@ async def list_tap_boards(
                 btn = _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
                 existing = existing_by_pool_idx.get(idx)
                 if existing:
-                    for preserve in ('image_url', 'custom_audio_file', 'background_color', 'text_color'):
+                    for preserve in ('image_url', 'custom_audio_file', 'background_color', 'text_color',
+                                     'after_selection', 'target_board_id'):
                         if existing.get(preserve) is not None:
                             btn[preserve] = existing[preserve]
                 new_buttons.append(btn)

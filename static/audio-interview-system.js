@@ -106,7 +106,6 @@ class AudioInterviewSystem {
         // Modal elements
         this.modal = document.getElementById('audioInterviewModal');
         this.startInterviewButton = document.getElementById('startInterviewButton');
-        this.closeInterviewModal = document.getElementById('closeInterviewModal');
         this.closeInterviewBtn = document.getElementById('closeInterviewBtn');
         
         // Interview control elements
