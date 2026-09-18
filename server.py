@@ -771,6 +771,21 @@ async def get_firebase_config():
 async def root():
     return RedirectResponse(url="/auth.html")
 
+@app.get("/manifest.json")
+async def pwa_manifest():
+    return FileResponse(os.path.join(static_file_path, "manifest.json"), media_type="application/manifest+json")
+
+@app.get("/sw.js")
+async def service_worker():
+    response = FileResponse(os.path.join(static_file_path, "sw.js"), media_type="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(os.path.join(static_file_path, "favicon.ico"))
+
 @app.get("/avatar-selector")
 async def avatar_selector():
     """Serve the avatar selector page"""
