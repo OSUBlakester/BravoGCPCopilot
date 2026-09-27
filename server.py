@@ -10172,6 +10172,57 @@ async def update_account_details(
         logging.error(f"Error updating account: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to update account")
 
+@app.delete("/api/admin/delete-auth-account")
+async def admin_delete_auth_account(
+    email: str,
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Admin-only: delete a Firebase Auth user (and their Firestore account doc) by email.
+    Used to recover from the state where an Auth user exists but the Firestore account was
+    manually deleted — allowing the email to be re-registered cleanly."""
+    caller_email = token_info.get("email", "")
+    if caller_email != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Admin only.")
+
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+
+    results = {}
+
+    # 1. Delete Firebase Auth user
+    try:
+        firebase_user = await asyncio.to_thread(auth.get_user_by_email, email)
+        uid = firebase_user.uid
+        await asyncio.to_thread(auth.delete_user, uid)
+        results["auth_deleted"] = True
+        results["uid"] = uid
+        logging.info(f"Admin deleted Firebase Auth user {email} (uid={uid})")
+    except auth.UserNotFoundError:
+        results["auth_deleted"] = False
+        results["auth_note"] = "Firebase Auth user not found — already deleted or never existed."
+        uid = None
+        logging.warning(f"Admin tried to delete {email} from Firebase Auth but user not found.")
+
+    # 2. Delete Firestore account document if it exists (best-effort using uid)
+    if uid:
+        try:
+            account_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(uid)
+            account_doc = await asyncio.to_thread(account_ref.get)
+            if account_doc.exists:
+                await asyncio.to_thread(account_ref.delete)
+                results["firestore_deleted"] = True
+                logging.info(f"Admin deleted Firestore account doc for uid={uid}")
+            else:
+                results["firestore_deleted"] = False
+                results["firestore_note"] = "Firestore account doc not found (already deleted)."
+        except Exception as e:
+            results["firestore_error"] = str(e)
+            logging.error(f"Error deleting Firestore account for {email}: {e}")
+
+    return results
+
+
 # NEW: Get accounts accessible by admin/therapist
 @app.get("/api/admin/accessible-accounts")
 async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
@@ -14615,6 +14666,78 @@ async def register_account(
                     aac_user_id=new_aac_user_id,
                     display_name=f"{request_data.account_name}'s Device {i + 1}"
                 )
+
+            # 5. Send notification emails (await both; send_system_email never raises)
+            account_name = request_data.account_name or email
+
+            await send_system_email(
+                to_address="admin@talkwithbravo.com",
+                subject="New Bravo Account Created",
+                body_text=(
+                    f"A new Bravo account has been created.\n\n"
+                    f"Account Name: {account_name}\n"
+                    f"Email: {email}\n"
+                    f"Account ID: {account_id}\n"
+                    f"Created: {dt.now().strftime('%Y-%m-%d %H:%M UTC')}\n"
+                ),
+                body_html=(
+                    "<html><body style='font-family:sans-serif;color:#222;'>"
+                    "<h2 style='color:#002244;'>New Bravo Account Created</h2>"
+                    "<table style='border-collapse:collapse;'>"
+                    f"<tr><td style='padding:4px 12px 4px 0;font-weight:600;'>Account Name</td><td>{account_name}</td></tr>"
+                    f"<tr><td style='padding:4px 12px 4px 0;font-weight:600;'>Email</td><td>{email}</td></tr>"
+                    f"<tr><td style='padding:4px 12px 4px 0;font-weight:600;'>Account ID</td><td>{account_id}</td></tr>"
+                    f"<tr><td style='padding:4px 12px 4px 0;font-weight:600;'>Created</td><td>{dt.now().strftime('%Y-%m-%d %H:%M UTC')}</td></tr>"
+                    "</table>"
+                    "</body></html>"
+                ),
+                purpose="new_account_admin_notification",
+            )
+
+            await send_system_email(
+                to_address=email,
+                subject="Welcome to Bravo!",
+                body_text=(
+                    f"Hi {account_name},\n\n"
+                    "Thank you for creating a new Account for Bravo!\n\n"
+                    "Here is some helpful information:\n\n"
+                    "- The Admin tools can be accessed by tapping on the Lock icon. The default PIN is 1234\n"
+                    "- There are help guides inside the Admin tools and there are also more detailed guides located in the Bravo University site:\n"
+                    "  https://talkwithbravo.com/bravo-university\n"
+                    "- Contact the Bravo Admin with any questions: admin@talkwithbravo.com\n\n"
+                    "Bravo was created by parents to empower everyone to set their voice free! "
+                    "We encourage any feedback to help Bravo grow. "
+                    "Please send any feedback to admin@talkwithbravo.com.\n\n"
+                    "Visit talkwithbravo.com to learn more about Bravo's story and all of the available features.\n\n"
+                    "— The Bravo Team"
+                ),
+                body_html=(
+                    "<html><body style='font-family:sans-serif;color:#222;max-width:600px;margin:0 auto;padding:24px;'>"
+                    "<div style='text-align:center;margin-bottom:24px;'>"
+                    "<img src='https://talkwithbravo.com/wp-content/uploads/2024/01/bravo-logo.png' alt='Bravo' style='height:60px;' onerror=\"this.style.display='none'\">"
+                    "</div>"
+                    "<h1 style='color:#002244;font-size:1.6rem;margin-bottom:8px;'>Welcome to Bravo!</h1>"
+                    f"<p style='font-size:1rem;'>Hi {account_name},</p>"
+                    "<p style='font-size:1rem;'>Thank you for creating a new Account for Bravo!</p>"
+                    "<h2 style='color:#002244;font-size:1.1rem;margin-top:24px;'>Here is some helpful information:</h2>"
+                    "<ul style='line-height:1.8;font-size:0.97rem;'>"
+                    "<li>The <strong>Admin tools</strong> can be accessed by tapping on the <strong>Lock icon</strong>. The default PIN is <strong>1234</strong>.</li>"
+                    "<li>There are help guides inside the Admin tools and more detailed guides at the "
+                    "<a href='https://talkwithbravo.com/bravo-university' style='color:#1565c0;'>Bravo University</a> site.</li>"
+                    "<li>Contact the Bravo Admin with any questions: "
+                    "<a href='mailto:admin@talkwithbravo.com' style='color:#1565c0;'>admin@talkwithbravo.com</a></li>"
+                    "</ul>"
+                    "<hr style='border:none;border-top:1px solid #e0e0e0;margin:24px 0;'>"
+                    "<p style='font-size:0.97rem;'>Bravo was created by parents to empower everyone to set their voice free! "
+                    "We encourage any feedback to help Bravo grow. Please send any feedback to "
+                    "<a href='mailto:admin@talkwithbravo.com' style='color:#1565c0;'>admin@talkwithbravo.com</a>.</p>"
+                    "<p style='font-size:0.97rem;'>Visit <a href='https://talkwithbravo.com' style='color:#1565c0;'>talkwithbravo.com</a> "
+                    "to learn more about Bravo's story and all of the available features.</p>"
+                    "<p style='margin-top:24px;font-size:0.97rem;'>— The Bravo Team</p>"
+                    "</body></html>"
+                ),
+                purpose="new_account_welcome_email",
+            )
 
             return JSONResponse(content={
                 "message": "Account and user profiles created successfully.",

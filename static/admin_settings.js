@@ -1977,6 +1977,37 @@ async function saveAccountSettings() {
     }
 }
 
+async function adminDeleteAuthAccount() {
+    const emailEl  = document.getElementById('admin-delete-auth-email');
+    const statusEl = document.getElementById('admin-delete-auth-status');
+    const btn      = document.getElementById('admin-delete-auth-btn');
+    const email    = emailEl ? emailEl.value.trim() : '';
+    if (!email) {
+        if (statusEl) { statusEl.textContent = 'Enter an email address.'; statusEl.className = 'text-sm mt-2 ml-4 h-4 text-red-600'; }
+        return;
+    }
+    if (!confirm(`Delete Firebase Auth account for "${email}"?\n\nThis cannot be undone. The email can then be re-registered.`)) return;
+    if (btn) btn.disabled = true;
+    if (statusEl) { statusEl.textContent = 'Deleting…'; statusEl.className = 'text-sm mt-2 ml-4 h-4 text-gray-400'; }
+    try {
+        const resp = await window.authenticatedFetch(`/api/admin/delete-auth-account?email=${encodeURIComponent(email)}`, {
+            method: 'DELETE'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || `${resp.status}`);
+        const authMsg  = data.auth_deleted  ? '✓ Firebase Auth user deleted.' : (data.auth_note  || '');
+        const fsMsg    = data.firestore_deleted === true ? ' ✓ Firestore account doc deleted.' :
+                         data.firestore_deleted === false ? ` ${data.firestore_note || ''}` : '';
+        if (statusEl) { statusEl.textContent = authMsg + fsMsg; statusEl.className = 'text-sm mt-2 ml-4 h-4 text-green-600'; }
+        if (emailEl) emailEl.value = '';
+    } catch (err) {
+        console.error('adminDeleteAuthAccount error:', err);
+        if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.className = 'text-sm mt-2 ml-4 h-4 text-red-600'; }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // --- Initialization Function ---
 async function initializePage() {
     if (isAuthContextReady && isDomContentLoaded) {
@@ -2057,6 +2088,15 @@ async function initializePage() {
         // Wire account settings save button
         const acctSaveBtn = document.getElementById('acct-save-btn');
         if (acctSaveBtn) acctSaveBtn.addEventListener('click', saveAccountSettings);
+
+        // Admin-only: show delete auth account panel and wire button
+        const currentEmail = window.currentUserEmail || '';
+        if (currentEmail === 'admin@talkwithbravo.com') {
+            const adminGroup = document.getElementById('admin-delete-auth-group');
+            if (adminGroup) adminGroup.classList.remove('hidden');
+            const adminDeleteBtn = document.getElementById('admin-delete-auth-btn');
+            if (adminDeleteBtn) adminDeleteBtn.addEventListener('click', adminDeleteAuthAccount);
+        }
 
         // Initial data loading
         populateLanguageSelectors();
