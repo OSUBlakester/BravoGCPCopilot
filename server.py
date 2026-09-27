@@ -318,7 +318,7 @@ template_user_data_paths = {
         "llm_provider": "gemini",
         "speech_rate": 180,
         "LLMOptions": 10,
-        "FreestyleOptions": 20,
+        "FreestyleOptions": 10,
         "ScanningOff": False,
         "scanMode": "auto",
         "waitForSwitchToScan": False,
@@ -1833,7 +1833,7 @@ DEFAULT_SETTINGS = {
     "llm_provider": "gemini",
     "speech_rate": DEFAULT_SPEECH_RATE,            # Default speech rate in WPM
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
-    "FreestyleOptions": 20,  # Default Freestyle Options
+    "FreestyleOptions": 10,  # Default Freestyle Options
     "ScanningOff": False, # Default scanning off
     "scanMode": "auto", # Scanning mode: "auto" timer scanning or "step" switch-driven scanning
     "waitForSwitchToScan": False, # Default wait for switch to start scanning
@@ -14934,7 +14934,7 @@ async def get_freestyle_word_prediction(
     try:
         # Load user settings to get FreestyleOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
-        freestyle_options = settings.get("FreestyleOptions", 20)  # Default to 20 if not set
+        freestyle_options = settings.get("FreestyleOptions", 10)  # Default to 10 if not set
         
         # Load user context for better predictions
         user_info, _wp_consent = await asyncio.gather(
