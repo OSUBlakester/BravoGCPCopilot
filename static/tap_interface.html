@@ -6672,20 +6672,39 @@
 
             if (hasPoolOverflow) {
                 // Pool cycling for AI-generated boards: handles all pages including page 0.
-                // When staticOffset=0 and some buttons already have row/col (normal case),
-                // this still produces the correct first-page ordering by pool_index.
+                // Non-pool buttons (no pool_index, but with row/col) are pinned buttons that
+                // were manually inserted (e.g. from Flutter) — place them at their positions
+                // first, then fill remaining slots from the cycling pool.
+                const pinnedBtns = configuredButtons.filter(b =>
+                    b && (b.pool_index === null || b.pool_index === undefined)
+                    && b.row !== null && b.row !== undefined
+                    && b.col !== null && b.col !== undefined
+                    && Number(b.row) < splitRowIndex
+                );
                 const totalPool = allPoolBtns.length;
                 const effectiveOffset = totalPool > 0 ? staticOffset % totalPool : 0;
-                const pageBtns = allPoolBtns.slice(effectiveOffset, effectiveOffset + totalUpperSlots);
-                const remaining = totalUpperSlots - pageBtns.length;
+                // Reserve slots for pinned buttons; fill remaining with pool
+                const slotsNeeded = totalUpperSlots - pinnedBtns.length;
+                const pageBtns = allPoolBtns.slice(effectiveOffset, effectiveOffset + slotsNeeded);
+                const remaining = slotsNeeded - pageBtns.length;
                 if (remaining > 0 && totalPool > 0) {
                     pageBtns.push(...allPoolBtns.slice(0, remaining));
                 }
-                upperRowButtons = pageBtns.map((btn, idx) => ({
-                    ...btn,
-                    row: Math.floor(idx / cols),
-                    col: idx % cols,
-                }));
+                // Build a grid combining pinned and pool, pinned at their row/col, pool filling the rest
+                const gridSlots = [];
+                let poolBtnIdx = 0;
+                for (let r = 0; r < splitRowIndex; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const coordKey = `${r}:${c}`;
+                        const pinned = pinnedBtns.find(b => Number(b.row) === r && Number(b.col) === c);
+                        if (pinned) {
+                            gridSlots.push(pinned);
+                        } else if (poolBtnIdx < pageBtns.length) {
+                            gridSlots.push({ ...pageBtns[poolBtnIdx++], row: r, col: c });
+                        }
+                    }
+                }
+                upperRowButtons = gridSlots;
             } else if (!isCustomized && staticOffset > 0 && categoryContext && !isNoBackfillBoard && allPoolBtns.length === 0) {
                 // Something Else cycling: skip page-0 configured buttons entirely;
                 // pull the next page of pool words starting at staticOffset.

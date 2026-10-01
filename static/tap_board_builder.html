@@ -497,7 +497,6 @@
                             <option value="do_nothing">Do nothing (stay on current board)</option>
                             <option value="navigate">Navigate to Target Board</option>
                             <option value="navigate_home">Navigate to Home Board</option>
-                            <option value="use_ai">Use AI to generate next options</option>
                         </select>
                     </div>
                     <div class="mb-4" id="targetBoardWrapper" style="display:none;"><label for="targetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label><select id="targetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select></div>
@@ -609,7 +608,6 @@
                 <label class="block text-sm font-medium text-gray-700 mb-2">Action</label>
                 <select id="setAllAfterSelectionValue" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                     <option value="do_nothing">Do nothing (stay on current board)</option>
-                    <option value="use_ai">Use AI to generate next options</option>
                     <option value="navigate">Navigate to Target Board</option>
                     <option value="navigate_home">Navigate to Home Board</option>
                 </select>
@@ -632,10 +630,9 @@
                 <button id="closeSetDynamicRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
 
-            <!-- Step 1: AI Prompt + Examples/Exclusions -->
+            <!-- AI Prompt + Examples/Exclusions -->
             <div id="setDynamicRowsStep1">
                 <div class="mb-4">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 1 of 2</span>
                     <h4 class="text-md font-semibold text-gray-800 mt-1">AI Prompt for Dynamic Rows</h4>
                     <p class="text-sm text-gray-600 mt-1 mb-3">Specify what kind of words or phrases the AI should generate for the dynamic rows at the bottom of this board.</p>
                     <textarea id="dynamicRowsPromptInput" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Generate action words and phrases for common activities..."></textarea>
@@ -652,37 +649,8 @@
                 </div>
                 <div class="flex justify-end gap-2 mt-5">
                     <button id="setDynamicRowsCancelBtn1" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
-                    <button id="setDynamicRowsNextBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Next <i class="fas fa-arrow-right ml-1"></i></button>
-                </div>
-            </div>
-
-            <!-- Step 2: Row Count -->
-            <div id="setDynamicRowsStep2" class="hidden">
-                <div class="mb-4">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 2 of 2</span>
-                    <h4 class="text-md font-semibold text-gray-800 mt-1">Number of Dynamic Rows</h4>
-                    <p class="text-sm text-gray-600 mt-1 mb-3">Set the number of dynamic rows (0 to <span id="maxDynamicRowsVal">10</span>). Enter 0 to disable dynamic rows.</p>
-                    <input type="number" id="dynamicRowsCountInput" min="0" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. 1">
-                </div>
-                <div class="flex justify-end gap-2 mt-5">
-                    <button id="setDynamicRowsBackBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                    <button id="setDynamicRowsCancelBtn2" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
                     <button id="setDynamicRowsApplyBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Apply &amp; Save</button>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="confirmFillRowsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5350;">
-        <div class="relative top-40 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Fill Vacated Rows?</h3>
-                <button id="closeConfirmFillRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
-            </div>
-            <p class="text-sm text-gray-600 mb-4">You have reduced the number of dynamic rows. Would you like to fill the newly available rows with default static vocabulary options?</p>
-            <div class="flex justify-end gap-3 mt-5">
-                <button id="confirmFillRowsNoBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">No, leave blank</button>
-                <button id="confirmFillRowsYesBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Yes, fill them</button>
             </div>
         </div>
     </div>
@@ -732,7 +700,11 @@
                         <input type="number" id="aiBulkCount" min="5" max="50" value="30" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                     </div>
                 </div>
-                <div class="flex justify-end gap-2 mt-6">
+                <div class="flex items-start gap-2 mt-5 p-3 bg-amber-50 border border-amber-300 rounded-md text-sm text-amber-800">
+                    <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
+                    <span><strong>Warning:</strong> Generating buttons will replace all existing buttons on this board.</span>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
                     <button id="aiBulkCancelBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</button>
                     <button id="abiGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 font-semibold text-sm flex items-center gap-1.5"><i class="fas fa-wand-magic-sparkles"></i>Generate Options</button>
                 </div>
@@ -758,7 +730,6 @@
                         <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
                         <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                             <option value="do_nothing">Do nothing (default)</option>
-                            <option value="use_ai">Use AI</option>
                             <option value="navigate">Navigate to Target Board</option>
                             <option value="navigate_home">Navigate to Home Board</option>
                         </select>
@@ -893,7 +864,6 @@
                         <label for="cbwAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
                         <select id="cbwAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                             <option value="do_nothing">Do nothing (default)</option>
-                            <option value="use_ai">Use AI</option>
                             <option value="navigate_home">Navigate to Home Board</option>
                         </select>
                     </div>
@@ -1002,7 +972,6 @@
                 <div class="border-t pt-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Default action for buttons on newly created boards:</label>
                     <select id="cnbNewBoardAction" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
-                        <option value="use_ai">Use AI to generate next options</option>
                         <option value="do_nothing">Do Nothing</option>
                         <option value="navigate_home">Return Home</option>
                     </select>
@@ -1127,17 +1096,6 @@
             document.getElementById('setDynamicRowsBtn').addEventListener('click', openSetDynamicRowsModal);
             document.getElementById('closeSetDynamicRowsModal').addEventListener('click', closeSetDynamicRowsModal);
             document.getElementById('setDynamicRowsCancelBtn1').addEventListener('click', closeSetDynamicRowsModal);
-            document.getElementById('setDynamicRowsCancelBtn2').addEventListener('click', closeSetDynamicRowsModal);
-            document.getElementById('setDynamicRowsNextBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                document.getElementById('setDynamicRowsStep1').classList.add('hidden');
-                document.getElementById('setDynamicRowsStep2').classList.remove('hidden');
-            });
-            document.getElementById('setDynamicRowsBackBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                document.getElementById('setDynamicRowsStep2').classList.add('hidden');
-                document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
-            });
             document.getElementById('setDynamicRowsApplyBtn').addEventListener('click', applySetDynamicRows);
             document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
@@ -2054,7 +2012,6 @@
                             i.title = 'Navigates to Home board';
                             buttonDiv.appendChild(i);
                         }
-                        else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
                         else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
                     } else { buttonDiv.textContent = '+'; buttonDiv.classList.add('undefined'); }
  
@@ -2384,7 +2341,7 @@
             document.getElementById('customAudioFileUrl').value = resolvedData.custom_audio_file || '';
             document.getElementById('buttonBgColor').value = resolvedData.background_color || '#FFFFFF';
             let afterSel = resolvedData.after_selection || (resolvedData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
-            if (!['do_nothing', 'navigate', 'navigate_home', 'use_ai'].includes(afterSel)) {
+            if (!['do_nothing', 'navigate', 'navigate_home'].includes(afterSel)) {
                 afterSel = 'do_nothing';
             }
             document.getElementById('afterSelection').value = afterSel;
@@ -2451,7 +2408,7 @@
             } else {
                 currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
             }
-            if (label || speechText || targetBoard || customAudio || imageUrl || (buttonType === 'dynamic' && llmPrompt) || ['navigate_home', 'use_ai'].includes(afterSelection)) {
+            if (label || speechText || targetBoard || customAudio || imageUrl || (buttonType === 'dynamic' && llmPrompt) || afterSelection === 'navigate_home') {
                 const actionType = afterSelection === 'navigate' ? 'navigate' : (customAudio ? 'audio' : 'announce');
                 // Overflow buttons preserve their ID, pool_index, row=null, col=null
                 const isOverflow = !!currentEditingButton.buttonId && existingButton && (existingButton.row === null || existingButton.row === undefined);
@@ -2525,8 +2482,6 @@
                 ? (temporaryNavigation ? 'Navigate to Target Board, then return after one selection' : 'Navigate to Target Board')
                 : afterSelection === 'navigate_home'
                     ? 'Navigate to configured Home board'
-                : afterSelection === 'use_ai'
-                    ? 'Use AI to generate next options'
                     : 'Do nothing (stay on current board)';
             
             document.getElementById('buttonTypeInfo').textContent = buttonType === 'dynamic' ? 'Dynamic (AI)' : 'Static';
@@ -2587,33 +2542,12 @@
         function openSetDynamicRowsModal(e) {
             if (e) { e.preventDefault(); e.stopPropagation(); }
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
-            
-            // Set Step 1 visible, Step 2 hidden
-            document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
-            document.getElementById('setDynamicRowsStep2').classList.add('hidden');
-            
-            // Populate Step 1 Prompt + Examples/Exclusions
+
+            // Populate Prompt + Examples/Exclusions
             document.getElementById('dynamicRowsPromptInput').value = currentBoardData.llm_prompt || '';
             document.getElementById('dynamicRowsExamplesInput').value = currentBoardData.prompt_examples || '';
             document.getElementById('dynamicRowsExclusionsInput').value = currentBoardData.prompt_exclusions || '';
-            
-            const maxVal = GRID_ROWS;
-            document.getElementById('maxDynamicRowsVal').textContent = maxVal;
-            const input = document.getElementById('dynamicRowsCountInput');
-            input.max = maxVal;
-            
-            let val = 0;
-            const boardTypeForModal = String(currentBoardData.board_type || 'ai').toLowerCase();
-            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
-                val = currentBoardData.dynamic_rows;
-            } else if (boardTypeForModal === 'ai') {
-                // Fully AI board: all rows are dynamic
-                val = GRID_ROWS;
-            } else if (useHybridPages) {
-                val = tapDynamicRows;
-            }
-            input.value = Math.min(val, maxVal);
-            
+
             document.getElementById('setDynamicRowsModal').classList.remove('hidden');
         }
 
@@ -2621,129 +2555,20 @@
             document.getElementById('setDynamicRowsModal').classList.add('hidden');
         }
 
-        function askFillVacatedRows() {
-            return new Promise((resolve) => {
-                const modal = document.getElementById('confirmFillRowsModal');
-                const yesBtn = document.getElementById('confirmFillRowsYesBtn');
-                const noBtn = document.getElementById('confirmFillRowsNoBtn');
-                const closeBtn = document.getElementById('closeConfirmFillRowsModal');
-                
-                function cleanup(value) {
-                    modal.classList.add('hidden');
-                    yesBtn.removeEventListener('click', onYes);
-                    noBtn.removeEventListener('click', onNo);
-                    closeBtn.removeEventListener('click', onClose);
-                    resolve(value);
-                }
-                
-                function onYes(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(true); }
-                function onNo(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
-                function onClose(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
-                
-                yesBtn.addEventListener('click', onYes);
-                noBtn.addEventListener('click', onNo);
-                closeBtn.addEventListener('click', onClose);
-                
-                modal.classList.remove('hidden');
-            });
-        }
-
         async function applySetDynamicRows(e) {
             if (e) { e.preventDefault(); e.stopPropagation(); }
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            
-            const maxVal = GRID_ROWS;
-            const dynamicRowsInput = document.getElementById('dynamicRowsCountInput');
-            const val = parseInt(dynamicRowsInput.value, 10);
-            
-            if (isNaN(val) || val < 0 || val > maxVal) {
-                showNotification(`Please enter a valid number of rows between 0 and ${maxVal}`, 'error');
-                return;
-            }
-            
-            let oldVal = 0;
-            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
-                oldVal = currentBoardData.dynamic_rows;
-            } else if (useHybridPages) {
-                oldVal = tapDynamicRows;
-            }
-            
-            const newVal = val;
-            currentBoardData.dynamic_rows = newVal;
-            
+
+            // Only update the prompt fields — dynamic row count is not editable here
             const promptVal = document.getElementById('dynamicRowsPromptInput').value.trim();
             currentBoardData.llm_prompt = promptVal || null;
             currentBoardData.prompt_examples = document.getElementById('dynamicRowsExamplesInput').value.trim() || null;
             currentBoardData.prompt_exclusions = document.getElementById('dynamicRowsExclusionsInput').value.trim() || null;
-            
-            let fillStatic = false;
-            if (newVal < oldVal) {
-                closeSetDynamicRowsModal();
-                fillStatic = await askFillVacatedRows();
-            } else {
-                closeSetDynamicRowsModal();
-            }
-            
+
+            closeSetDynamicRowsModal();
+
             try {
-                if (fillStatic) {
-                    const response = await fetch('/api/tap-interface/static-pool?label=' + encodeURIComponent(currentBoardData.label), { headers: getAuthHeaders() });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    const data = await response.json();
-                    const pool = data.pool || [];
-                    
-                    if (pool.length > 0) {
-                        const existingLabels = new Set(
-                            (currentBoardData.buttons || [])
-                                .map(btn => (btn.label || '').trim().toLowerCase())
-                                .filter(l => l)
-                        );
-                        
-                        let poolIdx = 0;
-                        if (!currentBoardData.buttons) {
-                            currentBoardData.buttons = [];
-                        }
-                        
-                        for (let r = GRID_ROWS - oldVal; r < GRID_ROWS - newVal; r++) {
-                            for (let c = 0; c < GRID_COLS; c++) {
-                                const hasBtn = currentBoardData.buttons.some(btn => Number(btn.row) === r && Number(btn.col) === c);
-                                if (!hasBtn) {
-                                    let word = null;
-                                    while (poolIdx < pool.length) {
-                                        const candidate = pool[poolIdx].trim();
-                                        poolIdx++;
-                                        if (!existingLabels.has(candidate.toLowerCase())) {
-                                            word = candidate;
-                                            break;
-                                        }
-                                    }
-                                    if (word) {
-                                        const newBtn = {
-                                            id: `btn_${r}_${c}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-                                            label: word,
-                                            row: r,
-                                            col: c,
-                                            speech_text: word,
-                                            after_selection: 'do_nothing',
-                                            action_type: 'announce',
-                                            target_board_id: null,
-                                            temporary_navigation: false,
-                                            custom_audio_file: null,
-                                            special_function: null,
-                                            image_url: null,
-                                            background_color: '#FFFFFF',
-                                            text_color: '#000000',
-                                            hidden: false
-                                        };
-                                        currentBoardData.buttons.push(newBtn);
-                                        existingLabels.add(word.toLowerCase());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
                 await saveBoard();
                 renderButtonGrid();
             } catch (error) {
@@ -4288,13 +4113,6 @@
                             </div>
                         </label>
                         <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-gray-200">
-                            <input type="radio" name="atbAfterSelection" value="use_ai" class="mt-0.5 accent-violet-600">
-                            <div>
-                                <div class="font-semibold text-gray-800">AI Generates Next Options</div>
-                                <div class="text-xs text-gray-500 mt-0.5">After the option is spoken, AI generates a new set of related options.</div>
-                            </div>
-                        </label>
-                        <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-gray-200">
                             <input type="radio" name="atbAfterSelection" value="navigate_home" class="mt-0.5 accent-violet-600">
                             <div>
                                 <div class="font-semibold text-gray-800">Navigate to Home Board</div>
@@ -4441,11 +4259,9 @@
                 const n = parseInt(document.getElementById('atbNumOptions').value, 10);
                 const r = parseInt(document.getElementById('atbOptionsPerRow').value, 10);
                 const after = document.querySelector('input[name="atbAfterSelection"]:checked')?.value || 'do_nothing';
-                const afterLabel = after === 'use_ai'
-                    ? 'AI Generates Next Options'
-                    : after === 'navigate_home'
-                        ? 'Navigate to Home Board'
-                        : 'Do Nothing';
+                const afterLabel = after === 'navigate_home'
+                    ? 'Navigate to Home Board'
+                    : 'Do Nothing';
                 document.getElementById('atbSummaryOptions').textContent = n;
                 document.getElementById('atbSummaryPerRow').textContent = r;
                 document.getElementById('atbSummaryAfter').textContent = afterLabel;

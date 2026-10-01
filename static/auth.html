@@ -5402,6 +5402,48 @@ registerForm.addEventListener('submit', async (e) => {
                     } catch (_) { /* non-fatal: menu visibility can be adjusted in admin settings */ }
                 }
 
+                // Auto-translate when a non-English user language is selected
+                const userLang = String(wizardState.userLanguage || 'en-US').trim();
+                const isEnglish = userLang.toLowerCase().startsWith('en');
+                if (!isEnglish) {
+                    const translateHeaders = { ...headers };
+                    const translateBase = {
+                        source_locale: 'en-US',
+                        target_locale: userLang,
+                        include_display_name: true,
+                        include_button_text: true,
+                        include_speech_phrase: true,
+                        include_llm_query: true,
+                    };
+                    if (wizardState.interfaceMode === 'tap') {
+                        try {
+                            setWizardStatus('Translating board prompts…', false);
+                            await fetch('/api/admin/translate-pages', {
+                                method: 'POST',
+                                headers: translateHeaders,
+                                body: JSON.stringify({ ...translateBase, scope: 'tap_boards' }),
+                            });
+                        } catch (_) { /* non-fatal */ }
+                        try {
+                            setWizardStatus('Translating menus…', false);
+                            await fetch('/api/admin/translate-pages', {
+                                method: 'POST',
+                                headers: translateHeaders,
+                                body: JSON.stringify({ ...translateBase, scope: 'tap_menus' }),
+                            });
+                        } catch (_) { /* non-fatal */ }
+                    } else {
+                        try {
+                            setWizardStatus('Translating pages…', false);
+                            await fetch('/api/admin/translate-pages', {
+                                method: 'POST',
+                                headers: translateHeaders,
+                                body: JSON.stringify({ ...translateBase, scope: 'all' }),
+                            });
+                        } catch (_) { /* non-fatal */ }
+                    }
+                }
+
                 // Image assignment is handled by the background task in regenerate_boards.
                 // No need to call assign-all-images here — it runs automatically and quickly.
 
