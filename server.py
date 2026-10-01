@@ -10527,7 +10527,7 @@ class TranslateLinesRequest(BaseModel):
 class TranslatePagesRequest(BaseModel):
     source_locale: Optional[str] = None
     target_locale: str
-    scope: Literal["current", "all", "tap_boards"] = "current"
+    scope: Literal["current", "all", "tap_boards", "tap_menus"] = "current"
     page_name: Optional[str] = None
     include_display_name: bool = True
     include_button_text: bool = True
@@ -10984,9 +10984,6 @@ async def translate_pages_endpoint(
         raise HTTPException(status_code=400, detail="Select at least one field to translate")
 
     if request_data.scope == "tap_boards":
-        if not request_data.include_llm_query:
-            raise HTTPException(status_code=400, detail="Tap boards translation requires AI query prompts")
-
         tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not isinstance(tap_config_data, dict):
             raise HTTPException(status_code=404, detail="Tap interface configuration not found")
@@ -10997,82 +10994,224 @@ async def translate_pages_endpoint(
         tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
-        prompt_jobs: List[Dict[str, Any]] = []
-        for board in boards:
-            if not isinstance(board, dict):
-                continue
 
-            llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
-            if llm_prompt:
-                prompt_jobs.append({
-                    "board": board,
-                    "text": llm_prompt,
-                })
+        # --- LLM prompt translation ---
+        tap_boards_prompts_changed = 0
+        if request_data.include_llm_query:
+            prompt_jobs: List[Dict[str, Any]] = []
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+                llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+                if llm_prompt:
+                    prompt_jobs.append({"board": board, "text": llm_prompt})
 
-        if not prompt_jobs:
+            if prompt_jobs:
+                unique_prompts: List[str] = []
+                prompt_to_index: Dict[str, int] = {}
+                for job in prompt_jobs:
+                    key = job["text"]
+                    if key not in prompt_to_index:
+                        prompt_to_index[key] = len(unique_prompts)
+                        unique_prompts.append(key)
+                    job["unique_index"] = prompt_to_index[key]
+
+                translated_prompts: List[str] = [""] * len(unique_prompts)
+                batch_size = 60
+                try:
+                    for start_idx in range(0, len(unique_prompts), batch_size):
+                        batch = unique_prompts[start_idx:start_idx + batch_size]
+                        translated_batch = await _translate_lines_with_models(
+                            lines=batch,
+                            source_locale=source_locale,
+                            target_locale=target_locale
+                        )
+                        if len(translated_batch) != len(batch):
+                            raise ValueError("Tap board prompt translation returned unexpected line count")
+                        for offset, translated_text in enumerate(translated_batch):
+                            translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logging.error(f"Error translating tap board prompts for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail="Failed to translate tap board prompts")
+
+                for job in prompt_jobs:
+                    translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+                    if translated_value and translated_value != job["text"]:
+                        board = job["board"]
+                        board["llm_prompt"] = translated_value
+                        if "llm_query" in board:
+                            board["llm_query"] = translated_value
+                        tap_boards_prompts_changed += 1
+
+        # --- Button label / past_tense / plural translation ---
+        button_fields_changed = 0
+        if request_data.include_button_text:
+            btn_jobs: List[Dict[str, Any]] = []
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+                for btn in (board.get("buttons") or []):
+                    if not isinstance(btn, dict):
+                        continue
+                    for field in ("label", "past_tense", "plural"):
+                        val = str(btn.get(field) or "").strip()
+                        if val:
+                            btn_jobs.append({"container": btn, "field": field, "text": val})
+
+            if btn_jobs:
+                unique_btn_texts: List[str] = []
+                btn_text_to_index: Dict[str, int] = {}
+                for job in btn_jobs:
+                    key = job["text"]
+                    if key not in btn_text_to_index:
+                        btn_text_to_index[key] = len(unique_btn_texts)
+                        unique_btn_texts.append(key)
+                    job["unique_index"] = btn_text_to_index[key]
+
+                translated_btn_texts: List[str] = [""] * len(unique_btn_texts)
+                batch_size = 60
+                try:
+                    for start_idx in range(0, len(unique_btn_texts), batch_size):
+                        batch = unique_btn_texts[start_idx:start_idx + batch_size]
+                        translated_batch = await _translate_lines_with_models(
+                            lines=batch,
+                            source_locale=source_locale,
+                            target_locale=target_locale
+                        )
+                        if len(translated_batch) != len(batch):
+                            raise ValueError("Tap board button text translation returned unexpected line count")
+                        for offset, translated_text in enumerate(translated_batch):
+                            translated_btn_texts[start_idx + offset] = str(translated_text or "").strip()
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logging.error(f"Error translating tap board button text for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail="Failed to translate tap board button text")
+
+                for job in btn_jobs:
+                    translated_value = _sanitize_translated_text(translated_btn_texts[job["unique_index"]])
+                    if translated_value and translated_value != job["text"]:
+                        job["container"][job["field"]] = translated_value
+                        button_fields_changed += 1
+
+        total_changed = tap_boards_prompts_changed + button_fields_changed
+        if total_changed == 0 and not request_data.include_llm_query and not request_data.include_button_text:
             return JSONResponse(content={
-                "message": "No Tap board prompts found.",
+                "message": "No Tap board fields selected for translation.",
                 "scope": request_data.scope,
                 "pages_processed": 0,
                 "strings_seen": 0,
                 "unique_strings": 0,
                 "strings_changed": 0,
                 "tap_boards_prompts_changed": 0,
+                "tap_boards_buttons_changed": 0,
                 "special_pages_changed": 0,
             })
 
-        unique_prompts: List[str] = []
-        prompt_to_index: Dict[str, int] = {}
-        for job in prompt_jobs:
-            key = job["text"]
-            if key not in prompt_to_index:
-                prompt_to_index[key] = len(unique_prompts)
-                unique_prompts.append(key)
-            job["unique_index"] = prompt_to_index[key]
+        tap_config_data["updated_at"] = dt.now().isoformat()
+        await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
 
-        translated_prompts: List[str] = [""] * len(unique_prompts)
+        return JSONResponse(content={
+            "message": "Tap board translation complete.",
+            "scope": request_data.scope,
+            "pages_processed": 0,
+            "strings_seen": 0,
+            "unique_strings": 0,
+            "strings_changed": total_changed,
+            "tap_boards_prompts_changed": tap_boards_prompts_changed,
+            "tap_boards_buttons_changed": button_fields_changed,
+            "special_pages_changed": 0,
+        })
+
+    if request_data.scope == "tap_menus":
+        tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not isinstance(tap_config_data, dict):
+            raise HTTPException(status_code=404, detail="Tap interface configuration not found")
+
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
+        tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
+
+        # Collect label translation jobs from boards_menu and board labels
+        label_jobs: List[Dict[str, Any]] = []
+
+        def _collect_menu_labels(items: list) -> None:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                lbl = str(item.get("label") or "").strip()
+                if lbl:
+                    label_jobs.append({"container": item, "field": "label", "text": lbl})
+                _collect_menu_labels(item.get("children") or [])
+
+        _collect_menu_labels(tap_config_data.get("boards_menu") or [])
+
+        for board in (tap_config_data.get("boards") or []):
+            if not isinstance(board, dict):
+                continue
+            lbl = str(board.get("label") or "").strip()
+            if lbl:
+                label_jobs.append({"container": board, "field": "label", "text": lbl})
+
+        if not label_jobs:
+            return JSONResponse(content={
+                "message": "No tap menu/board labels found.",
+                "scope": request_data.scope,
+                "pages_processed": 0,
+                "strings_seen": 0,
+                "unique_strings": 0,
+                "strings_changed": 0,
+            })
+
+        unique_labels: List[str] = []
+        label_to_index: Dict[str, int] = {}
+        for job in label_jobs:
+            key = job["text"]
+            if key not in label_to_index:
+                label_to_index[key] = len(unique_labels)
+                unique_labels.append(key)
+            job["unique_index"] = label_to_index[key]
+
+        translated_labels: List[str] = [""] * len(unique_labels)
         batch_size = 60
         try:
-            for start_idx in range(0, len(unique_prompts), batch_size):
-                batch = unique_prompts[start_idx:start_idx + batch_size]
+            for start_idx in range(0, len(unique_labels), batch_size):
+                batch = unique_labels[start_idx:start_idx + batch_size]
                 translated_batch = await _translate_lines_with_models(
                     lines=batch,
                     source_locale=source_locale,
                     target_locale=target_locale
                 )
                 if len(translated_batch) != len(batch):
-                    raise ValueError("Tap board prompt translation returned unexpected line count")
-
+                    raise ValueError("Tap menu label translation returned unexpected line count")
                 for offset, translated_text in enumerate(translated_batch):
-                    translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+                    translated_labels[start_idx + offset] = str(translated_text or "").strip()
         except HTTPException:
             raise
         except Exception as e:
-            logging.error(f"Error translating tap board prompts for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to translate tap board prompts")
+            logging.error(f"Error translating tap menu labels for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to translate tap menu labels")
 
-        tap_boards_prompts_changed = 0
-        for job in prompt_jobs:
-            translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+        labels_changed = 0
+        for job in label_jobs:
+            translated_value = _sanitize_translated_text(translated_labels[job["unique_index"]])
             if translated_value and translated_value != job["text"]:
-                board = job["board"]
-                board["llm_prompt"] = translated_value
-                if "llm_query" in board:
-                    board["llm_query"] = translated_value
-                tap_boards_prompts_changed += 1
+                job["container"][job["field"]] = translated_value
+                labels_changed += 1
 
         tap_config_data["updated_at"] = dt.now().isoformat()
         await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
 
         return JSONResponse(content={
-            "message": "Tap board prompt translation complete.",
+            "message": "Tap menu and board label translation complete.",
             "scope": request_data.scope,
             "pages_processed": 0,
-            "strings_seen": len(prompt_jobs),
-            "unique_strings": len(unique_prompts),
-            "strings_changed": tap_boards_prompts_changed,
-            "tap_boards_prompts_changed": tap_boards_prompts_changed,
-            "special_pages_changed": 0,
+            "strings_seen": len(label_jobs),
+            "unique_strings": len(unique_labels),
+            "strings_changed": labels_changed,
         })
 
     pages = await load_pages_from_file(account_id, aac_user_id)
