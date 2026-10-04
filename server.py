@@ -22495,6 +22495,111 @@ async def request_image(
     return JSONResponse(content={"message": "Request sent successfully."})
 
 
+@app.get("/api/admin/gemini-costs")
+async def get_gemini_costs(
+    start_date: str,
+    end_date: str,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Return GEMINI_COST_TRACK log entries for a date range (admin only).
+
+    start_date / end_date: YYYY-MM-DD (inclusive, interpreted as UTC midnight).
+    Returns { rows: [...], summary: [...] } where summary is grouped by op+model.
+    """
+    import google.auth
+    import google.auth.transport.requests as google_requests
+
+    try:
+        # Parse dates and build RFC-3339 timestamps
+        start_dt = dt.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # end is inclusive through end of day
+        end_dt = (dt.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    project_id = CONFIG.get("gcp_project_id", "")
+    if not project_id:
+        raise HTTPException(status_code=503, detail="GCP project ID not configured")
+
+    log_filter = (
+        f'jsonPayload.message="GEMINI_COST_TRACK" '
+        f'timestamp>="{start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")}" '
+        f'timestamp<"{end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")}"'
+    )
+
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/logging.read"])
+        auth_req = google_requests.Request()
+        creds.refresh(auth_req)
+        bearer = creds.token
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not obtain GCP credentials: {e}")
+
+    rows = []
+    next_page_token = None
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            body = {
+                "resourceNames": [f"projects/{project_id}"],
+                "filter": log_filter,
+                "orderBy": "timestamp desc",
+                "pageSize": 1000,
+            }
+            if next_page_token:
+                body["pageToken"] = next_page_token
+
+            async with session.post(
+                "https://logging.googleapis.com/v2/entries:list",
+                headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
+                json=body,
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise HTTPException(status_code=502, detail=f"Cloud Logging API error: {text[:300]}")
+                data = await resp.json()
+
+            for entry in data.get("entries", []):
+                payload = entry.get("jsonPayload", {})
+                rows.append({
+                    "timestamp": entry.get("timestamp", ""),
+                    "op":        payload.get("op", ""),
+                    "model":     payload.get("model", ""),
+                    "account":   payload.get("account", ""),
+                    "user":      payload.get("user", ""),
+                    "in_tok":    int(payload.get("in_tok", 0) or 0),
+                    "cache_tok": int(payload.get("cache_tok", 0) or 0),
+                    "out_tok":   int(payload.get("out_tok", 0) or 0),
+                    "total_tok": int(payload.get("total_tok", 0) or 0),
+                    "cost_usd":  float(payload.get("cost_usd", 0) or 0),
+                })
+
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+
+    # Aggregate by op + model
+    agg: Dict[str, Any] = {}
+    for r in rows:
+        key = f"{r['op']}||{r['model']}"
+        if key not in agg:
+            agg[key] = {"op": r["op"], "model": r["model"],
+                        "calls": 0, "in_tok": 0, "cache_tok": 0,
+                        "out_tok": 0, "total_tok": 0, "cost_usd": 0.0}
+        agg[key]["calls"]     += 1
+        agg[key]["in_tok"]    += r["in_tok"]
+        agg[key]["cache_tok"] += r["cache_tok"]
+        agg[key]["out_tok"]   += r["out_tok"]
+        agg[key]["total_tok"] += r["total_tok"]
+        agg[key]["cost_usd"]  += r["cost_usd"]
+
+    summary = sorted(agg.values(), key=lambda x: x["cost_usd"], reverse=True)
+    for s in summary:
+        s["cost_usd"] = round(s["cost_usd"], 6)
+
+    return JSONResponse(content={"rows": rows, "summary": summary, "total_rows": len(rows)})
+
+
 @app.post("/api/admin/users/{user_id}/avatar")
 async def update_user_avatar(
     user_id: str,

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Cost Activity - Bravo Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <style>
+        .loading-spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #7c3aed;
+            border-radius: 50%;
+            width: 32px; height: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        th { position: sticky; top: 0; z-index: 1; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+        tr:hover td { background-color: #faf5ff; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Header -->
+<div class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center py-4">
+            <div class="flex items-center gap-4">
+                <a href="/static/admin_pages.html" class="text-gray-500 hover:text-gray-800 text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Admin
+                </a>
+                <h1 class="text-2xl font-bold text-gray-900">
+                    <i class="fas fa-dollar-sign mr-2 text-purple-600"></i>Gemini Cost Activity
+                </h1>
+            </div>
+            <span id="user-email" class="text-sm text-gray-400"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Access denied -->
+<div id="access-denied" class="hidden max-w-4xl mx-auto px-4 py-16 text-center">
+    <i class="fas fa-lock text-5xl text-red-400 mb-4"></i>
+    <h2 class="text-2xl font-semibold text-gray-700 mb-2">Access Denied</h2>
+    <p class="text-gray-500">This page is restricted to Bravo admin accounts.</p>
+</div>
+
+<!-- Main content -->
+<div id="main-content" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- Date range picker -->
+    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                <input id="start-date" type="date" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                <input id="end-date" type="date" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+            </div>
+            <button id="run-btn" onclick="runQuery()"
+                class="bg-purple-600 text-white px-5 py-2 rounded-lg hover:bg-purple-700 text-sm font-medium flex items-center gap-2">
+                <i class="fas fa-search"></i>Run Query
+            </button>
+            <div class="flex gap-2 ml-auto flex-wrap">
+                <button onclick="setPreset(0)"  class="preset-btn text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50">Today</button>
+                <button onclick="setPreset(1)"  class="preset-btn text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50">Yesterday</button>
+                <button onclick="setPreset(7)"  class="preset-btn text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50">Last 7 days</button>
+                <button onclick="setPreset(30)" class="preset-btn text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50">Last 30 days</button>
+            </div>
+        </div>
+        <div id="query-status" class="mt-3 text-sm text-gray-500 hidden"></div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden flex justify-center py-12">
+        <div class="text-center">
+            <div class="loading-spinner mx-auto mb-3"></div>
+            <p class="text-gray-500 text-sm">Querying Cloud Logging…</p>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden space-y-6">
+
+        <!-- Grand total banner -->
+        <div id="grand-total" class="grid grid-cols-2 sm:grid-cols-4 gap-4"></div>
+
+        <!-- Summary by operation -->
+        <div class="bg-white rounded-xl shadow-sm border">
+            <div class="px-5 py-4 border-b flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-gray-800">
+                    <i class="fas fa-chart-bar mr-2 text-purple-500"></i>Summary by Operation
+                </h2>
+                <button onclick="downloadCSV('summary')" class="text-xs text-purple-600 hover:underline">
+                    <i class="fas fa-download mr-1"></i>CSV
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm" id="summary-table">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                            <th class="px-4 py-3 text-left">Operation</th>
+                            <th class="px-4 py-3 text-left">Model</th>
+                            <th class="px-4 py-3 num">Calls</th>
+                            <th class="px-4 py-3 num">Input Tokens</th>
+                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num">Output Tokens</th>
+                            <th class="px-4 py-3 num">Total Tokens</th>
+                            <th class="px-4 py-3 num">Est. Cost (USD)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="summary-body" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Detail rows -->
+        <div class="bg-white rounded-xl shadow-sm border">
+            <div class="px-5 py-4 border-b flex justify-between items-center flex-wrap gap-2">
+                <h2 class="text-lg font-semibold text-gray-800">
+                    <i class="fas fa-list mr-2 text-purple-500"></i>Detail Log
+                    <span id="detail-count" class="ml-2 text-sm font-normal text-gray-400"></span>
+                </h2>
+                <div class="flex items-center gap-3">
+                    <input id="detail-filter" type="text" placeholder="Filter by account, op, model…"
+                        oninput="applyDetailFilter()"
+                        class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-56 focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                    <button onclick="downloadCSV('detail')" class="text-xs text-purple-600 hover:underline">
+                        <i class="fas fa-download mr-1"></i>CSV
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table class="w-full text-sm" id="detail-table">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                            <th class="px-4 py-3 text-left">Timestamp (UTC)</th>
+                            <th class="px-4 py-3 text-left">Operation</th>
+                            <th class="px-4 py-3 text-left">Model</th>
+                            <th class="px-4 py-3 text-left">Account</th>
+                            <th class="px-4 py-3 text-left">User</th>
+                            <th class="px-4 py-3 num">In Tok</th>
+                            <th class="px-4 py-3 num">Cache Tok</th>
+                            <th class="px-4 py-3 num">Out Tok</th>
+                            <th class="px-4 py-3 num">Total Tok</th>
+                            <th class="px-4 py-3 num">Cost (USD)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail-body" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="empty-state" class="hidden text-center py-16 text-gray-400">
+        <i class="fas fa-inbox text-4xl mb-3"></i>
+        <p class="text-lg">No cost records found for the selected date range.</p>
+    </div>
+</div>
+
+<script>
+    let firebaseIdToken = null;
+    let allRows = [];
+    let summaryData = [];
+
+    // ── Auth ────────────────────────────────────────────────────────────────
+    async function initAuth() {
+        const cfgResp = await fetch('/firebase-config');
+        const firebaseConfig = await cfgResp.json();
+        firebase.initializeApp(firebaseConfig);
+
+        firebase.auth().onAuthStateChanged(async user => {
+            if (!user) { window.location.href = '/'; return; }
+
+            const email = user.email || '';
+            document.getElementById('user-email').textContent = email;
+
+            if (email !== 'admin@talkwithbravo.com') {
+                document.getElementById('access-denied').classList.remove('hidden');
+                return;
+            }
+
+            firebaseIdToken = await user.getIdToken();
+            document.getElementById('main-content').classList.remove('hidden');
+            setPreset(7);
+        });
+    }
+
+    async function authFetch(url, opts = {}) {
+        if (!firebaseIdToken) throw new Error('Not authenticated.');
+        return fetch(url, {
+            ...opts,
+            headers: { 'Authorization': `Bearer ${firebaseIdToken}`, ...(opts.headers || {}) }
+        });
+    }
+
+    // ── Date presets ────────────────────────────────────────────────────────
+    function toLocalDateStr(d) {
+        return d.toISOString().slice(0, 10);
+    }
+
+    function setPreset(daysBack) {
+        const end = new Date();
+        const start = new Date();
+        if (daysBack === 0) {
+            // today
+        } else if (daysBack === 1) {
+            start.setDate(start.getDate() - 1);
+            end.setDate(end.getDate() - 1);
+        } else {
+            start.setDate(start.getDate() - daysBack + 1);
+        }
+        document.getElementById('start-date').value = toLocalDateStr(start);
+        document.getElementById('end-date').value   = toLocalDateStr(end);
+    }
+
+    // ── Query ───────────────────────────────────────────────────────────────
+    async function runQuery() {
+        const start = document.getElementById('start-date').value;
+        const end   = document.getElementById('end-date').value;
+        if (!start || !end) { alert('Please select both a start and end date.'); return; }
+
+        document.getElementById('results').classList.add('hidden');
+        document.getElementById('empty-state').classList.add('hidden');
+        document.getElementById('loading').classList.remove('hidden');
+        document.getElementById('query-status').classList.add('hidden');
+
+        try {
+            const resp = await authFetch(`/api/admin/gemini-costs?start_date=${start}&end_date=${end}`);
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${resp.status}`);
+            }
+            const data = await resp.json();
+            allRows = data.rows || [];
+            summaryData = data.summary || [];
+
+            document.getElementById('loading').classList.add('hidden');
+
+            if (allRows.length === 0) {
+                document.getElementById('empty-state').classList.remove('hidden');
+                return;
+            }
+
+            renderGrandTotal(summaryData);
+            renderSummary(summaryData);
+            renderDetail(allRows);
+            document.getElementById('results').classList.remove('hidden');
+
+            const status = document.getElementById('query-status');
+            status.textContent = `${allRows.length.toLocaleString()} log entries returned.`;
+            status.classList.remove('hidden');
+        } catch (e) {
+            document.getElementById('loading').classList.add('hidden');
+            const status = document.getElementById('query-status');
+            status.textContent = `Error: ${e.message}`;
+            status.classList.remove('hidden', 'text-gray-500');
+            status.classList.add('text-red-500');
+        }
+    }
+
+    // ── Grand total banner ───────────────────────────────────────────────────
+    function renderGrandTotal(summary) {
+        const totals = summary.reduce((acc, r) => {
+            acc.calls     += r.calls;
+            acc.in_tok    += r.in_tok;
+            acc.cache_tok += r.cache_tok;
+            acc.out_tok   += r.out_tok;
+            acc.total_tok += r.total_tok;
+            acc.cost_usd  += r.cost_usd;
+            return acc;
+        }, { calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 });
+
+        const cards = [
+            { label: 'Total Calls',    value: totals.calls.toLocaleString(),                    icon: 'fa-bolt',        color: 'purple' },
+            { label: 'Total Tokens',   value: totals.total_tok.toLocaleString(),                icon: 'fa-coins',       color: 'blue'   },
+            { label: 'Cached Tokens',  value: totals.cache_tok.toLocaleString(),                icon: 'fa-layer-group', color: 'green'  },
+            { label: 'Est. Cost',      value: '$' + totals.cost_usd.toFixed(4),                 icon: 'fa-dollar-sign', color: 'orange' },
+        ];
+
+        const colorMap = {
+            purple: 'bg-purple-50 border-purple-200 text-purple-700',
+            blue:   'bg-blue-50   border-blue-200   text-blue-700',
+            green:  'bg-green-50  border-green-200  text-green-700',
+            orange: 'bg-orange-50 border-orange-200 text-orange-700',
+        };
+
+        document.getElementById('grand-total').innerHTML = cards.map(c => `
+            <div class="rounded-xl border p-4 ${colorMap[c.color]}">
+                <div class="flex items-center gap-2 mb-1">
+                    <i class="fas ${c.icon} text-lg"></i>
+                    <span class="text-xs font-medium uppercase tracking-wide">${c.label}</span>
+                </div>
+                <div class="text-2xl font-bold">${c.value}</div>
+            </div>`).join('');
+    }
+
+    // ── Summary table ────────────────────────────────────────────────────────
+    function renderSummary(summary) {
+        const tbody = document.getElementById('summary-body');
+        tbody.innerHTML = summary.map(r => `
+            <tr>
+                <td class="px-4 py-3 font-mono text-xs text-gray-700">${esc(r.op)}</td>
+                <td class="px-4 py-3 text-gray-600 text-xs">${esc(r.model)}</td>
+                <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-700 font-medium">${r.total_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-semibold text-orange-700">$${r.cost_usd.toFixed(6)}</td>
+            </tr>`).join('');
+    }
+
+    // ── Detail table ─────────────────────────────────────────────────────────
+    function renderDetail(rows) {
+        document.getElementById('detail-count').textContent = `(${rows.length.toLocaleString()} rows)`;
+        const tbody = document.getElementById('detail-body');
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+                <td class="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">${fmtTs(r.timestamp)}</td>
+                <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(r.op)}</td>
+                <td class="px-4 py-2 text-xs text-gray-600">${esc(r.model)}</td>
+                <td class="px-4 py-2 text-xs text-gray-700">${esc(r.account)}</td>
+                <td class="px-4 py-2 text-xs text-gray-500">${esc(r.user)}</td>
+                <td class="px-4 py-2 num text-xs text-gray-600">${r.in_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-green-700">${r.cache_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-gray-600">${r.out_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-gray-700">${r.total_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs font-semibold text-orange-700">$${r.cost_usd.toFixed(6)}</td>
+            </tr>`).join('');
+    }
+
+    function applyDetailFilter() {
+        const q = document.getElementById('detail-filter').value.toLowerCase();
+        if (!q) { renderDetail(allRows); return; }
+        const filtered = allRows.filter(r =>
+            (r.account + r.user + r.op + r.model).toLowerCase().includes(q)
+        );
+        document.getElementById('detail-count').textContent = `(${filtered.length.toLocaleString()} of ${allRows.length.toLocaleString()})`;
+        const tbody = document.getElementById('detail-body');
+        tbody.innerHTML = filtered.map(r => `
+            <tr>
+                <td class="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">${fmtTs(r.timestamp)}</td>
+                <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(r.op)}</td>
+                <td class="px-4 py-2 text-xs text-gray-600">${esc(r.model)}</td>
+                <td class="px-4 py-2 text-xs text-gray-700">${esc(r.account)}</td>
+                <td class="px-4 py-2 text-xs text-gray-500">${esc(r.user)}</td>
+                <td class="px-4 py-2 num text-xs text-gray-600">${r.in_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-green-700">${r.cache_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-gray-600">${r.out_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs text-gray-700">${r.total_tok.toLocaleString()}</td>
+                <td class="px-4 py-2 num text-xs font-semibold text-orange-700">$${r.cost_usd.toFixed(6)}</td>
+            </tr>`).join('');
+    }
+
+    // ── CSV export ───────────────────────────────────────────────────────────
+    function downloadCSV(type) {
+        let headers, rows;
+        if (type === 'summary') {
+            headers = ['op','model','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
+            rows = summaryData.map(r => headers.map(h => r[h]));
+        } else {
+            headers = ['timestamp','op','model','account','user','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
+            rows = allRows.map(r => headers.map(h => r[h]));
+        }
+        const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+        const a = document.createElement('a');
+        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+        a.download = `gemini_costs_${type}_${document.getElementById('start-date').value}_${document.getElementById('end-date').value}.csv`;
+        a.click();
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function esc(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function fmtTs(ts) {
+        if (!ts) return '';
+        try { return new Date(ts).toISOString().replace('T', ' ').slice(0, 19); }
+        catch { return ts; }
+    }
+
+    initAuth();
+</script>
+</body>
+</html>
