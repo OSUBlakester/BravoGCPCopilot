@@ -4564,11 +4564,15 @@ async def _execute_gemini_call_with_retry(
     max_attempts: int = 6,
     base_delay_seconds: float = 0.5,
     max_delay_seconds: float = 20.0,
+    model_name: str = "",
 ):
     attempt = 1
     while attempt <= max_attempts:
         try:
-            return await call_factory()
+            response = await call_factory()
+            if model_name and hasattr(response, 'usage_metadata') and response.usage_metadata:
+                log_token_usage(response, operation_label, account_id, aac_user_id, model_name=model_name)
+            return response
         except Exception as exc:
             is_retryable = _is_retryable_gemini_exception(exc)
             is_last_attempt = attempt >= max_attempts
@@ -4639,6 +4643,7 @@ async def _generate_gemini_content_with_caching(
                     operation_label="gemini_chat_session_send_message",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
             else:
                 # Fallback: send full prompt if no user_query_only provided
@@ -4649,6 +4654,7 @@ async def _generate_gemini_content_with_caching(
                     operation_label="gemini_chat_session_send_message",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
             
             # Update message count
@@ -4690,6 +4696,7 @@ async def _generate_gemini_content_with_caching(
                         operation_label="gemini_cached_content_generate",
                         account_id=account_id,
                         aac_user_id=aac_user_id,
+                        model_name=_primary_model_name,
                     )
                     return response.text.strip()
                     
@@ -4746,27 +4753,25 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
             operation_label=f"gemini_primary_generate:{_primary_model_name}",
             account_id=account_id,
             aac_user_id=aac_user_id,
+            model_name=_primary_model_name,
         )
-        
+
         # Log response details for debugging
         logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
         logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
-        
+
         # Check for safety blocks or empty responses
         if not response.text or response.text.strip() == "":
             logging.error(f"❌ LLM returned empty response (fallback)! Candidates: {response.candidates}")
             logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
             raise Exception("LLM returned empty response")
-        
+
         if response.text.strip() == "[":
             logging.error(f"❌ LLM returned ONLY opening bracket (fallback)! This suggests the response was cut off.")
             logging.error(f"❌ Response candidates: {response.candidates}")
             logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
-        
+
         response_text = (await get_text_from_response(response)).strip()
-        
-        # Log detailed token usage for non-cached requests
-        log_token_usage(response, "NON_CACHED", account_id, aac_user_id)
         
         # Add validation for empty response
         if not response_text:
@@ -4788,11 +4793,9 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
                     operation_label=f"gemini_fallback_generate:{_fallback_model_name}",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_fallback_model_name,
                 )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
-
-                # Log detailed token usage for fallback requests
-                log_token_usage(response_fallback, "FALLBACK", account_id, aac_user_id)
 
                 return fallback_response_text
             except Exception as e_fallback:
@@ -4844,6 +4847,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
             aac_user_id=aac_user_id,
             max_attempts=3,
             base_delay_seconds=0.25,
+            model_name=_fw_model,
             max_delay_seconds=2.0,
         )
 
@@ -4858,9 +4862,6 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
             f"Fast category-words Gemini completed in {elapsed_ms}ms using {_fw_model} "
             f"for {account_id}/{aac_user_id}"
         )
-
-        if hasattr(response, 'usage_metadata'):
-            log_token_usage(response, "FAST_CATEGORY_WORDS", account_id, aac_user_id)
 
         if response_text:
             return response_text
@@ -4991,46 +4992,80 @@ RESPONSE FORMAT: Generate exactly the requested number of completely unique joke
     return f"{full_context_string}\n\n--- USER QUERY ---\n{user_query}"
 
 
-def log_token_usage(response, request_type: str, account_id: str, aac_user_id: str):
-    """
-    Logs detailed token usage information from Gemini API response.
-    This helps track cached vs non-cached token usage for billing analysis.
+# ---------------------------------------------------------------------------
+# Per-model pricing table (USD per 1M tokens).
+# Update these values when Google publishes new rates.
+# Keys are lowercase substrings matched against the model name.
+# ---------------------------------------------------------------------------
+_GEMINI_PRICING: List[Tuple[str, float, float]] = [
+    # (model substring, input_per_1m_usd, output_per_1m_usd)
+    ("flash-lite",  0.075, 0.30),
+    ("flash",       0.15,  0.60),
+    ("pro",         1.25,  5.00),
+]
+_GEMINI_PRICING_CACHE_DISCOUNT = 0.25   # cached input billed at 25 % of full rate
+
+def _gemini_cost_usd(model_name: str, input_tokens: int, output_tokens: int,
+                     cached_tokens: int = 0) -> float:
+    """Return estimated USD cost for one Gemini call."""
+    model_lower = (model_name or "").lower()
+    input_rate, output_rate = 0.15, 0.60   # default: Flash
+    for substr, ir, or_ in _GEMINI_PRICING:
+        if substr in model_lower:
+            input_rate, output_rate = ir, or_
+            break
+    new_input = max(0, input_tokens - cached_tokens)
+    cost = (
+        (new_input / 1_000_000) * input_rate
+        + (cached_tokens / 1_000_000) * input_rate * _GEMINI_PRICING_CACHE_DISCOUNT
+        + (output_tokens / 1_000_000) * output_rate
+    )
+    return cost
+
+
+def log_token_usage(response, request_type: str, account_id: str, aac_user_id: str,
+                    model_name: str = ""):
+    """Log token counts, estimated cost, and a structured GEMINI_COST_TRACK entry.
+
+    The structured entry is emitted as a single JSON-like line so it can be
+    filtered in Cloud Logging with:  textPayload =~ "GEMINI_COST_TRACK"
     """
     try:
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            usage = response.usage_metadata
-            
-            # Extract key metrics
-            prompt_tokens = getattr(usage, 'prompt_token_count', 0)
-            cached_tokens = getattr(usage, 'cached_content_token_count', 0)
-            candidates_tokens = getattr(usage, 'candidates_token_count', 0)
-            total_tokens = getattr(usage, 'total_token_count', 0)
-            
-            # Calculate billable tokens
-            new_prompt_tokens = prompt_tokens - cached_tokens
-            
-            # Calculate savings if using cache
-            if cached_tokens > 0:
-                cache_savings_percent = (cached_tokens / prompt_tokens) * 100 if prompt_tokens > 0 else 0
-                
-                logging.info(f"🎯 TOKEN USAGE [{request_type}] - {account_id}/{aac_user_id}:")
-                logging.info(f"  📊 Total Request: {prompt_tokens:,} tokens")
-                logging.info(f"  🔄 From Cache: {cached_tokens:,} tokens (75% discount)")
-                logging.info(f"  💰 New Billable: {new_prompt_tokens:,} tokens (standard rate)")
-                logging.info(f"  📝 Response Generated: {candidates_tokens:,} tokens")
-                logging.info(f"  📈 Cache Savings: {cache_savings_percent:.1f}% of prompt tokens")
-                logging.info(f"  🔢 Total Call: {total_tokens:,} tokens")
-            else:
-                logging.info(f"🎯 TOKEN USAGE [{request_type}] - {account_id}/{aac_user_id}:")
-                logging.info(f"  📊 Prompt: {prompt_tokens:,} tokens (NO CACHE - full billing)")
-                logging.info(f"  📝 Response: {candidates_tokens:,} tokens")
-                logging.info(f"  🔢 Total: {total_tokens:,} tokens")
-                
-        else:
-            logging.warning(f"No usage_metadata available in response for {account_id}/{aac_user_id}")
-            
+        if not (hasattr(response, 'usage_metadata') and response.usage_metadata):
+            logging.warning(f"No usage_metadata in Gemini response [{request_type}] {account_id}/{aac_user_id}")
+            return
+
+        usage = response.usage_metadata
+        prompt_tokens    = getattr(usage, 'prompt_token_count', 0) or 0
+        cached_tokens    = getattr(usage, 'cached_content_token_count', 0) or 0
+        candidates_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+        total_tokens     = getattr(usage, 'total_token_count', 0) or 0
+        new_input_tokens = max(0, prompt_tokens - cached_tokens)
+        estimated_cost   = _gemini_cost_usd(model_name, prompt_tokens, candidates_tokens, cached_tokens)
+
+        # Structured line — easy to grep / filter in Cloud Logging
+        import json as _json
+        logging.info("GEMINI_COST_TRACK " + _json.dumps({
+            "op":       request_type,
+            "model":    model_name or "unknown",
+            "account":  account_id,
+            "user":     aac_user_id,
+            "in_tok":   new_input_tokens,
+            "cache_tok": cached_tokens,
+            "out_tok":  candidates_tokens,
+            "total_tok": total_tokens,
+            "cost_usd": round(estimated_cost, 8),
+        }, separators=(",", ":")))
+
+        # Human-readable summary
+        cache_pct = f"{cached_tokens/prompt_tokens*100:.0f}% cached" if prompt_tokens else ""
+        logging.info(
+            f"TOKEN [{request_type}] {account_id}/{aac_user_id} | "
+            f"in={new_input_tokens:,} cache={cached_tokens:,} out={candidates_tokens:,} "
+            f"total={total_tokens:,} {cache_pct} | est=${estimated_cost:.6f}"
+        )
     except Exception as e:
-        logging.error(f"Error logging token usage for {account_id}/{aac_user_id}: {e}")
+        logging.error(f"Error logging token usage [{request_type}] {account_id}/{aac_user_id}: {e}")
 
 
 
@@ -5415,6 +5450,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     max_attempts=3,
                     base_delay_seconds=0.2,
                     max_delay_seconds=1.5,
+                    model_name=_sq_model,
                 )
 
                 llm_response_json_str = (response.text or "").strip()
@@ -5426,8 +5462,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         account_id,
                         aac_user_id,
                     )
-                else:
-                    log_token_usage(response, "STARTER_FAST", account_id, aac_user_id)
             except Exception as starter_fast_error:
                 logging.warning(
                     f"Starter-question fast path failed [{log_context}]: {starter_fast_error}. "
@@ -5499,6 +5533,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     operation_label="gemini_cached_base_plus_delta_generate",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
                 
                 # Log response details for debugging
@@ -5518,8 +5553,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 llm_response_json_str = response.text.strip()
                 
-                # Log detailed token usage for cached requests
-                log_token_usage(response, "CACHED+DELTA", account_id, aac_user_id)
                 
                 logging.info(f"✅ Successfully generated content using BASE cache + DELTA context [{log_context}].")
             except Exception as e:
@@ -5574,6 +5607,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         operation_label="gemini_new_cached_base_plus_delta_generate",
                         account_id=account_id,
                         aac_user_id=aac_user_id,
+                        model_name=_primary_model_name,
                     )
                     
                     # Log response details for debugging
@@ -5592,10 +5626,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
                     
                     llm_response_json_str = response.text.strip()
-                    
-                    # Log detailed token usage for newly cached requests
-                    log_token_usage(response, "NEW_CACHE+DELTA", account_id, aac_user_id)
-                    
+
                     logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA [{log_context}].")
                 else:
                     # Cache creation failed, use full prompt fallback
@@ -12451,6 +12482,7 @@ async def _a7_extract_preference(utterance: str, question: str = "") -> Optional
                 config=config,
             ),
             operation_label="gemini_preference_extraction",
+            model_name=_fast_words_model_name,
         )
     except Exception as e:
         logging.error(f"Preference extraction call failed: {e}", exc_info=True)
