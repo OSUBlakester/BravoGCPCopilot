@@ -22521,10 +22521,12 @@ async def get_gemini_costs(
     if not project_id:
         raise HTTPException(status_code=503, detail="GCP project ID not configured")
 
+    ts_start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts_end   = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Match both structured jsonPayload (new format) and textPayload (old format)
     log_filter = (
-        f'jsonPayload.message="GEMINI_COST_TRACK" '
-        f'timestamp>="{start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")}" '
-        f'timestamp<"{end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")}"'
+        f'(jsonPayload.message="GEMINI_COST_TRACK" OR textPayload:"GEMINI_COST_TRACK") '
+        f'timestamp>="{ts_start}" timestamp<"{ts_end}"'
     )
 
     try:
@@ -22537,6 +22539,7 @@ async def get_gemini_costs(
 
     rows = []
     next_page_token = None
+    import json as _json_mod
 
     async with aiohttp.ClientSession() as session:
         while True:
@@ -22556,11 +22559,23 @@ async def get_gemini_costs(
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
-                    raise HTTPException(status_code=502, detail=f"Cloud Logging API error: {text[:300]}")
+                    raise HTTPException(status_code=502, detail=f"Cloud Logging API error {resp.status}: {text[:400]}")
                 data = await resp.json()
 
             for entry in data.get("entries", []):
-                payload = entry.get("jsonPayload", {})
+                # Prefer jsonPayload; fall back to parsing the JSON out of textPayload
+                payload = entry.get("jsonPayload")
+                if not payload:
+                    text_payload = entry.get("textPayload", "")
+                    marker = "GEMINI_COST_TRACK "
+                    idx = text_payload.find(marker)
+                    if idx != -1:
+                        try:
+                            payload = _json_mod.loads(text_payload[idx + len(marker):])
+                        except Exception:
+                            continue
+                if not payload:
+                    continue
                 rows.append({
                     "timestamp": entry.get("timestamp", ""),
                     "op":        payload.get("op", ""),
