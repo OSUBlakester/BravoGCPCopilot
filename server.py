@@ -5043,19 +5043,22 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
         new_input_tokens = max(0, prompt_tokens - cached_tokens)
         estimated_cost   = _gemini_cost_usd(model_name, prompt_tokens, candidates_tokens, cached_tokens)
 
-        # Structured line — easy to grep / filter in Cloud Logging
-        import json as _json
-        logging.info("GEMINI_COST_TRACK " + _json.dumps({
-            "op":       request_type,
-            "model":    model_name or "unknown",
-            "account":  account_id,
-            "user":     aac_user_id,
-            "in_tok":   new_input_tokens,
+        # Emit as a structured JSON line. On Cloud Run, a JSON object printed to
+        # stdout is ingested as jsonPayload, making fields queryable in Log Analytics.
+        import json as _json, sys as _sys
+        print(_json.dumps({
+            "severity":  "INFO",
+            "message":   "GEMINI_COST_TRACK",
+            "op":        request_type,
+            "model":     model_name or "unknown",
+            "account":   account_id,
+            "user":      aac_user_id,
+            "in_tok":    new_input_tokens,
             "cache_tok": cached_tokens,
-            "out_tok":  candidates_tokens,
+            "out_tok":   candidates_tokens,
             "total_tok": total_tokens,
-            "cost_usd": round(estimated_cost, 8),
-        }, separators=(",", ":")))
+            "cost_usd":  round(estimated_cost, 8),
+        }), file=_sys.stdout, flush=True)
 
         # Human-readable summary
         cache_pct = f"{cached_tokens/prompt_tokens*100:.0f}% cached" if prompt_tokens else ""
