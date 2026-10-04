@@ -3158,8 +3158,10 @@ Analyze the provided context to create helpful, personalized suggestions."""
                         fact_text = fact.get("fact", "")
                         mention_count = fact.get("mention_count", 1)
                         sentiment = fact.get("sentiment", "likes")
+                        question_ctx = fact.get("question", "")
                         direction = "Likes" if sentiment == "likes" else "Does NOT like"
-                        facts_text.append(f"  • {direction}: {fact_text} (mentioned {mention_count}x)")
+                        q_suffix = f" [context: {question_ctx}]" if question_ctx else ""
+                        facts_text.append(f"  • {direction}: {fact_text}{q_suffix} (mentioned {mention_count}x)")
                     chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
                 
                 # Add common greetings (to help avoid repetition)
@@ -12392,6 +12394,24 @@ value is a short noun phrase, at most 60 characters, in the speaker's own words 
 
 Sentence: {utterance}"""
 
+_A7_EXTRACTION_PROMPT_QA = """You extract everyday preferences revealed by a question-and-answer exchange in an AAC (augmentative communication) app.
+
+A communication partner asked a question, and the AAC user selected a short word or phrase in response. Even a single word can reveal a durable preference when it directly answers a preference question.
+
+Return found: true when the question+answer combination reveals a durable, everyday preference. For example: asked "who is your favorite superhero?" and answered "Spider-Man" → media/topic preference for Spider-Man.
+
+Return found: false when the answer is about: health, symptoms, pain, medication, disability, therapy, feelings or mood, religion, race or background, money, someone's address, or anything negative about a named person.
+
+Return found: false if the question is not asking about a preference (e.g. "do you need the bathroom?"), or if you are unsure. A missed preference costs nothing. A wrong one is harmful.
+
+value is a short noun phrase, at most 60 characters, representing what the user expressed a preference about.
+
+Question: {question}
+User's answer: {utterance}"""
+
+
+
+
 
 def _a7_extraction_input_gate(utterance: str) -> Optional[str]:
     """A7 Layer 1 — deterministic input gate. Returns blocking domain or None.
@@ -12410,7 +12430,7 @@ def _a7_extraction_input_gate(utterance: str) -> Optional[str]:
     return None
 
 
-async def _a7_extract_preference(utterance: str) -> Optional[Dict[str, Any]]:
+async def _a7_extract_preference(utterance: str, question: str = "") -> Optional[Dict[str, Any]]:
     """A7 Layer 2 — model call. Isolated: no profile, history, or cached context."""
     config = types.GenerateContentConfig(
         temperature=0,
@@ -12418,11 +12438,16 @@ async def _a7_extract_preference(utterance: str) -> Optional[Dict[str, Any]]:
         response_schema=_A7_EXTRACTION_SCHEMA,
         max_output_tokens=200,
     )
+    use_qa = bool(question and question.strip())
+    if use_qa:
+        prompt_text = _A7_EXTRACTION_PROMPT_QA.format(question=question.strip(), utterance=utterance)
+    else:
+        prompt_text = _A7_EXTRACTION_PROMPT.format(utterance=utterance)
     try:
         response = await _execute_gemini_call_with_retry(
             lambda: _gemini_client.aio.models.generate_content(
                 model=_fast_words_model_name,
-                contents=_A7_EXTRACTION_PROMPT.format(utterance=utterance),
+                contents=prompt_text,
                 config=config,
             ),
             operation_label="gemini_preference_extraction",
@@ -12502,7 +12527,7 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
 
 async def a7_approve_proposal(account_id: str, aac_user_id: str,
                                category: str, value: str, timestamp: Any,
-                               sentiment: str = "likes") -> bool:
+                               sentiment: str = "likes", question: str = "") -> bool:
     """A7 Layer 5 — adult approval commits to profile and invalidates cache (A34).
 
     This is the ONLY path that writes to extracted_facts.
@@ -12523,14 +12548,17 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
             await cache_manager.invalidate_cache(account_id, aac_user_id)
             _a7_record_metric("approve.sentiment_updated", f'category="{category}"')
             return True
-    facts.append({
+    new_fact: Dict[str, Any] = {
         "fact": value,
         "category": category,
         "sentiment": sentiment,
         "source": "learned",
         "first_mentioned": timestamp,
         "mention_count": 1,
-    })
+    }
+    if question and question.strip():
+        new_fact["question"] = question.strip()
+    facts.append(new_fact)
     narrative["extracted_facts"] = facts
     narrative["last_updated"] = timestamp
     await save_chat_derived_narrative(account_id, aac_user_id, narrative)
@@ -12548,7 +12576,8 @@ def _a7_record_metric(event: str, label: str = "") -> None:
 
 async def maybe_propose_preference(account_id: str, aac_user_id: str,
                                    utterance: str, timestamp: Any,
-                                   learning_enabled: bool) -> None:
+                                   learning_enabled: bool,
+                                   question: str = "") -> None:
     """A7 orchestration — run all five layers for one utterance.
 
     Called from process_metadata_async for every AAC user response.
@@ -12561,14 +12590,16 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
         if blocked:
             _a7_record_metric("gate.blocked", f'domain="{blocked}"')
             return
-        raw = await _a7_extract_preference(utterance)
+        raw = await _a7_extract_preference(utterance, question=question)
         proposal, reason = _a7_validate_extraction(raw)
         if proposal is None:
             _a7_record_metric("validation.rejected", f'reason="{reason}"')
             return
         consent = await load_consent(account_id, aac_user_id)
+        if question and question.strip():
+            proposal["question"] = question.strip()
         if is_auto_approve_enabled(consent):
-            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"))
+            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"), question=proposal.get("question", ""))
             _a7_record_metric("auto_approved", f'category="{proposal["category"]}"')
         elif await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
             _a7_record_metric("proposed", f'category="{proposal["category"]}"')
@@ -14275,7 +14306,8 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
                     await maybe_propose_preference(
                         account_id, aac_user_id,
                         response.strip(), timestamp,
-                        is_learning_enabled(consent)
+                        is_learning_enabled(consent),
+                        question=question,
                     )
             except Exception as e:
                 logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
@@ -19781,7 +19813,7 @@ async def generate_category_words(
     request_start_time = time.perf_counter()
 
     try:
-        settings, user_info, user_current, _cw_consent = await asyncio.gather(
+        settings, user_info, user_current, _cw_consent, chat_narrative = await asyncio.gather(
             load_settings_from_file(account_id, aac_user_id),
             load_firestore_document(
                 account_id=account_id,
@@ -19796,6 +19828,7 @@ async def generate_category_words(
                 default_data=DEFAULT_USER_CURRENT.copy()
             ),
             load_consent(account_id, aac_user_id),
+            load_chat_derived_narrative(account_id, aac_user_id),
         )
         _cw_use_entered = is_personalization_enabled(_cw_consent)
 
@@ -19878,6 +19911,25 @@ async def generate_category_words(
             user_context_parts.append(f"activity={user_current['activity']}")
         user_context = " | ".join(user_context_parts) if user_context_parts else "general"
 
+        learned_facts_section = ""
+        if is_learning_enabled(_cw_consent) and chat_narrative:
+            extracted_facts = chat_narrative.get("extracted_facts") or []
+            if extracted_facts:
+                facts_lines = []
+                for fact in extracted_facts:
+                    val = fact.get("fact") or ""
+                    sentiment = fact.get("sentiment", "likes")
+                    q = fact.get("question") or ""
+                    if val:
+                        direction = "likes" if sentiment == "likes" else "dislikes"
+                        q_suffix = f" [asked: {q}]" if q else ""
+                        facts_lines.append(f"  - {direction}: {val}{q_suffix}")
+                if facts_lines:
+                    learned_facts_section = (
+                        "Known user preferences (only include in suggestions when DIRECTLY relevant to the current question/category — do NOT include if the preference belongs to a different topic):\n"
+                        + "\n".join(facts_lines)
+                    )
+
         live_context_summary = ", ".join(
             part for part in [
                 f"location={user_current.get('location')}" if user_current.get('location') else "",
@@ -19949,6 +20001,11 @@ async def generate_category_words(
             else:
                 follow_up_rule = "Stay tightly on the requested category"
 
+        _facts_fingerprint = "|".join(sorted(
+            f"{f.get('fact','')}:{f.get('sentiment','')}"
+            for f in (chat_narrative.get("extracted_facts") or [])
+            if f.get("fact")
+        )) if chat_narrative else ""
         cache_payload = {
             "category": request.category,
             "build_space": build_space_text,
@@ -19964,6 +20021,7 @@ async def generate_category_words(
             "vocabulary_level": vocabulary_level,
             "noun_only": is_noun_category,
             "adjective_only": is_adjective_category,
+            "facts": _facts_fingerprint,
         }
         quick_cache_key = (
             f"{account_id}|{aac_user_id}|cw|"
@@ -20020,7 +20078,7 @@ Exclude: {exclude_words_text}
 {mood_context}
 {adjective_constraint}
 {noun_constraint}
-
+{learned_facts_section}
 Rules:
 - Use common, useful, everyday AAC vocabulary
 - {follow_up_rule}
@@ -34285,6 +34343,7 @@ class ApproveLearnedProposalRequest(BaseModel):
     category: str
     value: str
     sentiment: str
+    question: Optional[str] = None
 
 
 class DiscardLearnedProposalRequest(BaseModel):
@@ -34685,7 +34744,8 @@ async def approve_learned_proposal_endpoint(
     if category not in _A7_EXTRACTION_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Unknown category: {category!r}")
     timestamp = dt.utcnow().isoformat()
-    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment)
+    question = (request_data.question or "").strip()
+    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment, question=question)
     # Remove from pending queue
     pending = await _a7_load_pending_proposals(account_id, aac_user_id)
     proposals = pending.get("proposals", [])
