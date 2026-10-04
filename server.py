@@ -7765,7 +7765,7 @@ async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, s
 
         if search_query:
             logging.info(f"Using grounding for topic '{topic_text}' with query: {search_query}")
-            results = await _generate_topic_content_with_grounding(search_query, topic_text)
+            results = await _generate_topic_content_with_grounding(search_query, topic_text, account_id=account_id, aac_user_id=aac_user_id)
             return JSONResponse(content={"summaries": results, "topic": topic_text, "source": "grounding"})
 
         if not scraping_config or not scraping_config.get("url"):
@@ -7799,7 +7799,7 @@ async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, s
         raise HTTPException(status_code=500, detail=f"Failed to get content for topic: {e}")
 
 
-async def _generate_topic_content_with_grounding(search_query: str, topic_name: str, count: int = 8) -> List[Dict]:
+async def _generate_topic_content_with_grounding(search_query: str, topic_name: str, count: int = 8, account_id: str = "unknown", aac_user_id: str = "unknown") -> List[Dict]:
     """Generate conversation starters for a topic using Gemini with Google Search grounding."""
     global _gemini_client, _primary_model_name
     if not _gemini_client or not _primary_model_name:
@@ -7844,6 +7844,7 @@ Rules:
             contents=prompt,
             config=config,
         )
+        log_token_usage(response, "favorites_topic_grounding", account_id, aac_user_id, model_name=_primary_model_name)
         text = response.text.strip()
         match = re.search(r'(\[.*\])', text, re.DOTALL)
         if match:
