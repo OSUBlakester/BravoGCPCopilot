@@ -170,7 +170,7 @@
 
     // ── Auth ────────────────────────────────────────────────────────────────
     async function initAuth() {
-        const cfgResp = await fetch('/firebase-config');
+        const cfgResp = await fetch('/api/frontend-config');
         const firebaseConfig = await cfgResp.json();
         firebase.initializeApp(firebaseConfig);
 
