@@ -3158,8 +3158,10 @@ Analyze the provided context to create helpful, personalized suggestions."""
                         fact_text = fact.get("fact", "")
                         mention_count = fact.get("mention_count", 1)
                         sentiment = fact.get("sentiment", "likes")
+                        question_ctx = fact.get("question", "")
                         direction = "Likes" if sentiment == "likes" else "Does NOT like"
-                        facts_text.append(f"  • {direction}: {fact_text} (mentioned {mention_count}x)")
+                        q_suffix = f" [context: {question_ctx}]" if question_ctx else ""
+                        facts_text.append(f"  • {direction}: {fact_text}{q_suffix} (mentioned {mention_count}x)")
                     chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
                 
                 # Add common greetings (to help avoid repetition)
@@ -4562,11 +4564,15 @@ async def _execute_gemini_call_with_retry(
     max_attempts: int = 6,
     base_delay_seconds: float = 0.5,
     max_delay_seconds: float = 20.0,
+    model_name: str = "",
 ):
     attempt = 1
     while attempt <= max_attempts:
         try:
-            return await call_factory()
+            response = await call_factory()
+            if model_name and hasattr(response, 'usage_metadata') and response.usage_metadata:
+                log_token_usage(response, operation_label, account_id, aac_user_id, model_name=model_name)
+            return response
         except Exception as exc:
             is_retryable = _is_retryable_gemini_exception(exc)
             is_last_attempt = attempt >= max_attempts
@@ -4637,6 +4643,7 @@ async def _generate_gemini_content_with_caching(
                     operation_label="gemini_chat_session_send_message",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
             else:
                 # Fallback: send full prompt if no user_query_only provided
@@ -4647,6 +4654,7 @@ async def _generate_gemini_content_with_caching(
                     operation_label="gemini_chat_session_send_message",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
             
             # Update message count
@@ -4688,6 +4696,7 @@ async def _generate_gemini_content_with_caching(
                         operation_label="gemini_cached_content_generate",
                         account_id=account_id,
                         aac_user_id=aac_user_id,
+                        model_name=_primary_model_name,
                     )
                     return response.text.strip()
                     
@@ -4744,27 +4753,25 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
             operation_label=f"gemini_primary_generate:{_primary_model_name}",
             account_id=account_id,
             aac_user_id=aac_user_id,
+            model_name=_primary_model_name,
         )
-        
+
         # Log response details for debugging
         logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
         logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
-        
+
         # Check for safety blocks or empty responses
         if not response.text or response.text.strip() == "":
             logging.error(f"❌ LLM returned empty response (fallback)! Candidates: {response.candidates}")
             logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
             raise Exception("LLM returned empty response")
-        
+
         if response.text.strip() == "[":
             logging.error(f"❌ LLM returned ONLY opening bracket (fallback)! This suggests the response was cut off.")
             logging.error(f"❌ Response candidates: {response.candidates}")
             logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
-        
+
         response_text = (await get_text_from_response(response)).strip()
-        
-        # Log detailed token usage for non-cached requests
-        log_token_usage(response, "NON_CACHED", account_id, aac_user_id)
         
         # Add validation for empty response
         if not response_text:
@@ -4786,11 +4793,9 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
                     operation_label=f"gemini_fallback_generate:{_fallback_model_name}",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_fallback_model_name,
                 )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
-
-                # Log detailed token usage for fallback requests
-                log_token_usage(response_fallback, "FALLBACK", account_id, aac_user_id)
 
                 return fallback_response_text
             except Exception as e_fallback:
@@ -4842,6 +4847,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
             aac_user_id=aac_user_id,
             max_attempts=3,
             base_delay_seconds=0.25,
+            model_name=_fw_model,
             max_delay_seconds=2.0,
         )
 
@@ -4856,9 +4862,6 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
             f"Fast category-words Gemini completed in {elapsed_ms}ms using {_fw_model} "
             f"for {account_id}/{aac_user_id}"
         )
-
-        if hasattr(response, 'usage_metadata'):
-            log_token_usage(response, "FAST_CATEGORY_WORDS", account_id, aac_user_id)
 
         if response_text:
             return response_text
@@ -4989,46 +4992,83 @@ RESPONSE FORMAT: Generate exactly the requested number of completely unique joke
     return f"{full_context_string}\n\n--- USER QUERY ---\n{user_query}"
 
 
-def log_token_usage(response, request_type: str, account_id: str, aac_user_id: str):
-    """
-    Logs detailed token usage information from Gemini API response.
-    This helps track cached vs non-cached token usage for billing analysis.
+# ---------------------------------------------------------------------------
+# Per-model pricing table (USD per 1M tokens).
+# Update these values when Google publishes new rates.
+# Keys are lowercase substrings matched against the model name.
+# ---------------------------------------------------------------------------
+_GEMINI_PRICING: List[Tuple[str, float, float]] = [
+    # (model substring, input_per_1m_usd, output_per_1m_usd)
+    ("flash-lite",  0.075, 0.30),
+    ("flash",       0.15,  0.60),
+    ("pro",         1.25,  5.00),
+]
+_GEMINI_PRICING_CACHE_DISCOUNT = 0.25   # cached input billed at 25 % of full rate
+
+def _gemini_cost_usd(model_name: str, input_tokens: int, output_tokens: int,
+                     cached_tokens: int = 0) -> float:
+    """Return estimated USD cost for one Gemini call."""
+    model_lower = (model_name or "").lower()
+    input_rate, output_rate = 0.15, 0.60   # default: Flash
+    for substr, ir, or_ in _GEMINI_PRICING:
+        if substr in model_lower:
+            input_rate, output_rate = ir, or_
+            break
+    new_input = max(0, input_tokens - cached_tokens)
+    cost = (
+        (new_input / 1_000_000) * input_rate
+        + (cached_tokens / 1_000_000) * input_rate * _GEMINI_PRICING_CACHE_DISCOUNT
+        + (output_tokens / 1_000_000) * output_rate
+    )
+    return cost
+
+
+def log_token_usage(response, request_type: str, account_id: str, aac_user_id: str,
+                    model_name: str = ""):
+    """Log token counts, estimated cost, and a structured GEMINI_COST_TRACK entry.
+
+    The structured entry is emitted as a single JSON-like line so it can be
+    filtered in Cloud Logging with:  textPayload =~ "GEMINI_COST_TRACK"
     """
     try:
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            usage = response.usage_metadata
-            
-            # Extract key metrics
-            prompt_tokens = getattr(usage, 'prompt_token_count', 0)
-            cached_tokens = getattr(usage, 'cached_content_token_count', 0)
-            candidates_tokens = getattr(usage, 'candidates_token_count', 0)
-            total_tokens = getattr(usage, 'total_token_count', 0)
-            
-            # Calculate billable tokens
-            new_prompt_tokens = prompt_tokens - cached_tokens
-            
-            # Calculate savings if using cache
-            if cached_tokens > 0:
-                cache_savings_percent = (cached_tokens / prompt_tokens) * 100 if prompt_tokens > 0 else 0
-                
-                logging.info(f"🎯 TOKEN USAGE [{request_type}] - {account_id}/{aac_user_id}:")
-                logging.info(f"  📊 Total Request: {prompt_tokens:,} tokens")
-                logging.info(f"  🔄 From Cache: {cached_tokens:,} tokens (75% discount)")
-                logging.info(f"  💰 New Billable: {new_prompt_tokens:,} tokens (standard rate)")
-                logging.info(f"  📝 Response Generated: {candidates_tokens:,} tokens")
-                logging.info(f"  📈 Cache Savings: {cache_savings_percent:.1f}% of prompt tokens")
-                logging.info(f"  🔢 Total Call: {total_tokens:,} tokens")
-            else:
-                logging.info(f"🎯 TOKEN USAGE [{request_type}] - {account_id}/{aac_user_id}:")
-                logging.info(f"  📊 Prompt: {prompt_tokens:,} tokens (NO CACHE - full billing)")
-                logging.info(f"  📝 Response: {candidates_tokens:,} tokens")
-                logging.info(f"  🔢 Total: {total_tokens:,} tokens")
-                
-        else:
-            logging.warning(f"No usage_metadata available in response for {account_id}/{aac_user_id}")
-            
+        if not (hasattr(response, 'usage_metadata') and response.usage_metadata):
+            logging.warning(f"No usage_metadata in Gemini response [{request_type}] {account_id}/{aac_user_id}")
+            return
+
+        usage = response.usage_metadata
+        prompt_tokens    = getattr(usage, 'prompt_token_count', 0) or 0
+        cached_tokens    = getattr(usage, 'cached_content_token_count', 0) or 0
+        candidates_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+        total_tokens     = getattr(usage, 'total_token_count', 0) or 0
+        new_input_tokens = max(0, prompt_tokens - cached_tokens)
+        estimated_cost   = _gemini_cost_usd(model_name, prompt_tokens, candidates_tokens, cached_tokens)
+
+        # Emit as a structured JSON line. On Cloud Run, a JSON object printed to
+        # stdout is ingested as jsonPayload, making fields queryable in Log Analytics.
+        import json as _json, sys as _sys
+        print(_json.dumps({
+            "severity":  "INFO",
+            "message":   "GEMINI_COST_TRACK",
+            "op":        request_type,
+            "model":     model_name or "unknown",
+            "account":   account_id,
+            "user":      aac_user_id,
+            "in_tok":    new_input_tokens,
+            "cache_tok": cached_tokens,
+            "out_tok":   candidates_tokens,
+            "total_tok": total_tokens,
+            "cost_usd":  round(estimated_cost, 8),
+        }), file=_sys.stdout, flush=True)
+
+        # Human-readable summary
+        cache_pct = f"{cached_tokens/prompt_tokens*100:.0f}% cached" if prompt_tokens else ""
+        logging.info(
+            f"TOKEN [{request_type}] {account_id}/{aac_user_id} | "
+            f"in={new_input_tokens:,} cache={cached_tokens:,} out={candidates_tokens:,} "
+            f"total={total_tokens:,} {cache_pct} | est=${estimated_cost:.6f}"
+        )
     except Exception as e:
-        logging.error(f"Error logging token usage for {account_id}/{aac_user_id}: {e}")
+        logging.error(f"Error logging token usage [{request_type}] {account_id}/{aac_user_id}: {e}")
 
 
 
@@ -5413,6 +5453,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     max_attempts=3,
                     base_delay_seconds=0.2,
                     max_delay_seconds=1.5,
+                    model_name=_sq_model,
                 )
 
                 llm_response_json_str = (response.text or "").strip()
@@ -5424,8 +5465,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         account_id,
                         aac_user_id,
                     )
-                else:
-                    log_token_usage(response, "STARTER_FAST", account_id, aac_user_id)
             except Exception as starter_fast_error:
                 logging.warning(
                     f"Starter-question fast path failed [{log_context}]: {starter_fast_error}. "
@@ -5497,6 +5536,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     operation_label="gemini_cached_base_plus_delta_generate",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
                 )
                 
                 # Log response details for debugging
@@ -5516,8 +5556,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 llm_response_json_str = response.text.strip()
                 
-                # Log detailed token usage for cached requests
-                log_token_usage(response, "CACHED+DELTA", account_id, aac_user_id)
                 
                 logging.info(f"✅ Successfully generated content using BASE cache + DELTA context [{log_context}].")
             except Exception as e:
@@ -5572,6 +5610,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         operation_label="gemini_new_cached_base_plus_delta_generate",
                         account_id=account_id,
                         aac_user_id=aac_user_id,
+                        model_name=_primary_model_name,
                     )
                     
                     # Log response details for debugging
@@ -5590,10 +5629,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                         logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
                     
                     llm_response_json_str = response.text.strip()
-                    
-                    # Log detailed token usage for newly cached requests
-                    log_token_usage(response, "NEW_CACHE+DELTA", account_id, aac_user_id)
-                    
+
                     logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA [{log_context}].")
                 else:
                     # Cache creation failed, use full prompt fallback
@@ -7732,7 +7768,7 @@ async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, s
 
         if search_query:
             logging.info(f"Using grounding for topic '{topic_text}' with query: {search_query}")
-            results = await _generate_topic_content_with_grounding(search_query, topic_text)
+            results = await _generate_topic_content_with_grounding(search_query, topic_text, account_id=account_id, aac_user_id=aac_user_id)
             return JSONResponse(content={"summaries": results, "topic": topic_text, "source": "grounding"})
 
         if not scraping_config or not scraping_config.get("url"):
@@ -7766,7 +7802,7 @@ async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, s
         raise HTTPException(status_code=500, detail=f"Failed to get content for topic: {e}")
 
 
-async def _generate_topic_content_with_grounding(search_query: str, topic_name: str, count: int = 8) -> List[Dict]:
+async def _generate_topic_content_with_grounding(search_query: str, topic_name: str, count: int = 8, account_id: str = "unknown", aac_user_id: str = "unknown") -> List[Dict]:
     """Generate conversation starters for a topic using Gemini with Google Search grounding."""
     global _gemini_client, _primary_model_name
     if not _gemini_client or not _primary_model_name:
@@ -7811,6 +7847,7 @@ Rules:
             contents=prompt,
             config=config,
         )
+        log_token_usage(response, "favorites_topic_grounding", account_id, aac_user_id, model_name=_primary_model_name)
         text = response.text.strip()
         match = re.search(r'(\[.*\])', text, re.DOTALL)
         if match:
@@ -12392,6 +12429,24 @@ value is a short noun phrase, at most 60 characters, in the speaker's own words 
 
 Sentence: {utterance}"""
 
+_A7_EXTRACTION_PROMPT_QA = """You extract everyday preferences revealed by a question-and-answer exchange in an AAC (augmentative communication) app.
+
+A communication partner asked a question, and the AAC user selected a short word or phrase in response. Even a single word can reveal a durable preference when it directly answers a preference question.
+
+Return found: true when the question+answer combination reveals a durable, everyday preference. For example: asked "who is your favorite superhero?" and answered "Spider-Man" → media/topic preference for Spider-Man.
+
+Return found: false when the answer is about: health, symptoms, pain, medication, disability, therapy, feelings or mood, religion, race or background, money, someone's address, or anything negative about a named person.
+
+Return found: false if the question is not asking about a preference (e.g. "do you need the bathroom?"), or if you are unsure. A missed preference costs nothing. A wrong one is harmful.
+
+value is a short noun phrase, at most 60 characters, representing what the user expressed a preference about.
+
+Question: {question}
+User's answer: {utterance}"""
+
+
+
+
 
 def _a7_extraction_input_gate(utterance: str) -> Optional[str]:
     """A7 Layer 1 — deterministic input gate. Returns blocking domain or None.
@@ -12410,7 +12465,7 @@ def _a7_extraction_input_gate(utterance: str) -> Optional[str]:
     return None
 
 
-async def _a7_extract_preference(utterance: str) -> Optional[Dict[str, Any]]:
+async def _a7_extract_preference(utterance: str, question: str = "") -> Optional[Dict[str, Any]]:
     """A7 Layer 2 — model call. Isolated: no profile, history, or cached context."""
     config = types.GenerateContentConfig(
         temperature=0,
@@ -12418,14 +12473,20 @@ async def _a7_extract_preference(utterance: str) -> Optional[Dict[str, Any]]:
         response_schema=_A7_EXTRACTION_SCHEMA,
         max_output_tokens=200,
     )
+    use_qa = bool(question and question.strip())
+    if use_qa:
+        prompt_text = _A7_EXTRACTION_PROMPT_QA.format(question=question.strip(), utterance=utterance)
+    else:
+        prompt_text = _A7_EXTRACTION_PROMPT.format(utterance=utterance)
     try:
         response = await _execute_gemini_call_with_retry(
             lambda: _gemini_client.aio.models.generate_content(
                 model=_fast_words_model_name,
-                contents=_A7_EXTRACTION_PROMPT.format(utterance=utterance),
+                contents=prompt_text,
                 config=config,
             ),
             operation_label="gemini_preference_extraction",
+            model_name=_fast_words_model_name,
         )
     except Exception as e:
         logging.error(f"Preference extraction call failed: {e}", exc_info=True)
@@ -12502,7 +12563,7 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
 
 async def a7_approve_proposal(account_id: str, aac_user_id: str,
                                category: str, value: str, timestamp: Any,
-                               sentiment: str = "likes") -> bool:
+                               sentiment: str = "likes", question: str = "") -> bool:
     """A7 Layer 5 — adult approval commits to profile and invalidates cache (A34).
 
     This is the ONLY path that writes to extracted_facts.
@@ -12523,14 +12584,17 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
             await cache_manager.invalidate_cache(account_id, aac_user_id)
             _a7_record_metric("approve.sentiment_updated", f'category="{category}"')
             return True
-    facts.append({
+    new_fact: Dict[str, Any] = {
         "fact": value,
         "category": category,
         "sentiment": sentiment,
         "source": "learned",
         "first_mentioned": timestamp,
         "mention_count": 1,
-    })
+    }
+    if question and question.strip():
+        new_fact["question"] = question.strip()
+    facts.append(new_fact)
     narrative["extracted_facts"] = facts
     narrative["last_updated"] = timestamp
     await save_chat_derived_narrative(account_id, aac_user_id, narrative)
@@ -12548,7 +12612,8 @@ def _a7_record_metric(event: str, label: str = "") -> None:
 
 async def maybe_propose_preference(account_id: str, aac_user_id: str,
                                    utterance: str, timestamp: Any,
-                                   learning_enabled: bool) -> None:
+                                   learning_enabled: bool,
+                                   question: str = "") -> None:
     """A7 orchestration — run all five layers for one utterance.
 
     Called from process_metadata_async for every AAC user response.
@@ -12561,14 +12626,16 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
         if blocked:
             _a7_record_metric("gate.blocked", f'domain="{blocked}"')
             return
-        raw = await _a7_extract_preference(utterance)
+        raw = await _a7_extract_preference(utterance, question=question)
         proposal, reason = _a7_validate_extraction(raw)
         if proposal is None:
             _a7_record_metric("validation.rejected", f'reason="{reason}"')
             return
         consent = await load_consent(account_id, aac_user_id)
+        if question and question.strip():
+            proposal["question"] = question.strip()
         if is_auto_approve_enabled(consent):
-            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"))
+            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"), question=proposal.get("question", ""))
             _a7_record_metric("auto_approved", f'category="{proposal["category"]}"')
         elif await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
             _a7_record_metric("proposed", f'category="{proposal["category"]}"')
@@ -14275,7 +14342,8 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
                     await maybe_propose_preference(
                         account_id, aac_user_id,
                         response.strip(), timestamp,
-                        is_learning_enabled(consent)
+                        is_learning_enabled(consent),
+                        question=question,
                     )
             except Exception as e:
                 logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
@@ -15103,7 +15171,7 @@ async def get_freestyle_word_prediction(
             prompt = f"Given the user context: '{user_context}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         
         # Use LLM to generate predictions
-        response_text = await _generate_gemini_content_with_fallback(prompt)
+        response_text = await _generate_gemini_content_with_fallback(prompt, account_id=account_id, aac_user_id=aac_user_id)
         
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
@@ -19781,7 +19849,7 @@ async def generate_category_words(
     request_start_time = time.perf_counter()
 
     try:
-        settings, user_info, user_current, _cw_consent = await asyncio.gather(
+        settings, user_info, user_current, _cw_consent, chat_narrative = await asyncio.gather(
             load_settings_from_file(account_id, aac_user_id),
             load_firestore_document(
                 account_id=account_id,
@@ -19796,6 +19864,7 @@ async def generate_category_words(
                 default_data=DEFAULT_USER_CURRENT.copy()
             ),
             load_consent(account_id, aac_user_id),
+            load_chat_derived_narrative(account_id, aac_user_id),
         )
         _cw_use_entered = is_personalization_enabled(_cw_consent)
 
@@ -19878,6 +19947,25 @@ async def generate_category_words(
             user_context_parts.append(f"activity={user_current['activity']}")
         user_context = " | ".join(user_context_parts) if user_context_parts else "general"
 
+        learned_facts_section = ""
+        if is_learning_enabled(_cw_consent) and chat_narrative:
+            extracted_facts = chat_narrative.get("extracted_facts") or []
+            if extracted_facts:
+                facts_lines = []
+                for fact in extracted_facts:
+                    val = fact.get("fact") or ""
+                    sentiment = fact.get("sentiment", "likes")
+                    q = fact.get("question") or ""
+                    if val:
+                        direction = "likes" if sentiment == "likes" else "dislikes"
+                        q_suffix = f" [asked: {q}]" if q else ""
+                        facts_lines.append(f"  - {direction}: {val}{q_suffix}")
+                if facts_lines:
+                    learned_facts_section = (
+                        "Known user preferences (only include in suggestions when DIRECTLY relevant to the current question/category — do NOT include if the preference belongs to a different topic):\n"
+                        + "\n".join(facts_lines)
+                    )
+
         live_context_summary = ", ".join(
             part for part in [
                 f"location={user_current.get('location')}" if user_current.get('location') else "",
@@ -19949,6 +20037,11 @@ async def generate_category_words(
             else:
                 follow_up_rule = "Stay tightly on the requested category"
 
+        _facts_fingerprint = "|".join(sorted(
+            f"{f.get('fact','')}:{f.get('sentiment','')}"
+            for f in (chat_narrative.get("extracted_facts") or [])
+            if f.get("fact")
+        )) if chat_narrative else ""
         cache_payload = {
             "category": request.category,
             "build_space": build_space_text,
@@ -19964,6 +20057,7 @@ async def generate_category_words(
             "vocabulary_level": vocabulary_level,
             "noun_only": is_noun_category,
             "adjective_only": is_adjective_category,
+            "facts": _facts_fingerprint,
         }
         quick_cache_key = (
             f"{account_id}|{aac_user_id}|cw|"
@@ -20020,7 +20114,7 @@ Exclude: {exclude_words_text}
 {mood_context}
 {adjective_constraint}
 {noun_constraint}
-
+{learned_facts_section}
 Rules:
 - Use common, useful, everyday AAC vocabulary
 - {follow_up_rule}
@@ -22399,6 +22493,126 @@ async def request_image(
         raise HTTPException(status_code=500, detail="Failed to send request email. Please contact admin@talkwithbravo.com directly.")
     logging.info(f"Image library request sent for account '{account_id}': {request_data.description[:80]}")
     return JSONResponse(content={"message": "Request sent successfully."})
+
+
+@app.get("/api/admin/gemini-costs")
+async def get_gemini_costs(
+    start_date: str,
+    end_date: str,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Return GEMINI_COST_TRACK log entries for a date range (admin only).
+
+    start_date / end_date: YYYY-MM-DD (inclusive, interpreted as UTC midnight).
+    Returns { rows: [...], summary: [...] } where summary is grouped by op+model.
+    """
+    import google.auth
+    import google.auth.transport.requests as google_requests
+
+    try:
+        # Parse dates and build RFC-3339 timestamps
+        start_dt = dt.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # end is inclusive through end of day
+        end_dt = (dt.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    project_id = CONFIG.get("gcp_project_id", "")
+    if not project_id:
+        raise HTTPException(status_code=503, detail="GCP project ID not configured")
+
+    ts_start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts_end   = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Match both structured jsonPayload (new format) and textPayload (old format)
+    log_filter = (
+        f'(jsonPayload.message="GEMINI_COST_TRACK" OR textPayload:"GEMINI_COST_TRACK") '
+        f'timestamp>="{ts_start}" timestamp<"{ts_end}"'
+    )
+
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/logging.read"])
+        auth_req = google_requests.Request()
+        creds.refresh(auth_req)
+        bearer = creds.token
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not obtain GCP credentials: {e}")
+
+    rows = []
+    next_page_token = None
+    import json as _json_mod
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            body = {
+                "resourceNames": [f"projects/{project_id}"],
+                "filter": log_filter,
+                "orderBy": "timestamp desc",
+                "pageSize": 1000,
+            }
+            if next_page_token:
+                body["pageToken"] = next_page_token
+
+            async with session.post(
+                "https://logging.googleapis.com/v2/entries:list",
+                headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
+                json=body,
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise HTTPException(status_code=502, detail=f"Cloud Logging API error {resp.status}: {text[:400]}")
+                data = await resp.json()
+
+            for entry in data.get("entries", []):
+                # Prefer jsonPayload; fall back to parsing the JSON out of textPayload
+                payload = entry.get("jsonPayload")
+                if not payload:
+                    text_payload = entry.get("textPayload", "")
+                    marker = "GEMINI_COST_TRACK "
+                    idx = text_payload.find(marker)
+                    if idx != -1:
+                        try:
+                            payload = _json_mod.loads(text_payload[idx + len(marker):])
+                        except Exception:
+                            continue
+                if not payload:
+                    continue
+                rows.append({
+                    "timestamp": entry.get("timestamp", ""),
+                    "op":        payload.get("op", ""),
+                    "model":     payload.get("model", ""),
+                    "account":   payload.get("account", ""),
+                    "user":      payload.get("user", ""),
+                    "in_tok":    int(payload.get("in_tok", 0) or 0),
+                    "cache_tok": int(payload.get("cache_tok", 0) or 0),
+                    "out_tok":   int(payload.get("out_tok", 0) or 0),
+                    "total_tok": int(payload.get("total_tok", 0) or 0),
+                    "cost_usd":  float(payload.get("cost_usd", 0) or 0),
+                })
+
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+
+    # Aggregate by op + model
+    agg: Dict[str, Any] = {}
+    for r in rows:
+        key = f"{r['op']}||{r['model']}"
+        if key not in agg:
+            agg[key] = {"op": r["op"], "model": r["model"],
+                        "calls": 0, "in_tok": 0, "cache_tok": 0,
+                        "out_tok": 0, "total_tok": 0, "cost_usd": 0.0}
+        agg[key]["calls"]     += 1
+        agg[key]["in_tok"]    += r["in_tok"]
+        agg[key]["cache_tok"] += r["cache_tok"]
+        agg[key]["out_tok"]   += r["out_tok"]
+        agg[key]["total_tok"] += r["total_tok"]
+        agg[key]["cost_usd"]  += r["cost_usd"]
+
+    summary = sorted(agg.values(), key=lambda x: x["cost_usd"], reverse=True)
+    for s in summary:
+        s["cost_usd"] = round(s["cost_usd"], 6)
+
+    return JSONResponse(content={"rows": rows, "summary": summary, "total_rows": len(rows)})
 
 
 @app.post("/api/admin/users/{user_id}/avatar")
@@ -34285,6 +34499,7 @@ class ApproveLearnedProposalRequest(BaseModel):
     category: str
     value: str
     sentiment: str
+    question: Optional[str] = None
 
 
 class DiscardLearnedProposalRequest(BaseModel):
@@ -34685,7 +34900,8 @@ async def approve_learned_proposal_endpoint(
     if category not in _A7_EXTRACTION_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Unknown category: {category!r}")
     timestamp = dt.utcnow().isoformat()
-    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment)
+    question = (request_data.question or "").strip()
+    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment, question=question)
     # Remove from pending queue
     pending = await _a7_load_pending_proposals(account_id, aac_user_id)
     proposals = pending.get("proposals", [])

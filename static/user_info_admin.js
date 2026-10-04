@@ -2001,6 +2001,7 @@ async function loadPendingProposals() {
         listEl.innerHTML = proposals.map((p, idx) => {
             const escapedVal = (p.value || '').replace(/"/g, '&quot;');
             const escapedCat = (p.category || '').replace(/"/g, '&quot;');
+            const escapedQ = (p.question || '').replace(/"/g, '&quot;');
             const sentiment = (p.sentiment || 'likes');
             const sentimentLabel = sentiment === 'dislikes'
                 ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 ml-1">dislikes</span>'
@@ -2017,7 +2018,7 @@ async function loadPendingProposals() {
                         </div>
                     </div>
                     <div class="flex flex-col gap-1 flex-shrink-0">
-                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
+                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}', '${escapedQ}')"
                             class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded">Approve</button>
                         <button onclick="editPendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
                             class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded pending-edit-btn">Edit</button>
@@ -2035,12 +2036,12 @@ async function loadPendingProposals() {
     }
 }
 
-async function approvePendingProposal(idx, category, value, sentiment) {
+async function approvePendingProposal(idx, category, value, sentiment, question) {
     try {
         const r = await window.authenticatedFetch('/api/learned/approve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, value, sentiment: sentiment || 'likes' }),
+            body: JSON.stringify({ category, value, sentiment: sentiment || 'likes', question: question || '' }),
         });
         if (!r.ok) throw new Error(`${r.status}`);
         await Promise.all([loadPendingProposals(), loadChatDerivedNarrative()]);

@@ -15816,7 +15816,7 @@ ${getTapLanguageDirective()}
                             }
                             
                             _logTapClick(speechText, 'phrase', true);
-                            addToSpeech(speechText);
+                            addToSpeech(speechText, tapFollowUpConversation.originalQuestion || currentQuestion || "");
                             if (!previewDecision.alreadyAnnounced) {
                                 await announce(speechText, "system", true);
                             }
@@ -17151,7 +17151,7 @@ ${getTapLanguageDirective()}
                     _logTapClick(text, isDynamic ? 'dynamic' : 'static', isDynamic);
 
                     if (phraseToAdd) {
-                        addToSpeech(phraseToAdd);
+                        addToSpeech(phraseToAdd, tapFollowUpConversation.originalQuestion || currentQuestion || "");
                     }
                     if (phraseToAnnounce && !previewDecision.alreadyAnnounced) {
                         await announce(phraseToAnnounce, 'system', true);
@@ -18022,17 +18022,17 @@ ${getTapLanguageDirective()}
         }
 
         // Build space functionality
-        function addToSpeech(text) {
+        function addToSpeech(text, questionContext = "") {
             const currentText = buildSpace.value.trim();
             if (currentText) {
                 buildSpace.value = currentText + ' ' + text;
             } else {
                 buildSpace.value = text;
             }
-            
+
             console.log('🎯 Recording chat history for tap selection:', text.trim());
             // Record chat history for user selections
-            recordChatHistory("", text.trim()).catch(error => {
+            recordChatHistory(questionContext, text.trim()).catch(error => {
                 console.error('Failed to record chat history for tap selection:', error);
             });
             
