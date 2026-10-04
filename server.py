@@ -15168,7 +15168,7 @@ async def get_freestyle_word_prediction(
             prompt = f"Given the user context: '{user_context}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         
         # Use LLM to generate predictions
-        response_text = await _generate_gemini_content_with_fallback(prompt)
+        response_text = await _generate_gemini_content_with_fallback(prompt, account_id=account_id, aac_user_id=aac_user_id)
         
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
