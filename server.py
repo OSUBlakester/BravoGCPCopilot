@@ -4999,11 +4999,12 @@ RESPONSE FORMAT: Generate exactly the requested number of completely unique joke
 # ---------------------------------------------------------------------------
 _GEMINI_PRICING: List[Tuple[str, float, float]] = [
     # (model substring, input_per_1m_usd, output_per_1m_usd)
-    ("flash-lite",  0.075, 0.30),
-    ("flash",       0.15,  0.60),
-    ("pro",         1.25,  5.00),
+    # Rates from Vertex AI billing (SKUs 255D-4FF7-8DB3 / EF3E-6ED9-3CD1)
+    ("flash-lite",  0.30,  2.50),
+    ("flash",       0.60,  2.50),
+    ("pro",         3.50, 10.50),
 ]
-_GEMINI_PRICING_CACHE_DISCOUNT = 0.25   # cached input billed at 25 % of full rate
+_GEMINI_PRICING_CACHE_DISCOUNT = 0.10   # cached input billed at 10% of full rate (SKU D1E7-04AD-E5B2)
 
 def _gemini_cost_usd(model_name: str, input_tokens: int, output_tokens: int,
                      cached_tokens: int = 0) -> float:
@@ -24220,10 +24221,10 @@ async def _lookup_images_for_labels(
         # Conjunctions
         'and', 'or', 'but',
         # Prepositions / particles
-        'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
+        'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out','onto'
         'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though', 'as',
         # Possessive adjectives / intensifiers
-        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own',
+        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own','them'
         # Quantifiers / demonstratives acting as articles
         'some', 'any', 'this', 'that', 'these', 'those',
         # Subject pronouns — e.g. "I want", "we can", "you need"
