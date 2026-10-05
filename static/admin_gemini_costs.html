@@ -119,6 +119,63 @@
             </div>
         </div>
 
+        <!-- Summary by User -->
+        <div class="bg-white rounded-xl shadow-sm border">
+            <div class="px-5 py-4 border-b flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-gray-800">
+                    <i class="fas fa-user mr-2 text-purple-500"></i>Summary by User
+                </h2>
+                <button onclick="downloadCSV('user')" class="text-xs text-purple-600 hover:underline">
+                    <i class="fas fa-download mr-1"></i>CSV
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                            <th class="px-4 py-3 text-left">Account</th>
+                            <th class="px-4 py-3 text-left">User</th>
+                            <th class="px-4 py-3 num">Calls</th>
+                            <th class="px-4 py-3 num">Input Tokens</th>
+                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num">Output Tokens</th>
+                            <th class="px-4 py-3 num">Total Tokens</th>
+                            <th class="px-4 py-3 num">Est. Cost (USD)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-body" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Summary by Day -->
+        <div class="bg-white rounded-xl shadow-sm border">
+            <div class="px-5 py-4 border-b flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-gray-800">
+                    <i class="fas fa-calendar-day mr-2 text-purple-500"></i>Summary by Day
+                </h2>
+                <button onclick="downloadCSV('day')" class="text-xs text-purple-600 hover:underline">
+                    <i class="fas fa-download mr-1"></i>CSV
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                            <th class="px-4 py-3 text-left">Date (UTC)</th>
+                            <th class="px-4 py-3 num">Calls</th>
+                            <th class="px-4 py-3 num">Input Tokens</th>
+                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num">Output Tokens</th>
+                            <th class="px-4 py-3 num">Total Tokens</th>
+                            <th class="px-4 py-3 num">Est. Cost (USD)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="day-body" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Detail rows -->
         <div class="bg-white rounded-xl shadow-sm border">
             <div class="px-5 py-4 border-b flex justify-between items-center flex-wrap gap-2">
@@ -249,6 +306,8 @@
 
             renderGrandTotal(summaryData);
             renderSummary(summaryData);
+            renderByUser(allRows);
+            renderByDay(allRows);
             renderDetail(allRows);
             document.getElementById('results').classList.remove('hidden');
 
@@ -316,6 +375,60 @@
             </tr>`).join('');
     }
 
+    // ── Summary by User ──────────────────────────────────────────────────────
+    function renderByUser(rows) {
+        const agg = {};
+        for (const r of rows) {
+            const key = `${r.account}||${r.user}`;
+            if (!agg[key]) agg[key] = { account: r.account, user: r.user, calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 };
+            agg[key].calls++;
+            agg[key].in_tok    += r.in_tok;
+            agg[key].cache_tok += r.cache_tok;
+            agg[key].out_tok   += r.out_tok;
+            agg[key].total_tok += r.total_tok;
+            agg[key].cost_usd  += r.cost_usd;
+        }
+        const sorted = Object.values(agg).sort((a, b) => b.cost_usd - a.cost_usd);
+        document.getElementById('user-body').innerHTML = sorted.map(r => `
+            <tr>
+                <td class="px-4 py-3 text-xs text-gray-700">${esc(r.account)}</td>
+                <td class="px-4 py-3 text-xs text-gray-500">${esc(r.user)}</td>
+                <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-700 font-medium">${r.total_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-semibold text-orange-700">$${r.cost_usd.toFixed(6)}</td>
+            </tr>`).join('');
+    }
+
+    // ── Summary by Day ───────────────────────────────────────────────────────
+    function renderByDay(rows) {
+        const agg = {};
+        for (const r of rows) {
+            const day = (r.timestamp || '').slice(0, 10); // YYYY-MM-DD
+            if (!day) continue;
+            if (!agg[day]) agg[day] = { day, calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 };
+            agg[day].calls++;
+            agg[day].in_tok    += r.in_tok;
+            agg[day].cache_tok += r.cache_tok;
+            agg[day].out_tok   += r.out_tok;
+            agg[day].total_tok += r.total_tok;
+            agg[day].cost_usd  += r.cost_usd;
+        }
+        const sorted = Object.values(agg).sort((a, b) => b.day.localeCompare(a.day));
+        document.getElementById('day-body').innerHTML = sorted.map(r => `
+            <tr>
+                <td class="px-4 py-3 text-sm font-medium text-gray-700">${esc(r.day)}</td>
+                <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num text-gray-700 font-medium">${r.total_tok.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-semibold text-orange-700">$${r.cost_usd.toFixed(6)}</td>
+            </tr>`).join('');
+    }
+
     // ── Detail table ─────────────────────────────────────────────────────────
     function renderDetail(rows) {
         document.getElementById('detail-count').textContent = `(${rows.length.toLocaleString()} rows)`;
@@ -364,6 +477,27 @@
         if (type === 'summary') {
             headers = ['op','model','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
             rows = summaryData.map(r => headers.map(h => r[h]));
+        } else if (type === 'user') {
+            headers = ['account','user','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
+            const agg = {};
+            for (const r of allRows) {
+                const key = `${r.account}||${r.user}`;
+                if (!agg[key]) agg[key] = { account: r.account, user: r.user, calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 };
+                agg[key].calls++; agg[key].in_tok += r.in_tok; agg[key].cache_tok += r.cache_tok;
+                agg[key].out_tok += r.out_tok; agg[key].total_tok += r.total_tok; agg[key].cost_usd += r.cost_usd;
+            }
+            rows = Object.values(agg).sort((a,b) => b.cost_usd - a.cost_usd).map(r => headers.map(h => r[h]));
+        } else if (type === 'day') {
+            headers = ['day','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
+            const agg = {};
+            for (const r of allRows) {
+                const day = (r.timestamp || '').slice(0, 10);
+                if (!day) continue;
+                if (!agg[day]) agg[day] = { day, calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 };
+                agg[day].calls++; agg[day].in_tok += r.in_tok; agg[day].cache_tok += r.cache_tok;
+                agg[day].out_tok += r.out_tok; agg[day].total_tok += r.total_tok; agg[day].cost_usd += r.cost_usd;
+            }
+            rows = Object.values(agg).sort((a,b) => b.day.localeCompare(a.day)).map(r => headers.map(h => r[h]));
         } else {
             headers = ['timestamp','op','model','account','user','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
             rows = allRows.map(r => headers.map(h => r[h]));
