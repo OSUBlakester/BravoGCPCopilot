@@ -3934,14 +3934,27 @@ except Exception as e_genai_config:
 # Vertex AI features (context caching, Google Search grounding).
 logging.info("Initializing Gemini AI Studio client...")
 try:
-    _gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    # Try Secret Manager first (same secret used by the rest of the app),
+    # then fall back to an explicit env var.
+    _gemini_api_key = ""
+    try:
+        from google.cloud import secretmanager as _sm
+        _sm_client = _sm.SecretManagerServiceClient()
+        _secret_name = f"projects/{CONFIG['gcp_project_id']}/secrets/bravo-google-api-key/versions/latest"
+        _sm_response = _sm_client.access_secret_version(request={"name": _secret_name})
+        _gemini_api_key = _sm_response.payload.data.decode("UTF-8").strip()
+        logging.info("Loaded Gemini API key from Secret Manager (bravo-google-api-key)")
+    except Exception as _sm_err:
+        logging.info(f"Secret Manager unavailable ({_sm_err}); trying GEMINI_API_KEY env var")
+        _gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
     if _gemini_api_key:
         _gemini_ai_studio_client = genai.Client(api_key=_gemini_api_key)
-        # AI Studio uses the same model name; strip any Vertex-specific version suffix
+        # AI Studio uses the same model name; strip any Vertex-specific version suffix (e.g. -001)
         _ai_studio_model_name = re.sub(r"-\d{3}$", "", GEMINI_FAST_WORDS_MODEL)
         logging.info(f"Gemini AI Studio client initialized. model={_ai_studio_model_name}")
     else:
-        logging.info("GEMINI_API_KEY not set — AI Studio client disabled; all calls will use Vertex AI")
+        logging.info("No Gemini API key found — AI Studio client disabled; all calls will use Vertex AI")
 except Exception as e_ai_studio:
     logging.warning(f"Could not initialize AI Studio client: {e_ai_studio}")
     _gemini_ai_studio_client = None
