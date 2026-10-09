@@ -106,6 +106,7 @@
                         <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
                             <th class="px-4 py-3 text-left">Operation</th>
                             <th class="px-4 py-3 text-left">Model</th>
+                            <th class="px-4 py-3 text-left">Backend</th>
                             <th class="px-4 py-3 num">Calls</th>
                             <th class="px-4 py-3 num">Input Tokens</th>
                             <th class="px-4 py-3 num">Cached Tokens</th>
@@ -199,6 +200,7 @@
                             <th class="px-4 py-3 text-left">Timestamp (UTC)</th>
                             <th class="px-4 py-3 text-left">Operation</th>
                             <th class="px-4 py-3 text-left">Model</th>
+                            <th class="px-4 py-3 text-left">Backend</th>
                             <th class="px-4 py-3 text-left">Account</th>
                             <th class="px-4 py-3 text-left">User</th>
                             <th class="px-4 py-3 num">In Tok</th>
@@ -359,6 +361,12 @@
             </div>`).join('');
     }
 
+    function backendBadge(b) {
+        if (b === 'ai_studio')  return '<span class="px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">AI Studio</span>';
+        if (b === 'vertex_ai')  return '<span class="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">Vertex AI</span>';
+        return `<span class="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">${esc(b||'?')}</span>`;
+    }
+
     // ── Summary table ────────────────────────────────────────────────────────
     function renderSummary(summary) {
         const tbody = document.getElementById('summary-body');
@@ -366,6 +374,7 @@
             <tr>
                 <td class="px-4 py-3 font-mono text-xs text-gray-700">${esc(r.op)}</td>
                 <td class="px-4 py-3 text-gray-600 text-xs">${esc(r.model)}</td>
+                <td class="px-4 py-3">${backendBadge(r.backend)}</td>
                 <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
@@ -438,6 +447,7 @@
                 <td class="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">${fmtTs(r.timestamp)}</td>
                 <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(r.op)}</td>
                 <td class="px-4 py-2 text-xs text-gray-600">${esc(r.model)}</td>
+                <td class="px-4 py-2">${backendBadge(r.backend)}</td>
                 <td class="px-4 py-2 text-xs text-gray-700">${esc(r.account)}</td>
                 <td class="px-4 py-2 text-xs text-gray-500">${esc(r.user)}</td>
                 <td class="px-4 py-2 num text-xs text-gray-600">${r.in_tok.toLocaleString()}</td>
@@ -461,6 +471,7 @@
                 <td class="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">${fmtTs(r.timestamp)}</td>
                 <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(r.op)}</td>
                 <td class="px-4 py-2 text-xs text-gray-600">${esc(r.model)}</td>
+                <td class="px-4 py-2">${backendBadge(r.backend)}</td>
                 <td class="px-4 py-2 text-xs text-gray-700">${esc(r.account)}</td>
                 <td class="px-4 py-2 text-xs text-gray-500">${esc(r.user)}</td>
                 <td class="px-4 py-2 num text-xs text-gray-600">${r.in_tok.toLocaleString()}</td>
@@ -475,7 +486,7 @@
     function downloadCSV(type) {
         let headers, rows;
         if (type === 'summary') {
-            headers = ['op','model','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
+            headers = ['op','model','backend','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];
             rows = summaryData.map(r => headers.map(h => r[h]));
         } else if (type === 'user') {
             headers = ['account','user','calls','in_tok','cache_tok','out_tok','total_tok','cost_usd'];

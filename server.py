@@ -3877,7 +3877,9 @@ RoutingTarget = Literal["personal", "system", "default"] # 'default' for fallbac
 collection = None # (This will be removed later, still a global variable)
 chroma_client_global = None # NEW: Keep a global chroma client for static db if needed, but per-user client is key.
 sentence_transformer_model = None # DISABLED - not currently used
-_gemini_client: Optional[genai.Client] = None  # Vertex AI client singleton
+_gemini_client: Optional[genai.Client] = None           # Vertex AI client singleton
+_gemini_ai_studio_client: Optional[genai.Client] = None  # AI Studio client (cheaper for high-volume calls)
+_ai_studio_model_name: str = ""
 _primary_model_name: str = ""
 _fallback_model_name: str = ""
 _fast_words_model_name: str = ""
@@ -3927,6 +3929,35 @@ try:
 except Exception as e_genai_config:
     logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
     _gemini_client = None
+
+# AI Studio client — cheaper for high-volume word-generation calls that don't need
+# Vertex AI features (context caching, Google Search grounding).
+logging.info("Initializing Gemini AI Studio client...")
+try:
+    # Try Secret Manager first (same secret used by the rest of the app),
+    # then fall back to an explicit env var.
+    _gemini_api_key = ""
+    try:
+        from google.cloud import secretmanager as _sm
+        _sm_client = _sm.SecretManagerServiceClient()
+        _secret_name = f"projects/{CONFIG['gcp_project_id']}/secrets/bravo-google-api-key/versions/latest"
+        _sm_response = _sm_client.access_secret_version(request={"name": _secret_name})
+        _gemini_api_key = _sm_response.payload.data.decode("UTF-8").strip()
+        logging.info("Loaded Gemini API key from Secret Manager (bravo-google-api-key)")
+    except Exception as _sm_err:
+        logging.info(f"Secret Manager unavailable ({_sm_err}); trying GEMINI_API_KEY env var")
+        _gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
+    if _gemini_api_key:
+        _gemini_ai_studio_client = genai.Client(api_key=_gemini_api_key)
+        # AI Studio uses the same model name; strip any Vertex-specific version suffix (e.g. -001)
+        _ai_studio_model_name = re.sub(r"-\d{3}$", "", GEMINI_FAST_WORDS_MODEL)
+        logging.info(f"Gemini AI Studio client initialized. model={_ai_studio_model_name}")
+    else:
+        logging.info("No Gemini API key found — AI Studio client disabled; all calls will use Vertex AI")
+except Exception as e_ai_studio:
+    logging.warning(f"Could not initialize AI Studio client: {e_ai_studio}")
+    _gemini_ai_studio_client = None
 
 # --- Initialize Google Cloud Text-to-Speech Client ---
 tts_client = None
@@ -4565,13 +4596,15 @@ async def _execute_gemini_call_with_retry(
     base_delay_seconds: float = 0.5,
     max_delay_seconds: float = 20.0,
     model_name: str = "",
+    backend: str = "vertex_ai",
 ):
     attempt = 1
     while attempt <= max_attempts:
         try:
             response = await call_factory()
             if model_name and hasattr(response, 'usage_metadata') and response.usage_metadata:
-                log_token_usage(response, operation_label, account_id, aac_user_id, model_name=model_name)
+                log_token_usage(response, operation_label, account_id, aac_user_id,
+                                model_name=model_name, backend=backend)
             return response
         except Exception as exc:
             is_retryable = _is_retryable_gemini_exception(exc)
@@ -4816,8 +4849,8 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
         logging.error("Empty or whitespace-only prompt provided to fast category-words Gemini path")
         raise HTTPException(status_code=400, detail="Empty prompt provided to LLM")
 
-    _fw_model = _fast_words_model_name or _primary_model_name
-    if not _fw_model or not _gemini_client:
+    _client, _fw_model, _backend = _pick_generation_client()
+    if not _fw_model or not _client:
         logging.warning("Fast category-words model unavailable; falling back to standard Gemini path")
         return await _generate_gemini_content_with_fallback(prompt_text, None, account_id, aac_user_id)
 
@@ -4830,14 +4863,14 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
 
     start_time = time.perf_counter()
     logging.info(
-        f"Attempting fast category-words generation with model: {_fw_model} "
+        f"Attempting fast category-words generation via {_backend} model={_fw_model} "
         f"for {account_id}/{aac_user_id}"
     )
     logging.info(f"Fast category-words prompt length: {len(prompt_text)} characters")
 
     try:
         response = await _execute_gemini_call_with_retry(
-            lambda: _gemini_client.aio.models.generate_content(
+            lambda: _client.aio.models.generate_content(
                 model=_fw_model,
                 contents=prompt_text,
                 config=generation_config,
@@ -4849,6 +4882,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
             base_delay_seconds=0.25,
             model_name=_fw_model,
             max_delay_seconds=2.0,
+            backend=_backend,
         )
 
         response_text = ""
@@ -4999,11 +5033,63 @@ RESPONSE FORMAT: Generate exactly the requested number of completely unique joke
 # ---------------------------------------------------------------------------
 _GEMINI_PRICING: List[Tuple[str, float, float]] = [
     # (model substring, input_per_1m_usd, output_per_1m_usd)
-    ("flash-lite",  0.075, 0.30),
-    ("flash",       0.15,  0.60),
-    ("pro",         1.25,  5.00),
+    # Rates from Vertex AI billing (SKUs 255D-4FF7-8DB3 / EF3E-6ED9-3CD1)
+    ("flash-lite",  0.30,  2.50),
+    ("flash",       0.60,  2.50),
+    ("pro",         3.50, 10.50),
 ]
-_GEMINI_PRICING_CACHE_DISCOUNT = 0.25   # cached input billed at 25 % of full rate
+_GEMINI_PRICING_CACHE_DISCOUNT = 0.10   # cached input billed at 10% of full rate (SKU D1E7-04AD-E5B2)
+
+def _pick_generation_client():
+    """Return (client, model_name, backend) preferring AI Studio for high-volume calls.
+
+    Falls back to Vertex AI when AI Studio is not configured.
+    Never use this for calls that need context caching or Google Search grounding —
+    those must always use _gemini_client (Vertex AI).
+    """
+    if _gemini_ai_studio_client and _ai_studio_model_name:
+        return _gemini_ai_studio_client, _ai_studio_model_name, "ai_studio"
+    fw = _fast_words_model_name or _primary_model_name or ""
+    return _gemini_client, fw, "vertex_ai"
+
+
+async def _generate_content_prefer_ai_studio(
+    prompt_text: str,
+    generation_config: Optional[Dict] = None,
+    account_id: str = "unknown",
+    aac_user_id: str = "unknown",
+) -> str:
+    """Generate content using AI Studio when available, otherwise Vertex AI.
+
+    Use this for high-volume, stateless word/phrase generation that doesn't
+    need context caching or Google Search grounding.
+    """
+    _client, _model, _backend = _pick_generation_client()
+    if _backend == "ai_studio" and _client and _model:
+        cfg = generation_config or {"temperature": 0.7, "max_output_tokens": 1024}
+        try:
+            response = await _execute_gemini_call_with_retry(
+                lambda: _client.aio.models.generate_content(
+                    model=_model,
+                    contents=prompt_text,
+                    config=cfg,
+                ),
+                operation_label=f"gemini_ai_studio:{_model}",
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                max_attempts=3,
+                base_delay_seconds=0.25,
+                model_name=_model,
+                backend=_backend,
+            )
+            text = (response.text or "").strip()
+            if text:
+                return text
+            logging.warning("AI Studio returned empty response; falling back to Vertex AI")
+        except Exception as e:
+            logging.warning(f"AI Studio call failed ({e}); falling back to Vertex AI")
+    return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
+
 
 def _gemini_cost_usd(model_name: str, input_tokens: int, output_tokens: int,
                      cached_tokens: int = 0) -> float:
@@ -5024,7 +5110,7 @@ def _gemini_cost_usd(model_name: str, input_tokens: int, output_tokens: int,
 
 
 def log_token_usage(response, request_type: str, account_id: str, aac_user_id: str,
-                    model_name: str = ""):
+                    model_name: str = "", backend: str = "vertex_ai"):
     """Log token counts, estimated cost, and a structured GEMINI_COST_TRACK entry.
 
     The structured entry is emitted as a single JSON-like line so it can be
@@ -5051,6 +5137,7 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
             "message":   "GEMINI_COST_TRACK",
             "op":        request_type,
             "model":     model_name or "unknown",
+            "backend":   backend,
             "account":   account_id,
             "user":      aac_user_id,
             "in_tok":    new_input_tokens,
@@ -12478,15 +12565,17 @@ async def _a7_extract_preference(utterance: str, question: str = "") -> Optional
         prompt_text = _A7_EXTRACTION_PROMPT_QA.format(question=question.strip(), utterance=utterance)
     else:
         prompt_text = _A7_EXTRACTION_PROMPT.format(utterance=utterance)
+    _a7_client, _a7_model, _a7_backend = _pick_generation_client()
     try:
         response = await _execute_gemini_call_with_retry(
-            lambda: _gemini_client.aio.models.generate_content(
-                model=_fast_words_model_name,
+            lambda: _a7_client.aio.models.generate_content(
+                model=_a7_model,
                 contents=prompt_text,
                 config=config,
             ),
             operation_label="gemini_preference_extraction",
-            model_name=_fast_words_model_name,
+            model_name=_a7_model,
+            backend=_a7_backend,
         )
     except Exception as e:
         logging.error(f"Preference extraction call failed: {e}", exc_info=True)
@@ -15170,8 +15259,8 @@ async def get_freestyle_word_prediction(
         else:
             prompt = f"Given the user context: '{user_context}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         
-        # Use LLM to generate predictions
-        response_text = await _generate_gemini_content_with_fallback(prompt, account_id=account_id, aac_user_id=aac_user_id)
+        # Use LLM to generate predictions (prefers AI Studio for cost savings)
+        response_text = await _generate_content_prefer_ai_studio(prompt, account_id=account_id, aac_user_id=aac_user_id)
         
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
@@ -15468,7 +15557,7 @@ Context for word selection: {contextual_info}"""
         }
         
         logging.warning(f"DEBUG Freestyle API - About to call LLM with freestyle_options={freestyle_options}, prompt length={len(prompt)}")
-        response_text = await _generate_gemini_content_with_fallback(prompt, generation_config, account_id, aac_user_id)
+        response_text = await _generate_content_prefer_ai_studio(prompt, generation_config, account_id, aac_user_id)
         logging.warning(f"DEBUG Freestyle API - LLM response length: {len(response_text)}, content: {response_text[:500]}...")
         
         # Parse options with keywords and ensure uniqueness.
@@ -22582,6 +22671,7 @@ async def get_gemini_costs(
                     "model":     payload.get("model", ""),
                     "account":   payload.get("account", ""),
                     "user":      payload.get("user", ""),
+                    "backend":   payload.get("backend", "vertex_ai"),
                     "in_tok":    int(payload.get("in_tok", 0) or 0),
                     "cache_tok": int(payload.get("cache_tok", 0) or 0),
                     "out_tok":   int(payload.get("out_tok", 0) or 0),
@@ -22593,12 +22683,12 @@ async def get_gemini_costs(
             if not next_page_token:
                 break
 
-    # Aggregate by op + model
+    # Aggregate by op + model + backend
     agg: Dict[str, Any] = {}
     for r in rows:
-        key = f"{r['op']}||{r['model']}"
+        key = f"{r['op']}||{r['model']}||{r['backend']}"
         if key not in agg:
-            agg[key] = {"op": r["op"], "model": r["model"],
+            agg[key] = {"op": r["op"], "model": r["model"], "backend": r["backend"],
                         "calls": 0, "in_tok": 0, "cache_tok": 0,
                         "out_tok": 0, "total_tok": 0, "cost_usd": 0.0}
         agg[key]["calls"]     += 1
@@ -24220,10 +24310,10 @@ async def _lookup_images_for_labels(
         # Conjunctions
         'and', 'or', 'but',
         # Prepositions / particles
-        'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
+        'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out','onto'
         'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though', 'as',
         # Possessive adjectives / intensifiers
-        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own',
+        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own','them'
         # Quantifiers / demonstratives acting as articles
         'some', 'any', 'this', 'that', 'these', 'those',
         # Subject pronouns — e.g. "I want", "we can", "you need"
