@@ -807,41 +807,98 @@
                 <i class="fas fa-envelope mr-2 text-blue-500"></i>Email Settings
             </h2>
 
-            <!-- Gmail Connection -->
-            <div class="mb-6">
-                <h3 class="text-lg font-semibold text-gray-700 mb-3">Gmail Connection</h3>
-                <div class="flex items-center gap-3 mb-3">
-                    <span class="text-sm font-medium text-gray-600">Status:</span>
-                    <span id="email-provider-status" class="text-sm font-semibold text-gray-500">Checking…</span>
-                </div>
-                <div class="flex flex-wrap gap-3 mb-4">
-                    <button type="button" id="refreshEmailStatusButton"
-                        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-gray-400 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400">
-                        <i class="fas fa-sync-alt"></i> Refresh Status
-                    </button>
-                    <button type="button" id="connectEmailButton"
-                        class="inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-green-600 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm shadow-md transition-colors focus:outline-none focus:ring-2 focus:ring-green-500">
-                        <i class="fas fa-link"></i> Connect Gmail
-                    </button>
-                    <button type="button" id="disconnectEmailButton"
-                        class="inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-red-600 bg-white hover:bg-red-50 text-red-600 font-semibold text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-red-400">
-                        <i class="fas fa-unlink"></i> Disconnect Gmail
-                    </button>
+            <!-- Status Row -->
+            <div class="flex items-center gap-3 mb-4">
+                <span class="text-sm font-medium text-gray-600">Status:</span>
+                <span id="email-provider-status" class="text-sm font-semibold text-gray-500">Checking…</span>
+                <button type="button" id="refreshEmailStatusButton"
+                    class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-400 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-xs shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+
+            <!-- Provider Selector -->
+            <div class="mb-5">
+                <p class="text-sm font-medium text-gray-700 mb-2">Email Provider</p>
+                <div class="flex gap-6">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="emailProvider" value="gmail" id="emailProviderGmail" class="text-blue-600">
+                        <span class="text-sm font-medium text-gray-700"><i class="fab fa-google mr-1"></i>Gmail</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="emailProvider" value="yahoo" id="emailProviderYahoo" class="text-purple-600">
+                        <span class="text-sm font-medium text-gray-700"><i class="fab fa-yahoo mr-1"></i>Yahoo Mail</span>
+                    </label>
                 </div>
             </div>
 
-            <!-- Server Prerequisites -->
+            <!-- Gmail Panel -->
+            <div id="email-gmail-panel" class="mb-4">
+                <div class="max-w-md space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="gmailEmailAddress">Gmail Address</label>
+                        <input type="email" id="gmailEmailAddress" placeholder="you@gmail.com"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="gmailAppPassword">Gmail App Password</label>
+                        <input type="password" id="gmailAppPassword" placeholder="App password (not your Google password)"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <p class="text-xs text-gray-500 mt-1">
+                            Requires 2-Step Verification. Generate in Google Account → Security → 2-Step Verification → <strong>App passwords</strong>.
+                        </p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button type="button" id="connectEmailButton"
+                            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-blue-600 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <i class="fas fa-link"></i> Connect Gmail
+                        </button>
+                        <button type="button" id="disconnectEmailButton" class="hidden inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-red-600 bg-white hover:bg-red-50 text-red-600 font-semibold text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-red-400">
+                            <i class="fas fa-unlink"></i> Disconnect
+                        </button>
+                    </div>
+                    <div id="gmail-connect-status" class="text-sm hidden"></div>
+                </div>
+            </div>
+
+            <!-- Yahoo Panel -->
+            <div id="email-yahoo-panel" class="mb-4 hidden">
+                <div class="max-w-md space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="yahooEmailAddress">Yahoo Email Address</label>
+                        <input type="email" id="yahooEmailAddress" placeholder="you@yahoo.com"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" for="yahooAppPassword">Yahoo App Password</label>
+                        <input type="password" id="yahooAppPassword" placeholder="App password (not your Yahoo password)"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        <p class="text-xs text-gray-500 mt-1">
+                            Generate in Yahoo Account Security → <strong>Generate app password</strong>.
+                            Do not use your regular Yahoo sign-in password.
+                        </p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button type="button" id="connectYahooButton"
+                            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-purple-600 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-sm shadow-md transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            <i class="fas fa-link"></i> Connect Yahoo
+                        </button>
+                        <button type="button" id="disconnectYahooButton" class="hidden inline-flex items-center gap-2 px-5 py-2 rounded-lg border-2 border-red-600 bg-white hover:bg-red-50 text-red-600 font-semibold text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-red-400">
+                            <i class="fas fa-unlink"></i> Disconnect
+                        </button>
+                    </div>
+                    <div id="yahoo-connect-status" class="text-sm hidden"></div>
+                </div>
+            </div>
+
+            <!-- Server Prerequisites (App Password only needs EMAIL_TOKEN_ENCRYPTION_KEY) -->
             <div id="email-server-prereq" class="bg-amber-50 border border-amber-300 rounded-lg p-4 hidden">
                 <h4 class="text-sm font-bold text-amber-800 mb-2"><i class="fas fa-exclamation-triangle mr-1"></i>Server Setup Required</h4>
-                <p class="text-xs text-amber-700 mb-3">Before Gmail can be connected, the following environment variables must be set on the server:</p>
+                <p class="text-xs text-amber-700 mb-3">The following environment variable must be set on the server to encrypt stored App Passwords:</p>
                 <ul class="text-xs text-amber-700 space-y-1 font-mono">
-                    <li><span class="font-bold">GOOGLE_OAUTH_CLIENT_ID</span> — Google Cloud OAuth 2.0 client ID</li>
-                    <li><span class="font-bold">GOOGLE_OAUTH_CLIENT_SECRET</span> — Google Cloud OAuth 2.0 client secret</li>
-                    <li><span class="font-bold">EMAIL_OAUTH_STATE_SECRET</span> — random secret string for state verification</li>
                     <li><span class="font-bold">EMAIL_TOKEN_ENCRYPTION_KEY</span> — Fernet key (<code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code>)</li>
-                    <li><span class="font-bold">EMAIL_OAUTH_REDIRECT_URI</span> — (optional) defaults to <code>{origin}/api/email/oauth/callback</code></li>
                 </ul>
-                <p class="text-xs text-amber-700 mt-3">Add these to your <code>.env</code> file or Cloud Run environment variables, then restart the server.</p>
+                <p class="text-xs text-amber-700 mt-3">Add this to your <code>.env</code> file or Cloud Run environment variables, then restart the server.</p>
             </div>
         </div>
 

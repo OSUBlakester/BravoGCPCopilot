@@ -131,6 +131,7 @@ import random
 import aiohttp
 import asyncio
 from urllib.parse import urljoin, urlparse
+import smtplib
 from email.utils import parseaddr
 from email.message import EmailMessage
 import uuid
@@ -11877,6 +11878,7 @@ class FriendFamilyEntry(BaseModel):
     relationship: str = Field(..., min_length=1)
     about: str = Field(default="", description="Information about this person")
     birthday: Optional[str] = Field(default=None, description="Birthday in MM-DD format")
+    email: Optional[str] = Field(default=None, description="Email address for Independent Email feature")
 
     @field_validator('birthday')
     @classmethod
@@ -15778,11 +15780,22 @@ DEFAULT_EMAIL_PROVIDER_STATE = {
     "token_expires_at": None,
     "scope": [],
     "last_error": None,
+    "smtp_password_encrypted": None,
 }
 
 
 class EmailConnectUrlRequest(BaseModel):
-    provider: Literal["gmail"] = Field(default="gmail")
+    provider: Literal["gmail", "yahoo"] = Field(default="gmail")
+
+
+class GmailConnectRequest(BaseModel):
+    email_address: str = Field(..., description="Gmail address")
+    app_password: str = Field(..., description="Gmail App Password")
+
+
+class YahooConnectRequest(BaseModel):
+    email_address: str = Field(..., description="Yahoo email address")
+    app_password: str = Field(..., description="Yahoo App Password")
 
 
 class EmailSendRequest(BaseModel):
@@ -16521,14 +16534,24 @@ async def get_email_status(current_ids: Annotated[Dict[str, str], Depends(get_cu
     aac_user_id = current_ids["aac_user_id"]
 
     state = await _load_email_provider_state(account_id, aac_user_id)
+    active_provider = state.get("provider", "gmail")
+    is_yahoo = active_provider == "yahoo"
+    is_gmail = not is_yahoo
+
     provider_status = {
         "gmail": {
-            "connected": bool(state.get("connected")),
-            "email_address": state.get("email_address"),
-            "connected_at": state.get("connected_at"),
-            "has_refresh_token": bool(_state_refresh_token(state)),
-            "scope": state.get("scope") or [],
-        }
+            "connected": bool(state.get("connected")) and is_gmail,
+            "email_address": state.get("email_address") if is_gmail else None,
+            "connected_at": state.get("connected_at") if is_gmail else None,
+            "has_app_password": bool(state.get("smtp_password_encrypted")) if is_gmail else False,
+        },
+        "yahoo": {
+            "connected": bool(state.get("connected")) and is_yahoo,
+            "email_address": state.get("email_address") if is_yahoo else None,
+            "connected_at": state.get("connected_at") if is_yahoo else None,
+            "has_app_password": bool(state.get("smtp_password_encrypted")) if is_yahoo else False,
+        },
+        "active_provider": active_provider,
     }
 
     return JSONResponse(content={"provider_status": provider_status})
@@ -16568,6 +16591,102 @@ async def get_email_connect_url(
     }
     connect_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(auth_query)}"
     return JSONResponse(content={"connect_url": connect_url})
+
+
+@app.post("/api/email/connect-gmail")
+async def connect_gmail_email(
+    request: GmailConnectRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    email_address = request.email_address.strip()
+    app_password = request.app_password.strip()
+
+    if not email_address or "@" not in email_address:
+        raise HTTPException(status_code=400, detail="Invalid Gmail address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="App password is required")
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(email_address, app_password)
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=400, detail="Gmail authentication failed — check email address and App Password. Ensure 2-Step Verification is enabled on your Google account.")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not connect to Gmail SMTP: {exc}")
+
+    next_state = await _load_email_provider_state(account_id, aac_user_id)
+    next_state.update(
+        {
+            "provider": "gmail",
+            "connected": True,
+            "connected_at": dt.now(timezone.utc).isoformat(),
+            "email_address": email_address,
+            "smtp_password_encrypted": _encrypt_email_token(app_password),
+            "token_encrypted": None,
+            "refresh_token_encrypted": None,
+            "token": None,
+            "refresh_token": None,
+            "token_expires_at": None,
+            "scope": [],
+            "last_error": None,
+        }
+    )
+    await _save_email_provider_state(account_id, aac_user_id, next_state)
+
+    return JSONResponse(content={"status": "connected", "provider": "gmail", "email_address": email_address})
+
+
+@app.post("/api/email/connect-yahoo")
+async def connect_yahoo_email(
+    request: YahooConnectRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    email_address = request.email_address.strip()
+    app_password = request.app_password.strip()
+
+    if not email_address or "@" not in email_address:
+        raise HTTPException(status_code=400, detail="Invalid Yahoo email address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="App password is required")
+
+    try:
+        with smtplib.SMTP("smtp.mail.yahoo.com", 587, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(email_address, app_password)
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=400, detail="Yahoo authentication failed — check email address and App Password")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not connect to Yahoo SMTP: {exc}")
+
+    next_state = await _load_email_provider_state(account_id, aac_user_id)
+    next_state.update(
+        {
+            "provider": "yahoo",
+            "connected": True,
+            "connected_at": dt.now(timezone.utc).isoformat(),
+            "email_address": email_address,
+            "smtp_password_encrypted": _encrypt_email_token(app_password),
+            "token_encrypted": None,
+            "refresh_token_encrypted": None,
+            "token": None,
+            "refresh_token": None,
+            "token_expires_at": None,
+            "scope": [],
+            "last_error": None,
+        }
+    )
+    await _save_email_provider_state(account_id, aac_user_id, next_state)
+
+    return JSONResponse(content={"status": "connected", "provider": "yahoo", "email_address": email_address})
 
 
 @app.get("/api/email/oauth/callback")
@@ -17003,8 +17122,9 @@ async def send_email_message(
 
     provider_state = await _load_email_provider_state(account_id, aac_user_id)
     from_address = provider_state.get("email_address")
+    active_provider = provider_state.get("provider", "gmail")
     if not from_address:
-        raise HTTPException(status_code=400, detail="Connected Gmail address is missing")
+        raise HTTPException(status_code=400, detail="No connected email address — connect an email provider first")
 
     message = EmailMessage()
     message["From"] = from_address
@@ -17022,26 +17142,30 @@ async def send_email_message(
         message["References"] = clean_references
     message.set_content(request.body or "")
 
-    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
-    send_payload: Dict[str, Any] = {"raw": encoded_message}
-    clean_thread_id = _clean_header_token(request.thread_id)
-    if clean_thread_id:
-        send_payload["threadId"] = clean_thread_id
-    send_result = await _gmail_post_json(
-        account_id,
-        aac_user_id,
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        payload=send_payload,
-    )
+    smtp_host = "smtp.mail.yahoo.com" if active_provider == "yahoo" else "smtp.gmail.com"
+    smtp_password = _decrypt_email_token(provider_state.get("smtp_password_encrypted"))
+    if not smtp_password:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{active_provider.title()} App Password not found — reconnect email provider",
+        )
 
-    return JSONResponse(
-        content={
-            "status": "sent",
-            "id": send_result.get("id"),
-            "thread_id": send_result.get("threadId"),
-            "label_ids": send_result.get("labelIds", []),
-        }
-    )
+    try:
+        with smtplib.SMTP(smtp_host, 587, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(from_address, smtp_password)
+            all_recipients = [r for r in (request.to + request.cc + request.bcc) if r]
+            smtp.sendmail(from_address, all_recipients, message.as_bytes())
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(
+            status_code=401,
+            detail=f"{active_provider.title()} authentication failed — App Password may have expired",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{active_provider.title()} SMTP send failed: {exc}")
+
+    return JSONResponse(content={"status": "sent", "provider": active_provider})
 
 
 @app.post("/api/email/disconnect")
@@ -17052,21 +17176,7 @@ async def disconnect_email_provider(
     aac_user_id = current_ids["aac_user_id"]
 
     state = await _load_email_provider_state(account_id, aac_user_id)
-    refresh_token = _state_refresh_token(state)
-    access_token = _state_access_token(state)
-    token_for_revoke = refresh_token or access_token
-
-    if token_for_revoke:
-        try:
-            await _async_http_request_json(
-                "POST",
-                "https://oauth2.googleapis.com/revoke",
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={"token": token_for_revoke},
-                timeout_seconds=15,
-            )
-        except Exception:
-            logging.warning("Failed to revoke Google token during disconnect", exc_info=True)
+    active_provider = state.get("provider", "gmail")
 
     await _save_email_provider_state(
         account_id,
@@ -17079,7 +17189,7 @@ async def disconnect_email_provider(
         },
     )
 
-    return JSONResponse(content={"status": "disconnected", "provider": EMAIL_PROVIDER_NAME})
+    return JSONResponse(content={"status": "disconnected", "provider": active_provider})
 
 
 # ===== BRAVO EMAIL PHASE 2 END (WEB APP REVIEW BLOCK) =====

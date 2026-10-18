@@ -129,6 +129,12 @@ const emailServerPrereqEl = document.getElementById('email-server-prereq');
 const refreshEmailStatusButton = document.getElementById('refreshEmailStatusButton');
 const connectEmailButton = document.getElementById('connectEmailButton');
 const disconnectEmailButton = document.getElementById('disconnectEmailButton');
+const connectYahooButton = document.getElementById('connectYahooButton');
+const disconnectYahooButton = document.getElementById('disconnectYahooButton');
+const emailGmailPanel = document.getElementById('email-gmail-panel');
+const emailYahooPanel = document.getElementById('email-yahoo-panel');
+const gmailConnectStatus = document.getElementById('gmail-connect-status');
+const yahooConnectStatus = document.getElementById('yahoo-connect-status');
 const exportProfileSettingsButton = document.getElementById('exportProfileSettingsButton');
 const importProfileSettingsButton = document.getElementById('importProfileSettingsButton');
 const importProfileSettingsFileInput = document.getElementById('importProfileSettingsFileInput');
@@ -857,6 +863,17 @@ async function loadSettings() {
     }
 }
 
+function _getSelectedEmailProvider() {
+    const checked = document.querySelector('input[name="emailProvider"]:checked');
+    return checked ? checked.value : 'gmail';
+}
+
+function _showEmailProviderPanel(provider) {
+    if (emailGmailPanel) emailGmailPanel.classList.toggle('hidden', provider !== 'gmail');
+    if (emailYahooPanel) emailYahooPanel.classList.toggle('hidden', provider !== 'yahoo');
+    if (emailServerPrereqEl && provider !== 'gmail') emailServerPrereqEl.classList.add('hidden');
+}
+
 async function loadEmailProviderStatus() {
     if (!emailProviderStatusEl || !window.authenticatedFetch) return;
 
@@ -864,74 +881,123 @@ async function loadEmailProviderStatus() {
     emailProviderStatusEl.style.color = '#4b5563';
     if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
 
-    // First check Firestore connection state
-    let connected = false;
-    let address = '';
+    let providerStatus = null;
     try {
         const response = await window.authenticatedFetch('/api/email/status');
         if (response.ok) {
             const statusData = await response.json();
-            const gmailStatus = statusData?.provider_status?.gmail || {};
-            connected = gmailStatus.connected === true;
-            address = gmailStatus.email_address || '';
+            providerStatus = statusData?.provider_status || {};
         }
-    } catch (_) { /* fall through to config probe */ }
+    } catch (_) { /* fall through */ }
 
-    if (connected) {
+    const activeProvider = providerStatus?.active_provider || 'gmail';
+    const gmailStatus = providerStatus?.gmail || {};
+    const yahooStatus = providerStatus?.yahoo || {};
+
+    // Sync the radio button to what the server says is the active provider
+    const radioToSelect = document.getElementById(activeProvider === 'yahoo' ? 'emailProviderYahoo' : 'emailProviderGmail');
+    if (radioToSelect) radioToSelect.checked = true;
+    _showEmailProviderPanel(activeProvider);
+
+    const gmailConnected = activeProvider === 'gmail' && gmailStatus.connected;
+    const yahooConnected = activeProvider === 'yahoo' && yahooStatus.connected;
+
+    if (gmailConnected) {
         emailProviderStatusEl.style.color = '#047857';
-        emailProviderStatusEl.textContent = `✓ Connected${address ? ` as ${address}` : ''}`;
+        emailProviderStatusEl.textContent = `✓ Connected${gmailStatus.email_address ? ` as ${gmailStatus.email_address}` : ''} (Gmail)`;
+        if (connectEmailButton) connectEmailButton.classList.add('hidden');
+        if (disconnectEmailButton) disconnectEmailButton.classList.remove('hidden');
+        const addrInput = document.getElementById('gmailEmailAddress');
+        if (addrInput && gmailStatus.email_address) addrInput.value = gmailStatus.email_address;
         if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
         return;
     }
 
-    // Probe whether server OAuth credentials are configured by calling connect-url
-    // (400/500 vs 200 tells us if env vars are missing)
-    try {
-        const probeResp = await window.authenticatedFetch('/api/email/connect-url', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: 'gmail' })
-        });
-        if (!probeResp.ok) {
-            const errText = await probeResp.text().catch(() => '');
-            if (errText.includes('Missing Google OAuth') || probeResp.status === 500) {
-                emailProviderStatusEl.style.color = '#92400e';
-                emailProviderStatusEl.textContent = '⚠ Server not configured — see setup requirements below';
-                if (emailServerPrereqEl) emailServerPrereqEl.classList.remove('hidden');
-                return;
-            }
-        }
-        // connect-url returned OK, meaning config is present but no account linked yet
-        emailProviderStatusEl.style.color = '#1d4ed8';
-        emailProviderStatusEl.textContent = 'Not connected — click Connect Gmail to authorize';
-        if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
-    } catch (_) {
-        emailProviderStatusEl.style.color = '#1d4ed8';
-        emailProviderStatusEl.textContent = 'Not connected — click Connect Gmail to authorize';
-        if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
+    if (yahooConnected) {
+        emailProviderStatusEl.style.color = '#047857';
+        emailProviderStatusEl.textContent = `✓ Connected${yahooStatus.email_address ? ` as ${yahooStatus.email_address}` : ''} (Yahoo)`;
+        if (connectYahooButton) connectYahooButton.classList.add('hidden');
+        if (disconnectYahooButton) disconnectYahooButton.classList.remove('hidden');
+        const addrInput = document.getElementById('yahooEmailAddress');
+        if (addrInput && yahooStatus.email_address) addrInput.value = yahooStatus.email_address;
+        return;
     }
+
+    // Not connected
+    emailProviderStatusEl.style.color = '#1d4ed8';
+    emailProviderStatusEl.textContent = activeProvider === 'yahoo'
+        ? 'Not connected — enter Yahoo email and App Password below'
+        : 'Not connected — enter Gmail address and App Password below';
+    if (connectEmailButton) connectEmailButton.classList.remove('hidden');
+    if (disconnectEmailButton) disconnectEmailButton.classList.add('hidden');
+    if (connectYahooButton) connectYahooButton.classList.remove('hidden');
+    if (disconnectYahooButton) disconnectYahooButton.classList.add('hidden');
 }
 
-async function connectEmailProvider() {
-    const response = await window.authenticatedFetch('/api/email/connect-url', {
+async function connectGmailEmail() {
+    const emailAddress = (document.getElementById('gmailEmailAddress')?.value || '').trim();
+    const appPassword = (document.getElementById('gmailAppPassword')?.value || '').trim();
+
+    if (!emailAddress) throw new Error('Enter your Gmail address');
+    if (!appPassword) throw new Error('Enter your Gmail App Password');
+
+    if (gmailConnectStatus) {
+        gmailConnectStatus.textContent = 'Connecting…';
+        gmailConnectStatus.style.color = '#4b5563';
+        gmailConnectStatus.classList.remove('hidden');
+    }
+
+    const response = await window.authenticatedFetch('/api/email/connect-gmail', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'gmail' })
+        body: JSON.stringify({ email_address: emailAddress, app_password: appPassword })
     });
+
     if (!response.ok) {
-        const text = await response.text().catch(() => 'Unable to create Gmail connect URL');
-        if (text.includes('Missing Google OAuth') || response.status === 500) {
-            throw new Error('Server OAuth credentials are not configured. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET to your .env file, then restart the server.');
-        }
+        const text = await response.text().catch(() => 'Unable to connect Gmail');
         throw new Error(text);
     }
 
-    const data = await response.json();
-    if (!data?.connect_url) {
-        throw new Error('Missing Gmail connect URL');
+    if (gmailConnectStatus) {
+        gmailConnectStatus.textContent = '✓ Gmail connected';
+        gmailConnectStatus.style.color = '#047857';
+    }
+    const pwInput = document.getElementById('gmailAppPassword');
+    if (pwInput) pwInput.value = '';
+    await loadEmailProviderStatus();
+}
+
+async function connectYahooEmail() {
+    const emailAddress = (document.getElementById('yahooEmailAddress')?.value || '').trim();
+    const appPassword = (document.getElementById('yahooAppPassword')?.value || '').trim();
+
+    if (!emailAddress) throw new Error('Enter your Yahoo email address');
+    if (!appPassword) throw new Error('Enter your Yahoo App Password');
+
+    if (yahooConnectStatus) {
+        yahooConnectStatus.textContent = 'Connecting…';
+        yahooConnectStatus.style.color = '#4b5563';
+        yahooConnectStatus.classList.remove('hidden');
     }
 
-    window.location.href = data.connect_url;
+    const response = await window.authenticatedFetch('/api/email/connect-yahoo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email_address: emailAddress, app_password: appPassword })
+    });
+
+    if (!response.ok) {
+        const text = await response.text().catch(() => 'Unable to connect Yahoo');
+        throw new Error(text);
+    }
+
+    if (yahooConnectStatus) {
+        yahooConnectStatus.textContent = '✓ Yahoo connected';
+        yahooConnectStatus.style.color = '#047857';
+    }
+    const pwInput = document.getElementById('yahooAppPassword');
+    if (pwInput) pwInput.value = '';
+    await loadEmailProviderStatus();
 }
 
 async function disconnectEmailProvider() {
@@ -940,7 +1006,7 @@ async function disconnectEmailProvider() {
         headers: { 'Content-Type': 'application/json' }
     });
     if (!response.ok) {
-        const text = await response.text().catch(() => 'Unable to disconnect Gmail');
+        const text = await response.text().catch(() => 'Unable to disconnect');
         throw new Error(text);
     }
 
@@ -2052,8 +2118,13 @@ async function initializePage() {
         }
         if (connectEmailButton) {
             connectEmailButton.addEventListener('click', () => {
-                connectEmailProvider().catch((error) => {
-                    showTemporaryStatus(settingsStatus, `Email connect error: ${error.message}`, true, 4000);
+                connectGmailEmail().catch((error) => {
+                    if (gmailConnectStatus) {
+                        gmailConnectStatus.textContent = `Error: ${error.message}`;
+                        gmailConnectStatus.style.color = '#dc2626';
+                        gmailConnectStatus.classList.remove('hidden');
+                    }
+                    showTemporaryStatus(settingsStatus, `Gmail connect error: ${error.message}`, true, 4000);
                 });
             });
         }
@@ -2064,6 +2135,30 @@ async function initializePage() {
                 });
             });
         }
+        if (connectYahooButton) {
+            connectYahooButton.addEventListener('click', () => {
+                connectYahooEmail().catch((error) => {
+                    if (yahooConnectStatus) {
+                        yahooConnectStatus.textContent = `Error: ${error.message}`;
+                        yahooConnectStatus.style.color = '#dc2626';
+                        yahooConnectStatus.classList.remove('hidden');
+                    }
+                    showTemporaryStatus(settingsStatus, `Yahoo connect error: ${error.message}`, true, 4000);
+                });
+            });
+        }
+        if (disconnectYahooButton) {
+            disconnectYahooButton.addEventListener('click', () => {
+                disconnectEmailProvider().catch((error) => {
+                    showTemporaryStatus(settingsStatus, `Email disconnect error: ${error.message}`, true, 4000);
+                });
+            });
+        }
+        document.querySelectorAll('input[name="emailProvider"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                _showEmailProviderPanel(radio.value);
+            });
+        });
         if (exportProfileSettingsButton) {
             exportProfileSettingsButton.addEventListener('click', () => {
                 exportProfileSettings().catch((error) => {

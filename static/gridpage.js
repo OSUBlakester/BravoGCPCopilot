@@ -235,6 +235,9 @@ function updateSpeechHistoryPanel() {
     const textarea = document.getElementById('speech-history');
     if (!label || !textarea) return;
 
+    // IE email flow manages this panel directly — don't overwrite it
+    if (ieFlowActive) return;
+
     if (isComposeSessionActive()) {
         label.textContent = isEmailSessionActive() ? 'Email:' : 'Create:';
         textarea.value = String(composeSession.text || '');
@@ -2942,347 +2945,636 @@ async function startGmailConnectFlow() {
     window.location.href = data.connect_url;
 }
 
-async function renderEmailEntryMenu(container, fromUrl) {
-    stopAuditoryScanning();
-    container.innerHTML = '';
-    updateEmailQuestionDisplay('Email: Choose an option');
+// ── Independent Email state ───────────────────────────────────────────────────
+let ieFlowActive = false;      // true while IE email flow is on-screen
+let ieContacts = [];
+let ieSelectedContact = null;
+let ieConversationLines = [];
+let ieRecentEmailContent = '';
+let ieHadRecentEmail = false;
+let ieLastLLMOptions = [];
+let ieCurrentScreen = 'contactPicker';
+let ieFromUrl = null;
 
-    const options = [
-        {
-            label: 'Home',
-            handler: async () => {
-                clearEmailSession();
-                window.location.href = fromUrl || 'gridpage.html?page=home';
-            }
-        },
-        {
-            label: 'Create New Email',
-            handler: async () => {
-                await renderEmailContactsMenu(container, fromUrl);
-            }
-        },
-        {
-            label: 'Read Existing Email',
-            handler: async () => {
-                await renderEmailInboxMenu(container, fromUrl);
-            }
-        }
-    ];
+// IE wake word state
+let ieWakeWordInterjection = 'hey';
+let ieWakeWordName = 'bravo';
+let ieRecognition = null;
+let ieListeningMode = null;
+let iePartnerTranscript = '';
+let ieWakeWordTimeout = null;
+let iePartnerSilenceTimer = null;
+let iePartnerHardTimer = null;
+let iePartnerNoSpeechTimer = null;
+let iePartnerSpeechStarted = false;
 
-    options.forEach((option, index) => {
-        container.appendChild(createComposeGridButton(option.label, option.handler, index));
-    });
+function ieGetWakePhrase() { return `${ieWakeWordInterjection} ${ieWakeWordName}`; }
 
-    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-entry-menu' }), 50);
+function ieMatchesWakeWord(transcript) {
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const t = norm(transcript);
+    const w = norm(ieGetWakePhrase());
+    return t.includes(w) || t.replace(/ /g, '').includes(w.replace(/ /g, ''));
 }
 
-async function renderEmailContactsMenu(container, fromUrl, selectedContacts = [], pageToken = null) {
-    stopAuditoryScanning();
-    container.innerHTML = '';
-    const selectionCount = selectedContacts.length;
-    const displayTitle = selectionCount > 0
-        ? `Email: Add another contact (${selectionCount} selected)`
-        : 'Email: Choose a contact';
-    updateEmailQuestionDisplay(displayTitle);
+function ieContactContext() {
+    if (!ieSelectedContact) return '';
+    const parts = [];
+    if (ieSelectedContact.relationship) parts.push(`Relationship: ${ieSelectedContact.relationship}`);
+    if (ieSelectedContact.about) parts.push(`About them: ${ieSelectedContact.about}`);
+    if (ieSelectedContact.birthday) parts.push(`Birthday: ${ieSelectedContact.birthday}`);
+    return parts.join('. ');
+}
 
-    const pageSize = Math.max(4, LLMOptions);
-    let contacts = [];
-    let nextPageToken = null;
-    let loadError = null;
-    let usingInboxFallback = false;
-    try {
-        const contactsUrl = new URL('/api/email/contacts', window.location.origin);
-        contactsUrl.searchParams.set('max_results', String(pageSize));
-        if (pageToken) contactsUrl.searchParams.set('page_token', pageToken);
-        const response = await authenticatedFetch(`${contactsUrl.pathname}${contactsUrl.search}`, { method: 'GET' });
-        if (response.ok) {
-            const data = await response.json();
-            contacts = Array.isArray(data.contacts) ? data.contacts : [];
-            nextPageToken = String(data.next_page_token || '').trim() || null;
-        } else {
-            loadError = `Unable to load contacts (${response.status})`;
-        }
-    } catch (error) {
-        loadError = error.message || 'Unable to load contacts';
+function ieBuildPrompt(type) {
+    const name = ieSelectedContact ? ieSelectedContact.name : 'your contact';
+    const ctx = ieContactContext();
+    const convo = ieConversationLines.length ? `Conversation so far:\n${ieConversationLines.join('\n')}` : '';
+    const count = `Generate up to ${LLMOptions} options.`;
+    const format = `Format as a JSON list: [{"option": "full text", "summary": "short label"}, ...]. For "summary": 3-5 word label; if option is 5 words or less use full text.`;
+
+    if (type === 'reply') {
+        const parts = [`The user wants to reply to an email from ${name}.`];
+        if (ctx) parts.push(`Contact info: ${ctx}`);
+        if (ieRecentEmailContent) parts.push(`Their recent email: "${ieRecentEmailContent}"`);
+        if (convo) parts.push(convo);
+        parts.push('Generate short, natural, complete email reply options ready to send.', count, format);
+        return parts.join('\n');
     }
+    if (type === 'new_topic') {
+        const parts = [`The user wants to start a new email to ${name}.`];
+        if (ctx) parts.push(`Contact info: ${ctx}.`);
+        parts.push('Generate short, friendly opening email message options ready to send.', count, format);
+        return parts.join('\n');
+    }
+    if (type === 'follow_up') {
+        const parts = [`The user is composing an email to ${name}.`];
+        if (ctx) parts.push(`Contact info: ${ctx}`);
+        if (convo) parts.push(convo);
+        if (ieLastLLMOptions.length) {
+            const excluded = ieLastLLMOptions.map(o => o.fullText).filter(Boolean).join('; ');
+            if (excluded) parts.push(`Do not repeat: ${excluded}`);
+        }
+        parts.push('Generate short follow-up email message options to continue the email.', count, format);
+        return parts.join('\n');
+    }
+    if (type === 'something_else') {
+        const base = ieBuildPrompt(ieHadRecentEmail ? 'reply' : 'new_topic');
+        const excluded = ieLastLLMOptions.map(o => o.fullText).filter(Boolean).join('; ');
+        return base + (excluded ? `\nThe user did not like these options: ${excluded}. Generate completely different alternatives.` : '');
+    }
+    return '';
+}
 
-    if (loadError || !contacts.length) {
+async function ieCallLLM(prompt) {
+    const resp = await authenticatedFetch('/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+    });
+    if (!resp.ok) throw new Error(`LLM error ${resp.status}`);
+    const data = await resp.json();
+    return (Array.isArray(data) ? data : [])
+        .map(item => ({
+            label: (item.summary || item.option || '').toString().trim(),
+            fullText: (item.option || item.summary || '').toString().trim(),
+        }))
+        .filter(o => o.label);
+}
+
+function ieEnsureListeningPanel(container) {
+    let panel = container.querySelector('.ie-listen-panel');
+    if (!panel) {
+        if (!document.getElementById('ie-pulse-style')) {
+            const style = document.createElement('style');
+            style.id = 'ie-pulse-style';
+            style.textContent = '@keyframes iepulse{0%,100%{opacity:1}50%{opacity:0.3}}';
+            document.head.appendChild(style);
+        }
+        panel = document.createElement('div');
+        panel.className = 'ie-listen-panel';
+        // span all grid columns so it doesn't interfere with button grid positions
+        panel.style.cssText = 'display:none;background:#fff;border:2px solid #93c5fd;border-radius:10px;padding:12px 14px;margin-bottom:10px;grid-column:1/-1;';
+        panel.innerHTML =
+            '<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#374151;margin-bottom:8px;">' +
+            '<span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;animation:iepulse 1s infinite;flex-shrink:0;"></span>' +
+            '<span class="ie-listen-label">Listening…</span></div>' +
+            '<div class="ie-transcript-box" style="background:#eff6ff;border-radius:8px;padding:10px 12px;font-size:15px;font-style:italic;color:#1e40af;min-height:36px;">(waiting…)</div>';
+        container.insertBefore(panel, container.firstChild);
+    }
+    return panel;
+}
+
+function ieShowListeningPanel(container, visible, label) {
+    const panel = ieEnsureListeningPanel(container);
+    panel.style.display = visible ? 'block' : 'none';
+    if (visible && label) panel.querySelector('.ie-listen-label').textContent = label;
+}
+
+function ieUpdateTranscript(container, text) {
+    const panel = container.querySelector('.ie-listen-panel');
+    if (panel) panel.querySelector('.ie-transcript-box').textContent = text ? `"${text}"` : '(waiting…)';
+}
+
+function ieUpdateSpeechHistory() {
+    const label = document.getElementById('speech-history-label');
+    const textarea = document.getElementById('speech-history');
+    if (!textarea) return;
+    const meLines = ieConversationLines.filter(l => l.startsWith('Me: ')).map(l => l.slice(4));
+    if (label) label.textContent = 'Email:';
+    textarea.value = meLines.join('\n\n');
+}
+
+function ieExitFlow() {
+    ieFlowActive = false;
+    ieStopListening();
+    updateSpeechHistoryPanel();
+    window.location.href = ieFromUrl;
+}
+
+function ieStartFreestyle() {
+    ieFlowActive = false;
+    ieStopListening();
+    sessionStorage.setItem('ieEmailState', JSON.stringify({
+        pendingFreeStyle: true,
+        selectedContact: ieSelectedContact,
+        conversationLines: ieConversationLines,
+        recentEmailContent: ieRecentEmailContent,
+        hadRecentEmail: ieHadRecentEmail,
+        fromUrl: ieFromUrl,
+    }));
+    composeSession = {
+        active: true,
+        documentId: null,
+        title: '',
+        text: '',
+        startedAt: new Date().toISOString(),
+        sourceFrom: window.location.href,
+    };
+    saveComposeSession();
+    window.location.href = `freestyle.html?compose=1&from=${encodeURIComponent(window.location.href)}`;
+}
+
+function ieStopListening() {
+    clearTimeout(ieWakeWordTimeout);
+    clearTimeout(iePartnerSilenceTimer);
+    clearTimeout(iePartnerHardTimer);
+    clearTimeout(iePartnerNoSpeechTimer);
+    ieListeningMode = null;
+    iePartnerTranscript = '';
+    iePartnerSpeechStarted = false;
+    if (ieRecognition) {
+        try { ieRecognition.stop(); } catch (_) {}
+        ieRecognition = null;
+    }
+}
+
+function ieStartWakeWordListening(container) {
+    ieStopListening();
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { console.warn('[IE] Web Speech API not available'); return; }
+    ieListeningMode = 'wake_word';
+    ieRecognition = new SR();
+    ieRecognition.continuous = true;
+    ieRecognition.interimResults = false;
+    ieRecognition.lang = 'en-US';
+    ieRecognition.onresult = (event) => {
+        if (ieListeningMode !== 'wake_word') return;
+        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+        if (ieMatchesWakeWord(transcript)) {
+            ieListeningMode = null;
+            try { ieRecognition.stop(); } catch (_) {}
+            ieRecognition = null;
+            ieHandleWakeWordDetected(container);
+        }
+    };
+    ieRecognition.onerror = ev => { if (ev.error !== 'no-speech' && ev.error !== 'aborted') console.log('[IE WAKE] error:', ev.error); };
+    ieRecognition.onend = () => { if (ieListeningMode === 'wake_word') setTimeout(() => ieStartWakeWordListening(container), 400); };
+    try { ieRecognition.start(); } catch (_) {}
+}
+
+async function ieHandleWakeWordDetected(container) {
+    clearTimeout(ieWakeWordTimeout);
+    iePartnerSpeechStarted = false;
+    iePartnerTranscript = '';
+    ieShowListeningPanel(container, true, 'Read the most recent email aloud');
+    ieUpdateTranscript(container, '');
+
+    await announce("I'm listening. Please read the email aloud.", 'system', false);
+    if (ieCurrentScreen !== 'recentEmailVoice') return;
+    ieStartPartnerSpeechListening(container);
+
+    iePartnerNoSpeechTimer = setTimeout(() => {
+        if (!iePartnerSpeechStarted && ieListeningMode === 'partner_speech') {
+            ieStopListening();
+            ieShowListeningPanel(container, false);
+            ieRenderWakeWordScreen(container);
+        }
+    }, 10000);
+
+    iePartnerHardTimer = setTimeout(() => {
+        if (ieListeningMode === 'partner_speech') {
+            ieStopListening();
+            ieShowListeningPanel(container, false);
+            ieRenderWakeWordScreen(container);
+        }
+    }, 30000);
+}
+
+function ieStartPartnerSpeechListening(container) {
+    if (ieRecognition) { try { ieRecognition.stop(); } catch (_) {} ieRecognition = null; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    ieListeningMode = 'partner_speech';
+    ieRecognition = new SR();
+    ieRecognition.continuous = true;
+    ieRecognition.interimResults = true;
+    ieRecognition.lang = 'en-US';
+    ieRecognition.onresult = (event) => {
+        if (ieListeningMode !== 'partner_speech') return;
+        const transcript = Array.from(event.results).map(r => r[0].transcript).join(' ').trim();
+        iePartnerTranscript = transcript;
+        ieUpdateTranscript(container, transcript);
+        if (transcript && !iePartnerSpeechStarted) {
+            iePartnerSpeechStarted = true;
+            clearTimeout(iePartnerNoSpeechTimer);
+        }
+        clearTimeout(iePartnerSilenceTimer);
+        iePartnerSilenceTimer = setTimeout(() => {
+            if (ieListeningMode !== 'partner_speech') return;
+            const final = iePartnerTranscript.trim();
+            if (!final) return;
+            ieListeningMode = null;
+            try { ieRecognition.stop(); } catch (_) {}
+            ieRecognition = null;
+            ieProcessPartnerSpeech(container, final);
+        }, 3000);
+    };
+    ieRecognition.onerror = ev => { if (ev.error !== 'no-speech' && ev.error !== 'aborted') console.log('[IE PARTNER] error:', ev.error); };
+    ieRecognition.onend = () => { if (ieListeningMode === 'partner_speech') setTimeout(() => ieStartPartnerSpeechListening(container), 300); };
+    try { ieRecognition.start(); } catch (_) {}
+}
+
+async function ieProcessPartnerSpeech(container, transcript) {
+    clearTimeout(iePartnerSilenceTimer);
+    clearTimeout(iePartnerNoSpeechTimer);
+    clearTimeout(iePartnerHardTimer);
+    ieRecentEmailContent = transcript;
+    ieShowListeningPanel(container, false);
+    await announce('Got it. Give me a moment to respond.', 'system', false);
+    await ieRenderLLMOptions(container, 'reply');
+}
+
+async function renderEmailEntryMenu(container, fromUrl) {
+    // Restore IE state when returning from freestyle compose
+    const rawIeState = sessionStorage.getItem('ieEmailState');
+    if (rawIeState) {
         try {
-            const inboxUrl = new URL('/api/email/inbox', window.location.origin);
-            inboxUrl.searchParams.set('max_results', String(pageSize));
-            if (pageToken) inboxUrl.searchParams.set('page_token', pageToken);
-            const inboxResponse = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
-            if (inboxResponse.ok) {
-                const inboxData = await inboxResponse.json();
-                const messages = Array.isArray(inboxData.messages) ? inboxData.messages : [];
-                const dedupe = new Set();
-                const fallbackContacts = [];
-                messages.forEach((message) => {
-                    const senderEmail = String(message?.sender_email || extractEmailAddressFromHeader(message?.from || '') || '').trim();
-                    if (!senderEmail) return;
-                    const dedupeKey = senderEmail.toLowerCase();
-                    if (dedupe.has(dedupeKey)) return;
-                    dedupe.add(dedupeKey);
-                    fallbackContacts.push({
-                        name: String(message?.sender_name || '').trim(),
-                        email: senderEmail,
-                    });
-                });
-                if (fallbackContacts.length) {
-                    contacts = fallbackContacts;
-                    nextPageToken = String(inboxData.next_page_token || '').trim() || null;
-                    usingInboxFallback = true;
-                    loadError = null;
+            const saved = JSON.parse(rawIeState);
+            if (saved.pendingFreeStyle && saved.selectedContact) {
+                sessionStorage.removeItem('ieEmailState');
+                ieFlowActive = true;
+                ieSelectedContact = saved.selectedContact;
+                ieConversationLines = Array.isArray(saved.conversationLines) ? saved.conversationLines : [];
+                ieRecentEmailContent = saved.recentEmailContent || '';
+                ieHadRecentEmail = !!saved.hadRecentEmail;
+                ieFromUrl = saved.fromUrl || fromUrl || 'gridpage.html?page=home';
+                ieCurrentScreen = 'postSelection';
+
+                const freeText = String(composeSession?.text || '').trim();
+                if (freeText) {
+                    ieConversationLines = [...ieConversationLines, `Me: ${freeText}`];
+                    clearComposeSession();
                 }
+
+                ieStopListening();
+                container.innerHTML = '';
+                updateEmailQuestionDisplay(`Email: ${ieSelectedContact.name}`);
+                ieUpdateSpeechHistory();
+                await ieRenderFollowUp(container);
+                return;
             }
-        } catch (fallbackError) {
-            console.warn('Email contacts fallback from inbox failed:', fallbackError);
+        } catch (_) {
+            sessionStorage.removeItem('ieEmailState');
         }
     }
 
-    if (usingInboxFallback) {
-        updateEmailQuestionDisplay(selectionCount > 0
-            ? `Email: Add another contact (${selectionCount} selected)`
-            : 'Email: Choose a contact (recent senders)');
+    stopAuditoryScanning();
+    ieStopListening();
+    ieFlowActive = true;
+    ieCurrentScreen = 'contactPicker';
+    ieFromUrl = fromUrl || 'gridpage.html?page=home';
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Choose a contact');
+
+    // Load settings for wake word
+    try {
+        const settResp = await authenticatedFetch('/api/settings');
+        if (settResp.ok) {
+            const settData = await settResp.json();
+            const s = settData.settings || settData;
+            if (s.wakeWordInterjection) ieWakeWordInterjection = s.wakeWordInterjection.trim().toLowerCase();
+            if (s.wakeWordName) ieWakeWordName = s.wakeWordName.trim().toLowerCase();
+        }
+    } catch (_) {}
+
+    ieContacts = [];
+    ieSelectedContact = null;
+    ieConversationLines = [];
+    ieRecentEmailContent = '';
+    ieHadRecentEmail = false;
+    ieLastLLMOptions = [];
+
+    let loadError = null;
+    try {
+        const resp = await authenticatedFetch('/api/friends-family', { method: 'GET' });
+        if (resp.ok) {
+            const data = await resp.json();
+            const list = Array.isArray(data.friends_family) ? data.friends_family : [];
+            ieContacts = list
+                .filter(c => c.email && String(c.email).trim())
+                .map(c => ({
+                    name: (c.name || '').trim(),
+                    email: (c.email || '').trim(),
+                    relationship: (c.relationship || '').trim(),
+                    about: (c.about || '').trim(),
+                    birthday: (c.birthday || '').trim(),
+                }))
+                .filter(c => c.name && c.email);
+        } else {
+            loadError = `Unable to load contacts (${resp.status})`;
+        }
+    } catch (err) {
+        loadError = err.message || 'Unable to load contacts';
     }
 
     let index = 0;
     if (loadError) {
         container.appendChild(createComposeGridButton('Try Again', async () => {
-            await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+            await renderEmailEntryMenu(container, ieFromUrl);
         }, index++));
-        container.appendChild(createComposeGridButton('Connect Gmail', async () => {
-            try {
-                await startGmailConnectFlow();
-            } catch (error) {
-                await announce('Unable to connect Gmail right now.', 'system', false);
-                await renderEmailEntryMenu(container, fromUrl);
-            }
-        }, index++));
-    } else if (!contacts.length) {
-        container.appendChild(createComposeGridButton('No Contacts Found', async () => {
-            await announce('No contacts found.', 'system', false);
-            await renderEmailEntryMenu(container, fromUrl);
-        }, index++));
+    } else if (!ieContacts.length) {
+        // no contacts with email — only show Add New Contact + Home
     } else {
-        // Filter out already-selected contacts to avoid duplicates
-        const selectedEmails = new Set(selectedContacts.map(c => c.email.toLowerCase()));
-        const availableContacts = contacts.filter(c => {
-            const email = String(c?.email || '').trim().toLowerCase();
-            return email && !selectedEmails.has(email);
-        });
-
-        availableContacts.forEach((contact) => {
-            const recipientEmail = String(contact?.email || '').trim();
-            const recipientName = String(contact?.name || '').trim();
-            const label = recipientName || recipientEmail;
-            if (!recipientEmail) return;
-
-            container.appendChild(createComposeGridButton(label, async () => {
-                const updatedContacts = [...selectedContacts, { email: recipientEmail, name: recipientName }];
-                await renderEmailContactsConfirmMenu(container, fromUrl, updatedContacts);
+        ieContacts.forEach(contact => {
+            container.appendChild(createComposeGridButton(contact.name, async () => {
+                ieSelectedContact = contact;
+                ieConversationLines = [];
+                ieRecentEmailContent = '';
+                ieHadRecentEmail = false;
+                await announce(`I want to email ${contact.name}.`, 'system', false);
+                await ieRenderModeMenu(container);
             }, index++));
         });
-
-        if (nextPageToken) {
-            container.appendChild(createComposeGridButton('Show More', async () => {
-                await renderEmailContactsMenu(container, fromUrl, selectedContacts, nextPageToken);
-            }, index++));
-        }
     }
 
-    container.appendChild(createComposeGridButton('Go Back', async () => {
-        if (selectedContacts.length > 0) {
-            await renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts);
-        } else {
-            await renderEmailEntryMenu(container, fromUrl);
-        }
-    }, index));
+    container.appendChild(createComposeGridButton('Add New Contact', async () => {
+        await announce(
+            'I want to add a new contact. Please ask me yes or no questions and help me add the new contact.',
+            'system', false
+        );
+        ieExitFlow();
+    }, index++));
 
-    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-menu' }), 50);
+    container.appendChild(createComposeGridButton('Home', async () => {
+        clearEmailSession();
+        ieExitFlow();
+    }, index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-entry-menu' }), 50);
 }
 
-async function renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts) {
+async function ieRenderModeMenu(container) {
     stopAuditoryScanning();
+    ieCurrentScreen = 'modeMenu';
     container.innerHTML = '';
-    const names = selectedContacts.map(c => c.name || c.email).join(', ');
-    updateEmailQuestionDisplay(`To: ${names}`);
-
-    container.appendChild(createComposeGridButton('Add More Contacts', async () => {
-        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
-    }, 0));
-
-    container.appendChild(createComposeGridButton('Create Email', async () => {
-        const primary = selectedContacts[0];
-        emailSession = {
-            active: true,
-            mode: 'compose',
-            recipientEmail: selectedContacts.map(c => c.email).join(','),
-            recipientName: selectedContacts.map(c => c.name || c.email).join(', '),
-            recipients: selectedContacts,
-            sourceFrom: fromUrl || getEmailReturnTarget(),
-            threadId: '',
-            inReplyTo: '',
-            references: ''
-        };
-        saveEmailSession();
-
-        composeSession = {
-            active: true,
-            documentId: null,
-            title: '',
-            text: '',
-            startedAt: new Date().toISOString(),
-            sourceFrom: fromUrl || getEmailReturnTarget()
-        };
-        saveComposeSession();
-
-        window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
-    }, 1));
-
-    container.appendChild(createComposeGridButton('Go Back', async () => {
-        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
-    }, 2));
-
-    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-confirm-menu' }), 50);
-}
-
-async function renderEmailInboxMenu(container, fromUrl, pageToken = null) {
-    stopAuditoryScanning();
-    container.innerHTML = '';
-    updateEmailQuestionDisplay('Email: Read existing messages');
-
-    let messages = [];
-    let nextPageToken = null;
-    let loadError = null;
-    try {
-        const inboxUrl = new URL('/api/email/inbox', window.location.origin);
-        inboxUrl.searchParams.set('max_results', '20');
-        if (pageToken) {
-            inboxUrl.searchParams.set('page_token', pageToken);
-        }
-
-        const response = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
-        if (response.ok) {
-            const data = await response.json();
-            messages = Array.isArray(data.messages) ? data.messages : [];
-            nextPageToken = String(data.next_page_token || '').trim() || null;
-        } else {
-            loadError = `Unable to load inbox (${response.status})`;
-        }
-    } catch (error) {
-        loadError = error.message || 'Unable to load inbox';
-    }
+    updateEmailQuestionDisplay(`Email: ${ieSelectedContact.name}`);
+    ieUpdateSpeechHistory();
 
     let index = 0;
-    if (loadError || !messages.length) {
-        container.appendChild(createComposeGridButton(loadError ? 'Inbox Unavailable' : 'No Inbox Messages', async () => {
-            await announce(loadError || 'No inbox messages available.', 'system', false);
-            await renderEmailEntryMenu(container, fromUrl);
-        }, index++));
-    } else {
-        messages.slice(0, Math.max(8, gridColumns * 3)).forEach((message) => {
-            const messageId = String(message?.id || '').trim();
-            if (!messageId) return;
-            const subject = String(message.subject || '(No subject)').trim();
-            const label = subject;
+    container.appendChild(createComposeGridButton('Reply to\nRecent Email', async () => {
+        ieHadRecentEmail = true;
+        await ieRenderWakeWordScreen(container);
+    }, index++));
 
-            container.appendChild(createComposeGridButton(label.slice(0, 64), async () => {
-                stopAuditoryScanning();
-                try {
-                    const detailResponse = await authenticatedFetch(`/api/email/messages/${encodeURIComponent(messageId)}`, { method: 'GET' });
-                    if (!detailResponse.ok) {
-                        await announce('Unable to load that email.', 'system', false);
-                        await renderEmailInboxMenu(container, fromUrl, pageToken);
-                        return;
-                    }
-                    const detail = await detailResponse.json();
-                    const msg = detail?.message || {};
-                    const body = String(msg.body_text || msg.snippet || '').trim();
-                    const readText = body || 'No message body available.';
-                    await announce(readText, 'system', false, false);
-                    await renderEmailReadActionsMenu(container, fromUrl, messageId, msg);
-                    return;
-                } catch (error) {
-                    await announce('Unable to read that email right now.', 'system', false);
-                }
-                await renderEmailInboxMenu(container, fromUrl, pageToken);
-            }, index++));
-        });
-    }
+    container.appendChild(createComposeGridButton('New Topic', async () => {
+        ieHadRecentEmail = false;
+        await ieRenderLLMOptions(container, 'new_topic');
+    }, index++));
 
-    if (nextPageToken) {
-        container.appendChild(createComposeGridButton('Show More', async () => {
-            await renderEmailInboxMenu(container, fromUrl, nextPageToken);
+    if (ieConversationLines.length) {
+        container.appendChild(createComposeGridButton('Send Email', async () => {
+            await ieHandleSendEmail(container);
         }, index++));
     }
 
     container.appendChild(createComposeGridButton('Go Back', async () => {
-        await renderEmailEntryMenu(container, fromUrl);
-    }, index));
+        await renderEmailEntryMenu(container, ieFromUrl);
+    }, index++));
 
-    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-inbox-menu' }), 50);
+    container.appendChild(createComposeGridButton('Exit', () => ieExitFlow(), index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-mode-menu' }), 50);
+}
+
+async function ieRenderWakeWordScreen(container) {
+    stopAuditoryScanning();
+    ieCurrentScreen = 'recentEmailVoice';
+    ieStopListening();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay(`Email: ${ieSelectedContact.name} — read incoming email`);
+
+    const wkPhrase = ieGetWakePhrase();
+    ieEnsureListeningPanel(container);
+    ieShowListeningPanel(container, true, `Waiting for partner to say "${wkPhrase}"`);
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        ieStopListening();
+        await ieRenderModeMenu(container);
+    }, 0));
+
+    await announce(
+        `I need help replying to an email. Can you please find the most recent email from ${ieSelectedContact.name}? ` +
+        `Say ${wkPhrase} when you are ready to read it to me.`,
+        'system', false
+    );
+
+    ieStartWakeWordListening(container);
+
+    ieWakeWordTimeout = setTimeout(async () => {
+        if (ieCurrentScreen !== 'recentEmailVoice') return;
+        ieStopListening();
+        await announce('Waiting for help timed out. Returning to options.', 'system', false);
+        await ieRenderModeMenu(container);
+    }, 60000);
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-wake-word' }), 50);
+}
+
+async function ieRenderLLMOptions(container, promptType) {
+    stopAuditoryScanning();
+    ieCurrentScreen = 'llmOptions';
+    container.innerHTML = '';
+    updateEmailQuestionDisplay(`Email: ${ieSelectedContact.name} — generating options…`);
+
+    let opts = [];
+    try {
+        opts = await ieCallLLM(ieBuildPrompt(promptType));
+    } catch (_) {
+        await announce('Unable to generate options right now.', 'system', false);
+        await ieRenderModeMenu(container);
+        return;
+    }
+
+    if (!opts.length) {
+        await announce('Unable to generate options right now.', 'system', false);
+        await ieRenderModeMenu(container);
+        return;
+    }
+
+    ieLastLLMOptions = [...opts];
+    const title = promptType === 'reply'
+        ? `${ieSelectedContact.name}: choose your reply`
+        : `${ieSelectedContact.name}: choose your message`;
+    updateEmailQuestionDisplay(`Email: ${title}`);
+
+    let index = 0;
+    if (ieConversationLines.length) {
+        container.appendChild(createComposeGridButton('Send Email', async () => {
+            await ieHandleSendEmail(container);
+        }, index++));
+    }
+
+    opts.forEach(opt => {
+        container.appendChild(createComposeGridButton(opt.label, async () => {
+            const text = (opt.fullText || '').trim();
+            if (!text) return;
+            ieConversationLines = [...ieConversationLines, `Me: ${text}`];
+            ieUpdateSpeechHistory();
+            await announce(text, 'system', false);
+            await ieRenderFollowUp(container);
+        }, index++));
+    });
+
+    container.appendChild(createComposeGridButton('Something Else', async () => {
+        await ieRenderLLMOptions(container, 'something_else');
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Free Style', () => {
+        ieStartFreestyle();
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await ieRenderModeMenu(container);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit', () => ieExitFlow(), index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-llm-options' }), 50);
+}
+
+async function ieRenderFollowUp(container) {
+    stopAuditoryScanning();
+    ieCurrentScreen = 'postSelection';
+    container.innerHTML = '';
+    updateEmailQuestionDisplay(`Email: ${ieSelectedContact.name} — what's next?`);
+
+    let opts = [];
+    try {
+        opts = await ieCallLLM(ieBuildPrompt('follow_up'));
+        ieLastLLMOptions = [...opts];
+    } catch (_) {}
+
+    let index = 0;
+    container.appendChild(createComposeGridButton('Send Email', async () => {
+        await ieHandleSendEmail(container);
+    }, index++));
+
+    opts.forEach(opt => {
+        container.appendChild(createComposeGridButton(opt.label, async () => {
+            const text = (opt.fullText || '').trim();
+            if (!text) return;
+            ieConversationLines = [...ieConversationLines, `Me: ${text}`];
+            ieUpdateSpeechHistory();
+            await announce(text, 'system', false);
+            await ieRenderFollowUp(container);
+        }, index++));
+    });
+
+    container.appendChild(createComposeGridButton('Something Else', async () => {
+        await ieRenderFollowUp(container);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Free Style', () => {
+        ieStartFreestyle();
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        ieHadRecentEmail
+            ? await ieRenderLLMOptions(container, 'reply')
+            : await ieRenderLLMOptions(container, 'new_topic');
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit', () => ieExitFlow(), index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-follow-up' }), 50);
+}
+
+async function ieHandleSendEmail(container) {
+    const meLines = ieConversationLines.filter(l => l.startsWith('Me: ')).map(l => l.slice(4));
+    const body = meLines.join('\n\n');
+    if (!body) {
+        await announce('No message selected. Please choose a message first.', 'system', false);
+        return;
+    }
+    if (!ieSelectedContact || !ieSelectedContact.email) {
+        await announce('No recipient email address found for this contact.', 'system', false);
+        return;
+    }
+
+    stopAuditoryScanning();
+    updateEmailQuestionDisplay('Email: Sending…');
+    container.innerHTML = '';
+
+    try {
+        const resp = await authenticatedFetch('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: [ieSelectedContact.email],
+                subject: `Email from a friend`,
+                body,
+            }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => 'Unknown error');
+            throw new Error(text);
+        }
+        await announce(`Email sent to ${ieSelectedContact.name}.`, 'system', false);
+        ieCurrentScreen = 'afterSend';
+        updateEmailQuestionDisplay(`Email: Sent to ${ieSelectedContact.name}`);
+        let idx = 0;
+        container.appendChild(createComposeGridButton('Send Another', async () => {
+            ieConversationLines = [];
+            ieRecentEmailContent = '';
+            ieHadRecentEmail = false;
+            await ieRenderModeMenu(container);
+        }, idx++));
+        container.appendChild(createComposeGridButton('Done', () => ieExitFlow(), idx++));
+        setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-after-send' }), 50);
+    } catch (err) {
+        await announce(`Could not send email. ${err.message || 'Please try again.'}`, 'system', false);
+        await ieRenderModeMenu(container);
+    }
 }
 
 function extractEmailAddressFromHeader(headerValue) {
     const raw = String(headerValue || '').trim();
     if (!raw) return '';
-
     const bracketMatch = raw.match(/<([^>]+)>/);
-    if (bracketMatch && bracketMatch[1]) {
-        return bracketMatch[1].trim();
-    }
-
+    if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
     const plainMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
     return plainMatch ? plainMatch[0].trim() : '';
-}
-
-async function startReplyToEmail(fromUrl, messageId, messageData) {
-    const recipientEmail = extractEmailAddressFromHeader(messageData.from || '');
-    if (!recipientEmail) {
-        await announce('Unable to determine sender email for reply.', 'system', false);
-        return;
-    }
-
-    emailSession = {
-        active: true,
-        mode: 'reply',
-        recipientEmail,
-        recipientName: String(messageData.from || '').trim(),
-        sourceFrom: fromUrl || getEmailReturnTarget(),
-        threadId: String(messageData.thread_id || '').trim(),
-        inReplyTo: String(messageData.message_id_header || '').trim(),
-        references: String(messageData.references || '').trim()
-    };
-    saveEmailSession();
-
-    composeSession = {
-        active: true,
-        documentId: null,
-        title: String(messageData.subject || '').trim(),
-        text: '',
-        startedAt: new Date().toISOString(),
-        sourceFrom: fromUrl || getEmailReturnTarget()
-    };
-    saveComposeSession();
-
-    window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
-}
-
-async function renderEmailReadActionsMenu(container, fromUrl, messageId, messageData) {
-    stopAuditoryScanning();
-    container.innerHTML = '';
-    updateEmailQuestionDisplay('Email: Choose an action');
-
-    container.appendChild(createComposeGridButton('Reply to Email', async () => {
-        await startReplyToEmail(fromUrl, messageId, messageData);
-    }, 0));
-
-    container.appendChild(createComposeGridButton('Go Back', async () => {
-        await renderEmailInboxMenu(container, fromUrl);
-    }, 1));
-
-    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-read-actions-menu' }), 50);
 }
 
 async function sendCurrentEmailFromSession() {
