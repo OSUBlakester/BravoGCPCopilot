@@ -35,7 +35,7 @@ steps:
       - '--update-env-vars'
       - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID,EMAIL_FEATURE_ENABLED=$_EMAIL_FEATURE_ENABLED,AZURE_SPEECH_REGION=westus2'
       - '--update-secrets'
-      - 'GOOGLE_API_KEY=bravo-google-api-key:latest,AZURE_SPEECH_KEY=AZURE_SPEECH_KEY:latest'
+      - 'GOOGLE_API_KEY=bravo-google-api-key:latest,AZURE_SPEECH_KEY=AZURE_SPEECH_KEY:latest,EMAIL_TOKEN_ENCRYPTION_KEY=EMAIL_TOKEN_ENCRYPTION_KEY:latest,EMAIL_OAUTH_STATE_SECRET=EMAIL_OAUTH_STATE_SECRET:latest'
       - '--memory'
       - '2Gi'
       - '--cpu'
