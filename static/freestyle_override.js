@@ -539,6 +539,23 @@ async function speakDisplayFromFreestyle() {
 
 function goBackFromFreestyle() {
     stopAuditoryScanning();
+
+    // Flush unsaved build space text to compose session before leaving
+    const _fsSession = JSON.parse(sessionStorage.getItem('bravoComposeSession') || '{}');
+    if (_fsSession.active) {
+        const unsaved = (typeof currentBuildSpaceText !== 'undefined' ? currentBuildSpaceText.trim() : '')
+            || (document.getElementById('build-space')?.value || '').trim();
+        if (unsaved && typeof appendToComposeText === 'function') {
+            appendToComposeText(unsaved);
+        }
+    }
+
+    // Respect 'from' param so the email flow can return correctly
+    const fromUrl = new URLSearchParams(window.location.search).get('from');
+    if (fromUrl) {
+        window.location.href = fromUrl;
+        return;
+    }
     window.location.href = '/static/gridpage.html?page=home';
 }
 

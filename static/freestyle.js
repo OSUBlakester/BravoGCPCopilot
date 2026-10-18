@@ -888,6 +888,20 @@ async function cleanupTextInternal() {
 }
 
 function goBackToGrid() {
+    // Flush unsaved build space text to compose session before leaving
+    const _fsSession = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+    if (_fsSession.active) {
+        const unsaved = currentBuildSpaceText.trim()
+            || (document.getElementById('build-space')?.value || '').trim();
+        if (unsaved) appendToComposeText(unsaved);
+    }
+
+    // If a 'from' URL was passed (e.g. returning to IE email flow), use it directly.
+    const fromUrl = new URLSearchParams(window.location.search).get('from');
+    if (fromUrl) {
+        window.location.href = fromUrl;
+        return;
+    }
     // Navigate back to gridpage.html with the home page.
     // Preserve explicit compose mode when freestyle was used during composition.
     if (isComposeFlowRequested()) {
