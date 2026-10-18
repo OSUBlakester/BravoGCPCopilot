@@ -10646,7 +10646,9 @@ def _extract_translated_lines_from_model_text(response_text: str, expected_count
 async def _translate_lines_with_models(
     lines: List[str],
     source_locale: Optional[str],
-    target_locale: str
+    target_locale: str,
+    account_id: str = "unknown",
+    aac_user_id: str = "unknown",
 ) -> List[str]:
     if not lines:
         return []
@@ -10701,6 +10703,7 @@ async def _translate_lines_with_models(
                 contents=prompt,
                 config=strict_cfg,
             )
+            log_token_usage(response, "translation_batch", account_id, aac_user_id, model_name=model_name)
             response_text = (getattr(response, "text", "") or "").strip()
             logging.info(
                 "TRANSLATION BATCH RAW RESPONSE LENGTH (%s->%s): %s chars",
@@ -10723,6 +10726,7 @@ async def _translate_lines_with_models(
                 model=model_name,
                 contents=prompt,
             )
+            log_token_usage(response, "translation_batch_retry", account_id, aac_user_id, model_name=model_name)
             response_text = (getattr(response, "text", "") or "").strip()
             logging.info(
                 "TRANSLATION BATCH RAW RESPONSE LENGTH (retry %s->%s): %s chars",
@@ -10765,6 +10769,7 @@ async def _translate_lines_with_models(
                         contents=single_line_prompt,
                         config=strict_cfg,
                     )
+                    log_token_usage(response, "translation_line", account_id, aac_user_id, model_name=model_name)
                     response_text = (getattr(response, "text", "") or "").strip()
                     parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
                     translated_line = str(parsed_line[0] or "").strip() or source_line
@@ -10775,6 +10780,7 @@ async def _translate_lines_with_models(
                             model=model_name,
                             contents=single_line_prompt,
                         )
+                        log_token_usage(response, "translation_line_retry", account_id, aac_user_id, model_name=model_name)
                         response_text = (getattr(response, "text", "") or "").strip()
                         parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
                         translated_line = str(parsed_line[0] or "").strip() or source_line
@@ -11001,7 +11007,9 @@ async def translate_lines_endpoint(request_data: TranslateLinesRequest, current_
         translated_lines = await _translate_lines_with_models(
             lines=request_data.lines,
             source_locale=source_locale,
-            target_locale=target_locale
+            target_locale=target_locale,
+            account_id=current_ids.get("account_id", "unknown"),
+            aac_user_id=current_ids.get("aac_user_id", "unknown"),
         )
         return JSONResponse(content={"translated_lines": translated_lines})
     except Exception as e:
@@ -11076,7 +11084,9 @@ async def translate_pages_endpoint(
                             lines=batch,
                             source_locale=source_locale,
                             target_locale=target_locale
-                        )
+                        ,
+                            account_id=account_id,
+                            aac_user_id=aac_user_id)
                         if len(translated_batch) != len(batch):
                             raise ValueError("Tap board prompt translation returned unexpected line count")
                         for offset, translated_text in enumerate(translated_batch):
@@ -11130,7 +11140,9 @@ async def translate_pages_endpoint(
                             lines=batch,
                             source_locale=source_locale,
                             target_locale=target_locale
-                        )
+                        ,
+                            account_id=account_id,
+                            aac_user_id=aac_user_id)
                         if len(translated_batch) != len(batch):
                             raise ValueError("Tap board button text translation returned unexpected line count")
                         for offset, translated_text in enumerate(translated_batch):
@@ -11235,7 +11247,9 @@ async def translate_pages_endpoint(
                     lines=batch,
                     source_locale=source_locale,
                     target_locale=target_locale
-                )
+                ,
+                    account_id=account_id,
+                    aac_user_id=aac_user_id)
                 if len(translated_batch) != len(batch):
                     raise ValueError("Tap menu label translation returned unexpected line count")
                 for offset, translated_text in enumerate(translated_batch):
@@ -11385,7 +11399,9 @@ async def translate_pages_endpoint(
                 lines=batch,
                 source_locale=source_locale,
                 target_locale=target_locale
-            )
+            ,
+                account_id=account_id,
+                aac_user_id=aac_user_id)
 
             if len(translated_batch) != len(batch):
                 raise ValueError("Translation batch returned unexpected line count")
@@ -11453,7 +11469,9 @@ async def translate_pages_endpoint(
                         lines=batch,
                         source_locale=source_locale,
                         target_locale=target_locale
-                    )
+                    ,
+                        account_id=account_id,
+                        aac_user_id=aac_user_id)
                     if len(translated_batch) != len(batch):
                         raise ValueError("Tap board prompt translation returned unexpected line count")
 
@@ -11487,7 +11505,9 @@ async def translate_pages_endpoint(
             lines=freestyle_lines,
             source_locale=source_locale,
             target_locale=target_locale
-        )
+        ,
+            account_id=account_id,
+            aac_user_id=aac_user_id)
 
         freestyle_bundle: Dict[str, str] = {}
         for index, key in enumerate(freestyle_keys):
@@ -11527,7 +11547,9 @@ async def translate_pages_endpoint(
             lines=games_lines,
             source_locale=source_locale,
             target_locale=target_locale
-        )
+        ,
+            account_id=account_id,
+            aac_user_id=aac_user_id)
 
         games_bundle: Dict[str, str] = {}
         for index, key in enumerate(games_keys):

@@ -929,8 +929,9 @@ async function loadChatDerivedNarrative() {
 
             const factsList = document.getElementById('chat-facts-list');
             factsList.innerHTML = data.extracted_facts.map((fact, idx) => {
-                const escapedFact = fact.fact.replace(/"/g, '&quot;');
-                const escapedCat = (fact.category || '').replace(/"/g, '&quot;');
+                const _esc = s => (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\r?\n/g, ' ');
+                const escapedFact = _esc(fact.fact);
+                const escapedCat = _esc(fact.category);
                 const colorCls = fact.category === 'preference' ? 'purple' : 'blue';
                 return `
                 <div class="bg-white border border-gray-200 rounded px-3 py-2" id="approved-fact-${idx}">
@@ -1999,9 +2000,12 @@ async function loadPendingProposals() {
         if (badge) { badge.textContent = proposals.length; badge.classList.remove('hidden'); }
 
         listEl.innerHTML = proposals.map((p, idx) => {
-            const escapedVal = (p.value || '').replace(/"/g, '&quot;');
-            const escapedCat = (p.category || '').replace(/"/g, '&quot;');
-            const escapedQ = (p.question || '').replace(/"/g, '&quot;');
+            // Must escape \, ', ", and newlines for use inside single-quoted JS strings
+            // that live inside double-quoted HTML onclick attributes.
+            const _esc = s => (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\r?\n/g, ' ');
+            const escapedVal = _esc(p.value);
+            const escapedCat = _esc(p.category);
+            const escapedQ = _esc(p.question);
             const sentiment = (p.sentiment || 'likes');
             const sentimentLabel = sentiment === 'dislikes'
                 ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 ml-1">dislikes</span>'

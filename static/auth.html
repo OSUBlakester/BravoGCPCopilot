@@ -2029,6 +2029,7 @@
             
             // Show the target section
             sectionToShow.classList.add('active');
+            authTitle.innerHTML = '';
             authTitle.textContent = title;
             authErrorMessage.textContent = ''; // Clear error message
         }
@@ -2172,7 +2173,7 @@
             loginSection.classList.remove('active');
             registerSection.classList.remove('active');
             profileSection.classList.add('active');
-            authTitle.textContent = "Select Profile";
+            authTitle.innerHTML = '<img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;">';
 
             // Store userProfiles and idToken globally for other functions
             window.currentUserProfiles = userProfiles;
