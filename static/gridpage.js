@@ -3537,12 +3537,29 @@ async function ieHandleSendEmail(container) {
     container.innerHTML = '';
 
     try {
+        let subject = 'Message from a friend';
+        try {
+            const titleResp = await authenticatedFetch('/api/compose/generate-title', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ body }),
+            });
+            if (titleResp.ok) {
+                const titleData = await titleResp.json();
+                if (titleData?.success && titleData?.title) {
+                    subject = String(titleData.title).trim() || subject;
+                }
+            }
+        } catch (titleErr) {
+            console.warn('Subject generation failed, using fallback:', titleErr);
+        }
+
         const resp = await authenticatedFetch('/api/email/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 to: [ieSelectedContact.email],
-                subject: `Email from a friend`,
+                subject,
                 body,
             }),
         });
