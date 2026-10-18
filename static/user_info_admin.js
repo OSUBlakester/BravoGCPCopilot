@@ -1286,6 +1286,19 @@ function renderFriendsFamilyTable() {
         });
         birthdayCell.appendChild(birthdayInput);
 
+        // Email Cell
+        const emailCell = document.createElement('td');
+        emailCell.className = 'px-4 py-2';
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.value = person.email || '';
+        emailInput.placeholder = 'name@example.com';
+        emailInput.className = 'border px-2 py-1 w-full text-sm';
+        emailInput.addEventListener('change', (e) => {
+            currentFriendsFamily.friends_family[index].email = e.target.value.trim();
+        });
+        emailCell.appendChild(emailInput);
+
         // Action Cell
         const actionCell = document.createElement('td');
         actionCell.className = 'px-4 py-2';
@@ -1303,6 +1316,7 @@ function renderFriendsFamilyTable() {
         row.appendChild(relationshipCell);
         row.appendChild(aboutCell);
         row.appendChild(birthdayCell);
+        row.appendChild(emailCell);
         row.appendChild(actionCell);
         friendsFamilyTableBody.appendChild(row);
     });
@@ -1312,11 +1326,12 @@ function addFriendsFamilyRow() {
     if (!Array.isArray(currentFriendsFamily.friends_family)) {
         currentFriendsFamily.friends_family = [];
     }
-    currentFriendsFamily.friends_family.push({ 
-        name: '', 
-        relationship: '', 
-        about: '', 
-        birthday: '' 
+    currentFriendsFamily.friends_family.push({
+        name: '',
+        relationship: '',
+        about: '',
+        birthday: '',
+        email: '',
     });
     renderFriendsFamilyTable();
     
