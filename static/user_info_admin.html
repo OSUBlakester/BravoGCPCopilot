@@ -807,15 +807,16 @@
             <!-- Friends & Family Table -->
             <div>
                  <p class="text-sm text-gray-600 mb-4">Add people important to you with their relationship, background info, and birthdays.</p>
-                 <table id="friendsFamilyTable" class="min-w-full divide-y divide-gray-200 border border-gray-200">
+                 <div class="overflow-x-auto">
+                 <table id="friendsFamilyTable" class="w-full divide-y divide-gray-200 border border-gray-200" style="min-width:860px;table-layout:fixed">
                      <thead class="bg-gray-50">
                          <tr>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Name</th>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Relationship</th>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">About</th>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Birthday (MM-DD)</th>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Email</th>
-                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Action</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:14%">Name</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:13%">Relationship</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:30%">About</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:10%">Birthday</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:23%">Email</th>
+                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width:10%">Action</th>
                          </tr>
                      </thead>
                      <tbody id="friendsFamilyTbody" class="bg-white divide-y divide-gray-200">
@@ -836,6 +837,9 @@
                                  <input type="text" placeholder="MM-DD" pattern="\d{2}-\d{2}" maxlength="5" class="border px-2 py-1 w-full text-sm">
                              </td>
                              <td class="px-4 py-2">
+                                 <input type="email" placeholder="name@example.com" class="border px-2 py-1 w-full text-sm">
+                             </td>
+                             <td class="px-4 py-2">
                                  <button class="button-danger px-2 py-1 text-xs">
                                      <i class="fas fa-trash mr-1"></i>Delete
                                  </button>
@@ -843,6 +847,7 @@
                          </tr>
                      </tbody>
                  </table>
+                 </div><!-- /overflow-x-auto -->
                  <button type="button" id="addFriendsFamilyRow" class="button-success mt-4">
                      <i class="fas fa-plus mr-2"></i> Add Person
                  </button>
