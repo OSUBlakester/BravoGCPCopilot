@@ -108,8 +108,9 @@
                             <th class="px-4 py-3 text-left">Model</th>
                             <th class="px-4 py-3 text-left">Backend</th>
                             <th class="px-4 py-3 num">Calls</th>
-                            <th class="px-4 py-3 num">Input Tokens</th>
-                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num" title="new_input + cached — matches GCP Billing">Total Input</th>
+                            <th class="px-4 py-3 num" title="Tokens not served from cache">New Input</th>
+                            <th class="px-4 py-3 num" title="Tokens served from cache (billed at reduced rate)">Cached</th>
                             <th class="px-4 py-3 num">Output Tokens</th>
                             <th class="px-4 py-3 num">Total Tokens</th>
                             <th class="px-4 py-3 num">Est. Cost (USD)</th>
@@ -137,8 +138,9 @@
                             <th class="px-4 py-3 text-left">Account</th>
                             <th class="px-4 py-3 text-left">User</th>
                             <th class="px-4 py-3 num">Calls</th>
-                            <th class="px-4 py-3 num">Input Tokens</th>
-                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num" title="new_input + cached — matches GCP Billing">Total Input</th>
+                            <th class="px-4 py-3 num" title="Tokens not served from cache">New Input</th>
+                            <th class="px-4 py-3 num" title="Tokens served from cache (billed at reduced rate)">Cached</th>
                             <th class="px-4 py-3 num">Output Tokens</th>
                             <th class="px-4 py-3 num">Total Tokens</th>
                             <th class="px-4 py-3 num">Est. Cost (USD)</th>
@@ -165,8 +167,9 @@
                         <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
                             <th class="px-4 py-3 text-left">Date (UTC)</th>
                             <th class="px-4 py-3 num">Calls</th>
-                            <th class="px-4 py-3 num">Input Tokens</th>
-                            <th class="px-4 py-3 num">Cached Tokens</th>
+                            <th class="px-4 py-3 num" title="new_input + cached — matches GCP Billing">Total Input</th>
+                            <th class="px-4 py-3 num" title="Tokens not served from cache">New Input</th>
+                            <th class="px-4 py-3 num" title="Tokens served from cache (billed at reduced rate)">Cached</th>
                             <th class="px-4 py-3 num">Output Tokens</th>
                             <th class="px-4 py-3 num">Total Tokens</th>
                             <th class="px-4 py-3 num">Est. Cost (USD)</th>
@@ -338,10 +341,10 @@
         }, { calls: 0, in_tok: 0, cache_tok: 0, out_tok: 0, total_tok: 0, cost_usd: 0 });
 
         const cards = [
-            { label: 'Total Calls',    value: totals.calls.toLocaleString(),                    icon: 'fa-bolt',        color: 'purple' },
-            { label: 'Total Tokens',   value: totals.total_tok.toLocaleString(),                icon: 'fa-coins',       color: 'blue'   },
-            { label: 'Cached Tokens',  value: totals.cache_tok.toLocaleString(),                icon: 'fa-layer-group', color: 'green'  },
-            { label: 'Est. Cost',      value: '$' + totals.cost_usd.toFixed(4),                 icon: 'fa-dollar-sign', color: 'orange' },
+            { label: 'Total Calls',    value: totals.calls.toLocaleString(),                              icon: 'fa-bolt',        color: 'purple' },
+            { label: 'Input Tokens',   value: (totals.in_tok + totals.cache_tok).toLocaleString(),        icon: 'fa-arrow-right', color: 'blue'   },
+            { label: 'Cached Tokens',  value: totals.cache_tok.toLocaleString(),                          icon: 'fa-layer-group', color: 'green'  },
+            { label: 'Est. Cost',      value: '$' + totals.cost_usd.toFixed(4),                           icon: 'fa-dollar-sign', color: 'orange' },
         ];
 
         const colorMap = {
@@ -376,6 +379,7 @@
                 <td class="px-4 py-3 text-gray-600 text-xs">${esc(r.model)}</td>
                 <td class="px-4 py-3">${backendBadge(r.backend)}</td>
                 <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-medium text-blue-700">${(r.in_tok + r.cache_tok).toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
@@ -403,6 +407,7 @@
                 <td class="px-4 py-3 text-xs text-gray-700">${esc(r.account)}</td>
                 <td class="px-4 py-3 text-xs text-gray-500">${esc(r.user)}</td>
                 <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-medium text-blue-700">${(r.in_tok + r.cache_tok).toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
@@ -430,6 +435,7 @@
             <tr>
                 <td class="px-4 py-3 text-sm font-medium text-gray-700">${esc(r.day)}</td>
                 <td class="px-4 py-3 num text-gray-700">${r.calls.toLocaleString()}</td>
+                <td class="px-4 py-3 num font-medium text-blue-700">${(r.in_tok + r.cache_tok).toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.in_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-green-700">${r.cache_tok.toLocaleString()}</td>
                 <td class="px-4 py-3 num text-gray-600">${r.out_tok.toLocaleString()}</td>
