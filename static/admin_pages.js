@@ -187,10 +187,10 @@ function setupEventListeners() {
     document.getElementById('bbwCancelBtn')?.addEventListener('click', closeBravoButtonWizard);
     document.getElementById('bbwGenerateBtn')?.addEventListener('click', _bbwGenerate);
     document.getElementById('bbwAddOptionBtn')?.addEventListener('click', () => {
-        _bbwOptions.push({ label: '' });
+        _bbwOptions.push({ label: '', announcement: '' });
         _bbwRenderOptions();
         const inputs = document.getElementById('bbwOptionsList').querySelectorAll('input');
-        if (inputs.length) inputs[inputs.length - 1].focus();
+        if (inputs.length) inputs[inputs.length - 2]?.focus();
     });
     document.getElementById('bbwStep2BackBtn')?.addEventListener('click', () => _bbwGoToStep(1));
     document.getElementById('bbwStep2NextBtn')?.addEventListener('click', () => {
@@ -2126,7 +2126,7 @@ function _cpwWireEvents() {
 
 // ── Bravo Button Wizard ─────────────────────────────────────────────────────
 
-let _bbwOptions = []; // [{label}]
+let _bbwOptions = []; // [{label, announcement}]
 
 function openBravoButtonWizard() {
     if (!currentPageData) {
@@ -2208,8 +2208,22 @@ function _bbwRenderOptions() {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = item.label;
-        input.className = 'flex-1 text-sm border-none outline-none bg-transparent';
+        input.placeholder = 'Button label';
+        input.className = 'w-28 text-sm border-none outline-none bg-transparent font-medium';
+        input.title = 'Button label (short)';
         input.addEventListener('input', () => { _bbwOptions[idx].label = input.value; });
+
+        const sep = document.createElement('span');
+        sep.className = 'text-gray-300 text-xs select-none';
+        sep.textContent = '→';
+
+        const announce = document.createElement('input');
+        announce.type = 'text';
+        announce.value = item.announcement || item.label;
+        announce.placeholder = 'Announcement (spoken text)';
+        announce.className = 'flex-1 text-sm border-none outline-none bg-transparent text-gray-500';
+        announce.title = 'Announcement spoken when button is pressed';
+        announce.addEventListener('input', () => { _bbwOptions[idx].announcement = announce.value; });
 
         const del = document.createElement('button');
         del.type = 'button';
@@ -2219,6 +2233,8 @@ function _bbwRenderOptions() {
 
         row.appendChild(grip);
         row.appendChild(input);
+        row.appendChild(sep);
+        row.appendChild(announce);
         row.appendChild(del);
 
         // Drag-and-drop reorder
@@ -2266,10 +2282,10 @@ async function _bbwGenerate() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating…';
 
     try {
-        let prompt = `Generate UP TO ${maxCount} UNIQUE button labels for an AAC communication page about: ${topic}.\n`;
+        let prompt = `Generate UP TO ${maxCount} UNIQUE buttons for an AAC communication page about: ${topic}.\n`;
         if (examples) prompt += `Examples of the type of options to include: ${examples}\n`;
         if (exclusions) prompt += `Do NOT include any of these: ${exclusions}\n`;
-        prompt += `\nRequirements:\n- Short labels (1–4 words each)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of strings ONLY — e.g. ["eat","drink","play"]`;
+        prompt += `\nRequirements:\n- Each button has a short label (1–4 words) and a full spoken announcement (a natural sentence or phrase)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of objects ONLY — e.g. [{"summary":"Hungry","option":"I am hungry and would like something to eat"},{"summary":"Need a break","option":"I need to take a break right now"}]`;
 
         const response = await window.authenticatedFetch('/llm', {
             method: 'POST',
@@ -2279,19 +2295,22 @@ async function _bbwGenerate() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        let labels = [];
-        if (Array.isArray(data)) {
-            labels = data.map(item => typeof item === 'string' ? item : (item.option || item.label || JSON.stringify(item)));
-        } else if (data && Array.isArray(data.options)) {
-            labels = data.options.map(o => typeof o === 'string' ? o : (o.option || o.label || ''));
-        } else if (typeof data === 'string') {
-            labels = data.split('\n').map(s => s.trim()).filter(Boolean);
+        let pairs = [];
+        const items = Array.isArray(data) ? data : (Array.isArray(data?.options) ? data.options : []);
+        for (const item of items) {
+            if (typeof item === 'string') {
+                pairs.push({ label: item.trim(), announcement: item.trim() });
+            } else {
+                const label = (item.summary || item.label || item.option || '').trim();
+                const announcement = (item.option || item.announcement || label).trim();
+                if (label) pairs.push({ label, announcement });
+            }
         }
-        labels = labels.filter(l => l && l.trim()).slice(0, maxCount);
+        pairs = pairs.slice(0, maxCount);
 
-        if (!labels.length) { alert('No options returned — try a different topic.'); return; }
+        if (!pairs.length) { alert('No options returned — try a different topic.'); return; }
 
-        _bbwOptions = labels.map(l => ({ label: l.trim() }));
+        _bbwOptions = pairs;
         _bbwRenderOptions();
         _bbwGoToStep(2);
     } catch (err) {
@@ -2321,9 +2340,11 @@ function _bbwSaveButtons() {
     valid.forEach(item => {
         const spot = findEmptyGridSpot();
         if (!spot) return;
+        const announcement = (item.announcement || '').trim();
         currentPageData.buttons.push({
             ...DEFAULT_PAGE_BUTTON_STRUCTURE,
             text: item.label,
+            speechPhrase: announcement && announcement !== item.label ? announcement : null,
             targetPage: targetPage || '',
             navigationType: targetPage ? 'PERMANENT' : '',
             row: spot.row,
