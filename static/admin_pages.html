@@ -2549,9 +2549,15 @@
 
             <!-- Step 3: Review / Edit Options + Create Page -->
             <div id="cpw-step3" class="hidden">
-                <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center justify-between mb-2">
                     <p class="text-sm text-gray-600"><span id="cpwOptionsCount" class="font-semibold text-gray-900">0</span> options — edit, delete, reorder, or add items below</p>
                     <button id="cpwAddOptionBtn" class="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 flex items-center gap-1"><i class="fas fa-plus"></i> Add Item</button>
+                </div>
+                <div class="flex items-center gap-2 px-2 mb-1 text-xs text-gray-400 font-medium">
+                    <span class="w-4"></span>
+                    <span class="w-28">Button Label</span>
+                    <span class="w-4"></span>
+                    <span class="flex-1">Announcement (spoken text)</span>
                 </div>
                 <div id="cpwOptionsList" class="max-h-64 overflow-y-auto space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50"></div>
                 <div class="mt-3 border border-gray-200 rounded-md p-3 bg-white">
@@ -2678,10 +2684,26 @@
                         </select>
                     </div>
                     <div id="bbwSummary" class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2"></div>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="bbwAddHomeBtn" class="accent-violet-600">
-                        <span class="text-sm text-gray-700">Also add a <strong>Home</strong> button at the end</span>
-                    </label>
+                    <div class="border border-gray-200 rounded-md p-3 bg-white">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="bbwAddNavBtn" class="accent-violet-600">
+                            <span class="text-sm font-medium text-gray-700">Add a navigation button at the start</span>
+                        </label>
+                        <div id="bbwNavBtnOptions" class="hidden mt-3 pl-1 space-y-2">
+                            <div class="flex gap-3">
+                                <div class="flex-1">
+                                    <label for="bbwNavBtnName" class="block text-xs text-gray-500 mb-1">Button name</label>
+                                    <input type="text" id="bbwNavBtnName" value="Home" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-violet-500">
+                                </div>
+                                <div class="flex-1">
+                                    <label for="bbwNavBtnTarget" class="block text-xs text-gray-500 mb-1">Navigate to</label>
+                                    <select id="bbwNavBtnTarget" class="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-violet-500">
+                                        <option value="home">Home Page</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex justify-between gap-2 mt-6">
                     <button id="bbwStep3BackBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm flex items-center gap-1.5"><i class="fas fa-arrow-left text-xs"></i> Back</button>

@@ -198,6 +198,9 @@ function setupEventListeners() {
         if (!valid.length) { alert('Add at least one option.'); return; }
         _bbwGoToStep(3);
     });
+    document.getElementById('bbwAddNavBtn')?.addEventListener('change', function() {
+        document.getElementById('bbwNavBtnOptions').classList.toggle('hidden', !this.checked);
+    });
     document.getElementById('bbwStep3BackBtn')?.addEventListener('click', () => _bbwGoToStep(2));
     document.getElementById('bbwSaveBtn')?.addEventListener('click', _bbwSaveButtons);
     document.querySelectorAll('input[name="bbwMode"]').forEach(r =>
@@ -1923,8 +1926,22 @@ function _cpwRenderOptions() {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = item.label;
-        input.className = 'flex-1 text-sm border-none outline-none bg-transparent';
+        input.placeholder = 'Button label';
+        input.className = 'w-28 text-sm border-none outline-none bg-transparent font-medium';
+        input.title = 'Button label (short)';
         input.addEventListener('input', () => { _cpwOptions[idx].label = input.value; });
+
+        const sep = document.createElement('span');
+        sep.className = 'text-gray-300 text-xs select-none';
+        sep.textContent = '→';
+
+        const announce = document.createElement('input');
+        announce.type = 'text';
+        announce.value = item.announcement || item.label;
+        announce.placeholder = 'Announcement (spoken text)';
+        announce.className = 'flex-1 text-sm border-none outline-none bg-transparent text-gray-500';
+        announce.title = 'Announcement spoken when button is pressed';
+        announce.addEventListener('input', () => { _cpwOptions[idx].announcement = announce.value; });
 
         const del = document.createElement('button');
         del.type = 'button';
@@ -1934,6 +1951,8 @@ function _cpwRenderOptions() {
 
         row.appendChild(grip);
         row.appendChild(input);
+        row.appendChild(sep);
+        row.appendChild(announce);
         row.appendChild(del);
 
         row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', idx); row.classList.add('opacity-50'); });
@@ -1966,10 +1985,10 @@ async function _cpwGenerate() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating…';
 
     try {
-        let prompt = `Generate UP TO ${maxCount} UNIQUE button labels for an AAC communication page about: ${topic}.\n`;
+        let prompt = `Generate UP TO ${maxCount} UNIQUE buttons for an AAC communication page about: ${topic}.\n`;
         if (examples) prompt += `Examples of the type of options to include: ${examples}\n`;
         if (exclusions) prompt += `Do NOT include any of these: ${exclusions}\n`;
-        prompt += `\nRequirements:\n- Short labels (1–4 words each)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of strings ONLY — e.g. ["eat","drink","play"]`;
+        prompt += `\nRequirements:\n- Each button has a short label (1–4 words) and a full spoken announcement (a natural sentence or phrase)\n- No duplicates\n- Practical and relevant to the topic\n- Return as a JSON array of objects ONLY — e.g. [{"summary":"Hungry","option":"I am hungry and would like something to eat"},{"summary":"Need a break","option":"I need to take a break right now"}]`;
 
         const response = await window.authenticatedFetch('/llm', {
             method: 'POST',
@@ -1979,19 +1998,22 @@ async function _cpwGenerate() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        let labels = [];
-        if (Array.isArray(data)) {
-            labels = data.map(item => typeof item === 'string' ? item : (item.option || item.label || ''));
-        } else if (data && Array.isArray(data.options)) {
-            labels = data.options.map(o => typeof o === 'string' ? o : (o.option || o.label || ''));
-        } else if (typeof data === 'string') {
-            labels = data.split('\n').map(s => s.trim()).filter(Boolean);
+        let pairs = [];
+        const items = Array.isArray(data) ? data : (Array.isArray(data?.options) ? data.options : []);
+        for (const item of items) {
+            if (typeof item === 'string') {
+                pairs.push({ label: item.trim(), announcement: item.trim() });
+            } else {
+                const label = (item.summary || item.label || item.option || '').trim();
+                const announcement = (item.option || item.announcement || label).trim();
+                if (label) pairs.push({ label, announcement });
+            }
         }
-        labels = labels.filter(l => l && l.trim()).slice(0, maxCount);
+        pairs = pairs.slice(0, maxCount);
 
-        if (!labels.length) { alert('No options returned — try a different topic.'); return; }
+        if (!pairs.length) { alert('No options returned — try a different topic.'); return; }
 
-        _cpwOptions = labels.map(l => ({ label: l.trim() }));
+        _cpwOptions = pairs;
         _cpwRenderOptions();
         _cpwGoToStep(3);
     } catch (err) {
@@ -2015,7 +2037,13 @@ async function _cpwCreatePage(withAiButtons) {
         const valid = _cpwOptions.filter(o => o.label.trim());
         let row = 0, col = 0;
         valid.forEach(item => {
-            buttons.push({ ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: item.label, row, col });
+            const ann = (item.announcement || '').trim();
+            buttons.push({
+                ...DEFAULT_PAGE_BUTTON_STRUCTURE,
+                text: item.label,
+                speechPhrase: ann && ann !== item.label ? ann : null,
+                row, col
+            });
             col++;
             if (col >= GRID_COLS) { col = 0; row++; }
         });
@@ -2116,7 +2144,7 @@ function _cpwWireEvents() {
     });
     document.getElementById('cpwStep3BackBtn')?.addEventListener('click', () => _cpwGoToStep(2));
     document.getElementById('cpwAddOptionBtn')?.addEventListener('click', () => {
-        _cpwOptions.push({ label: '' });
+        _cpwOptions.push({ label: '', announcement: '' });
         _cpwRenderOptions();
         const inputs = document.getElementById('cpwOptionsList').querySelectorAll('input');
         if (inputs.length) inputs[inputs.length - 1].focus();
@@ -2138,11 +2166,13 @@ function openBravoButtonWizard() {
     document.getElementById('bbwExamples').value = '';
     document.getElementById('bbwExclusions').value = '';
     document.getElementById('bbwCount').value = '20';
-    const bbwHomeChk = document.getElementById('bbwAddHomeBtn');
-    if (bbwHomeChk) bbwHomeChk.checked = false;
+    const bbwNavChk = document.getElementById('bbwAddNavBtn');
+    if (bbwNavChk) { bbwNavChk.checked = false; document.getElementById('bbwNavBtnOptions').classList.add('hidden'); }
+    const bbwNavName = document.getElementById('bbwNavBtnName');
+    if (bbwNavName) bbwNavName.value = 'Home';
     _bbwGoToStep(1);
 
-    // Populate target page dropdown
+    // Populate target page dropdown (for all buttons)
     const sel = document.getElementById('bbwTargetPage');
     sel.innerHTML = '<option value="">No page navigation</option>';
     if (Array.isArray(SPECIAL_PAGES)) {
@@ -2160,6 +2190,28 @@ function openBravoButtonWizard() {
             o.textContent = page.displayName || page.name;
             sel.appendChild(o);
         });
+    }
+
+    // Populate nav-button target dropdown
+    const navSel = document.getElementById('bbwNavBtnTarget');
+    if (navSel) {
+        navSel.innerHTML = '<option value="home">Home Page</option>';
+        if (Array.isArray(SPECIAL_PAGES)) {
+            SPECIAL_PAGES.forEach(sp => {
+                const o = document.createElement('option');
+                o.value = '!' + sp.name;
+                o.textContent = (sp.displayName || sp.name) + ' (Special)';
+                navSel.appendChild(o);
+            });
+        }
+        if (Array.isArray(allUserPages)) {
+            allUserPages.forEach(page => {
+                const o = document.createElement('option');
+                o.value = page.name;
+                o.textContent = page.displayName || page.name;
+                navSel.appendChild(o);
+            });
+        }
     }
 
     // Show/hide replace section based on whether buttons exist
@@ -2352,11 +2404,13 @@ function _bbwSaveButtons() {
         });
     });
 
-    if (document.getElementById('bbwAddHomeBtn')?.checked) {
-        const spot = findEmptyGridSpot();
-        if (spot) {
-            currentPageData.buttons.push({ ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: 'Home', targetPage: 'home', navigationType: 'PERMANENT', row: spot.row, col: spot.col });
-        }
+    if (document.getElementById('bbwAddNavBtn')?.checked) {
+        const navName = document.getElementById('bbwNavBtnName')?.value.trim() || 'Home';
+        const navTarget = document.getElementById('bbwNavBtnTarget')?.value || 'home';
+        const navBtn = { ...DEFAULT_PAGE_BUTTON_STRUCTURE, text: navName, targetPage: navTarget, navigationType: 'PERMANENT', row: 0, col: 0 };
+        currentPageData.buttons.unshift(navBtn);
+        // Repack all positions after prepend
+        currentPageData.buttons.forEach((b, i) => { b.row = Math.floor(i / GRID_COLS); b.col = i % GRID_COLS; });
     }
 
     _repackButtonPositions();
