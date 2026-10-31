@@ -2287,7 +2287,7 @@ def build_ai_option_overrides_prompt_block(overrides: Dict[str, Any]) -> str:
 
     food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
     if food_allergy_terms:
-        lines.append(f"- EXCLUDE any food/drink references containing allergies: {', '.join(food_allergy_terms)}")
+        lines.append(f"- EXCLUDE any food/drink options that contain or are made with these allergens (including compound foods, e.g. 'peanut butter cups' if 'peanuts' is listed): {', '.join(food_allergy_terms)}")
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     if env_allergy_terms:
@@ -2822,12 +2822,15 @@ def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -
 
     food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
     for term in food_allergy_terms:
-        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+        # Strip trailing 's'/'es' so "peanuts" matches "peanut butter cups" and vice versa
+        stem = re.escape(term.rstrip('s').rstrip('e') if len(term) > 3 else term)
+        if term and re.search(rf'\b{stem}', normalized_text):
             return f"food_allergy:{term}"
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     for term in env_allergy_terms:
-        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+        stem = re.escape(term.rstrip('s').rstrip('e') if len(term) > 3 else term)
+        if term and re.search(rf'\b{stem}', normalized_text):
             return f"environmental_allergy:{term}"
 
     topic_patterns = {
