@@ -2781,6 +2781,43 @@ def apply_inclusion_preference_bias(
     return combined[:max(1, max_options)]
 
 
+# Maps allergen stems → brand names / food names that contain that allergen
+# but whose name does not include the allergen word itself.
+_ALLERGEN_BRAND_BLOCKLIST: Dict[str, List[str]] = {
+    "peanut": [
+        "reese", "snickers", "butterfinger", "payday", "pay day",
+        "nutter butter", "mr. goodbar", "mr goodbar", "oh henry",
+        "tagalong", "do-si-do", "dosido", "fifth avenue",
+        "satay", "pad thai", "gado gado", "kung pao",
+    ],
+    "tree nut": [
+        "ferrero rocher", "nutella", "toblerone", "almond joy",
+        "mounds", "pistachio", "praline", "marzipan", "gianduja",
+    ],
+    "milk": [
+        "butter", "cream", "cheese", "yogurt", "whey", "casein",
+        "half and half", "half & half", "lactose",
+    ],
+    "egg": [
+        "mayonnaise", "mayo", "hollandaise", "aioli", "meringue",
+        "custard", "quiche",
+    ],
+    "wheat": [
+        "seitan", "bulgur", "farro", "spelt", "kamut", "triticale",
+    ],
+    "soy": [
+        "edamame", "miso", "tempeh", "tamari", "tofu",
+    ],
+    "shellfish": [
+        "shrimp", "crab", "lobster", "crayfish", "crawfish",
+        "prawn", "barnacle", "krill",
+    ],
+    "fish": [
+        "worcestershire", "caesar dressing",
+    ],
+}
+
+
 def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -> Optional[str]:
     if not option_text:
         return None
@@ -2835,6 +2872,13 @@ def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -
         stem = re.escape(term.rstrip('s').rstrip('e') if len(term) > 3 else term)
         if term and re.search(rf'\b{stem}', normalized_text):
             return f"food_allergy:{term}"
+        # Check brand-name blocklist for allergens whose name doesn't appear in the product name
+        term_stem = term.rstrip('s').rstrip('e') if len(term) > 3 else term
+        for allergen_key, brand_names in _ALLERGEN_BRAND_BLOCKLIST.items():
+            if term_stem in allergen_key or allergen_key in term_stem or allergen_key.startswith(term_stem):
+                for brand in brand_names:
+                    if brand in normalized_text:
+                        return f"food_allergy:{term}(brand:{brand})"
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     for term in env_allergy_terms:
