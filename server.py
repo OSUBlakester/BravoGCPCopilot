@@ -15331,7 +15331,11 @@ async def get_freestyle_word_options(
                 live_context_parts.append(f"activity={activity_value}")
 
         context_str = " | ".join(context_parts) if context_parts else "General conversation"
-        
+
+        # Load AI option overrides (allergies, exclusions) from user profile
+        ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
+        ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+
         # Handle build space context for dynamic suggestions
         build_space_text = request.build_space_text or ""
 
@@ -15409,7 +15413,8 @@ CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-Context (use for relevance and ranking): {contextual_info}"""
+Context (use for relevance and ranking): {contextual_info}
+{ai_override_prompt_block}"""
         else:
             # If no build space text, provide words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
@@ -15456,8 +15461,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-User context: {contextual_info}"""
-            
+User context: {contextual_info}
+{ai_override_prompt_block}"""
+
             elif has_source_page:
                 # USER CAME FROM A STATIC (non-LLM) PAGE — use page name as topic hint
                 page_name = request.source_page.replace('_', ' ').replace('-', ' ')
@@ -15486,8 +15492,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-User context: {contextual_info}"""
-            
+User context: {contextual_info}
+{ai_override_prompt_block}"""
+
             else:
                 # NO CONTEXT — generic AAC words (home page or unknown source)
                 prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
@@ -15511,8 +15518,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-Context for word selection: {contextual_info}"""
-        
+Context for word selection: {contextual_info}
+{ai_override_prompt_block}"""
+
         logging.info(f"Generated prompt for LLM: {prompt}")
 
         # Use LLM to generate options with generation config for more randomness
@@ -15617,10 +15625,11 @@ Context for word selection: {contextual_info}"""
                     })
                     seen.add(unique_key)
         
-        # Take only the requested number
-        options = unique_options[:freestyle_options]
-        
-        logging.warning(f"DEBUG Freestyle API - Parsed {len(unique_options)} unique options, requested {freestyle_options}, returning {len(options)}")
+        # Apply allergy/exclusion overrides as a post-generation filter, then take requested count
+        filtered_options = enforce_ai_option_overrides(unique_options, ai_option_overrides, len(unique_options))
+        options = filtered_options[:freestyle_options]
+
+        logging.warning(f"DEBUG Freestyle API - Parsed {len(unique_options)} unique options, after overrides {len(filtered_options)}, requested {freestyle_options}, returning {len(options)}")
         logging.warning(f"DEBUG Freestyle API - All lines: {len(all_lines)}, Filtered lines: {len(word_lines)}")
         logging.warning(f"DEBUG Freestyle API - Filtered lines: {word_lines[:10] if len(word_lines) > 10 else word_lines}")
         logging.warning(f"DEBUG Freestyle API - Build space text: '{build_space_text}', has build space: {bool(build_space_text.strip())}")
