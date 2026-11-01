@@ -6801,6 +6801,17 @@
                 ? String(activeCategory.prompt_exclusions).split(',').map(s => s.trim()).filter(Boolean)
                 : [];
             const excludedWords = getTapSpecialButtonExclusions([...staticWords, ...extraExclusions, ...boardExclusions]);
+            // LLM exclusion list: omit static pool words so the LLM isn't blocked from
+            // generating natural contextual options when the static pool covers the full
+            // category vocabulary. Static duplicates are filtered out client-side below.
+            const llmExcludedWords = getTapSpecialButtonExclusions([...extraExclusions, ...boardExclusions]);
+            // Pre-build a lowercase set of static words for quick dedup after LLM returns.
+            const staticWordSet = new Set(staticWords.map(w => String(w).trim().toLowerCase()));
+            // When a static pool exists the LLM may generate words that match it; request
+            // extra candidates so we still fill all dynamic slots after dedup.
+            const llmRequestCount = staticWords.length > 0
+                ? Math.min(50, totalDynamicButtons + Math.min(staticWords.length, 20))
+                : totalDynamicButtons;
 
             // For bravo-build boards (source:"custom") WITHOUT an explicit llm_prompt, use pre-generated
             // dynamic buttons on initial load, or bravo-suggest on Something Else. Boards with an
@@ -6851,17 +6862,14 @@
                 if (activeCategory && isConfiguredHomeCategory(activeCategory) && !(activeCategory.words_prompt || activeCategory.llm_prompt)) {
                     // Home board should always use default general conversation-starter words
                     if (currentSpeech) {
-                        dynamicWords = await generateWordsBasedOnSpeechHistory(currentSpeech, totalDynamicButtons, excludedWords);
+                        dynamicWords = await generateWordsBasedOnSpeechHistory(currentSpeech, llmRequestCount, llmExcludedWords);
                     } else {
-                        dynamicWords = await generateDefaultHomeStarterWords(totalDynamicButtons, excludedWords);
+                        dynamicWords = await generateDefaultHomeStarterWords(llmRequestCount, llmExcludedWords);
                     }
                 } else if (activeCategory && !shouldUseDefaultHomeStarterWords(activeCategory)) {
                     // Use the board's specific category and LLM prompt
                     const categoryName = activeCategory.prompt_category || activeCategory.label || 'general';
                     let wordsPrompt = activeCategory.words_prompt || activeCategory.llm_prompt || null;
-
-                    // Use the board's configured prompt as-is. The exclusion list handles
-                    // filtering out words already shown. No prompt synthesis needed.
 
                     // Always pass current speech history so dynamic rows suggest words that
                     // naturally follow what the user has already selected. On initial load
@@ -6869,27 +6877,27 @@
                     // starters; after a selection it generates contextual follow-ups.
                     const buildSpaceForRequest = currentSpeech;
 
-                    console.log(`🔮 Generating hybrid dynamic words for category: "${categoryName}", prompt: "${wordsPrompt}", excluding:`, excludedWords);
+                    console.log(`🔮 Generating hybrid dynamic words for category: "${categoryName}", prompt: "${wordsPrompt}", excluding:`, llmExcludedWords);
 
                     dynamicWords = await generateFreestyleLLMOptionsWithExclusion(
                         categoryName,
-                        totalDynamicButtons,
+                        llmRequestCount,
                         wordsPrompt,
-                        excludedWords,
+                        llmExcludedWords,
                         buildSpaceForRequest
                     );
                 } else {
                     // Fallback to starter words or speech history-based options
                     if (currentSpeech) {
-                        dynamicWords = await generateWordsBasedOnSpeechHistory(currentSpeech, totalDynamicButtons, excludedWords);
+                        dynamicWords = await generateWordsBasedOnSpeechHistory(currentSpeech, llmRequestCount, llmExcludedWords);
                     } else {
-                        dynamicWords = await generateDefaultHomeStarterWords(totalDynamicButtons, excludedWords);
+                        dynamicWords = await generateDefaultHomeStarterWords(llmRequestCount, llmExcludedWords);
                     }
                 }
             } catch (err) {
                 console.error('Error fetching dynamic words for hybrid board:', err);
             }
-            
+
             // If the category-specific fetch failed or returned nothing, do fallback.
             // Wake word boards skip the home-starter fallback — retry with speech history context.
             if (!dynamicWords || dynamicWords.length === 0) {
@@ -6897,17 +6905,25 @@
                     if (currentSpeech || activeCategory?.is_wake_word_board) {
                         dynamicWords = await generateWordsBasedOnSpeechHistory(
                             currentSpeech || (activeCategory?.llm_prompt || ''),
-                            totalDynamicButtons,
-                            excludedWords
+                            llmRequestCount,
+                            llmExcludedWords
                         );
                     } else {
-                        dynamicWords = await generateDefaultHomeStarterWords(totalDynamicButtons, excludedWords);
+                        dynamicWords = await generateDefaultHomeStarterWords(llmRequestCount, llmExcludedWords);
                     }
                 } catch (fallbackErr) {
                     console.error('Error fetching fallback dynamic words:', fallbackErr);
                 }
             }
-            
+
+            // Dedup: remove dynamic words that are already shown in the static pool
+            if (staticWordSet.size > 0 && Array.isArray(dynamicWords) && dynamicWords.length > 0) {
+                dynamicWords = dynamicWords.filter(word => {
+                    const wordText = typeof word === 'object' ? (word.text || word.label || word.speech_text || '') : String(word || '');
+                    return !staticWordSet.has(wordText.trim().toLowerCase());
+                });
+            }
+
             // Ensure we have array of objects
             dynamicWords = dynamicWords.map(opt => (typeof opt === 'object' ? opt : { text: opt }));
             
@@ -16850,6 +16866,10 @@ ${getTapLanguageDirective()}
             console.log('🔄 Rebuilding board. ID:', currentBoardId, 'Type:', resolvedBoardType, 'Exclusions:', extraExclusions);
             
             if (resolvedBoardType === 'hybrid' || hasDynamicButtonsOnScreen) {
+                // Invalidate any pending selectCategory render. Without this, the deferred
+                // wordsRenderPromise.then() from the original board load can fire while we're
+                // awaiting the LLM and overwrite our in-place updates with stale generic options.
+                window.activeTapCategoryLoadKey = null;
                 const hybridOptions = await resolveHybridBoardButtons(currentCategory.board_word_options || [], currentCategory, extraExclusions);
                 
                 // Track current options for exclusions

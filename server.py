@@ -20111,6 +20111,13 @@ async def generate_category_words(
         configured_freestyle_options = settings.get("FreestyleOptions", 6)
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
         freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
+
+        excluded_words = {
+            str(word).strip().lower()
+            for word in (request.exclude_words or [])
+            if str(word).strip()
+        }
+
         # When the exclusion list is large (e.g. 40+ static pool words), the LLM generates
         # options that overlap with excluded words and many get filtered out. Ask the LLM for
         # more candidates so the requested count survives after filtering.
@@ -20131,12 +20138,6 @@ async def generate_category_words(
             else ""
         )
         prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
-
-        excluded_words = {
-            str(word).strip().lower()
-            for word in (request.exclude_words or [])
-            if str(word).strip()
-        }
 
         ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
         ai_override_prompt_block = (
