@@ -13539,7 +13539,8 @@ VARIETY RULES:
                     context: 'home starters',
                     source_page: 'tap_home',
                     is_llm_generated: false,
-                    originating_button_text: 'Home'
+                    originating_button_text: 'Home',
+                    max_options: desiredCount,
                 };
 
                 const response = await authenticatedFetch('/api/freestyle/category-words', {
