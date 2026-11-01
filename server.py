@@ -2783,6 +2783,24 @@ def apply_inclusion_preference_bias(
 
 # Maps allergen stems → brand names / food names that contain that allergen
 # but whose name does not include the allergen word itself.
+def _has_user_specific_overrides(overrides: Dict[str, Any]) -> bool:
+    """Return True only when the user has actual custom restrictions set (allergies, activity flags).
+    The default profanity/adult/politics guards are always enforced by the model and do not need
+    to be injected into every prompt."""
+    exclusions = overrides.get("exclusions", {})
+    activity_flags = [
+        "eatingByMouth", "eatingIndependently", "drinkingByMouth", "drinkingIndependently",
+        "walkingIndependently", "toiletingIndependently", "readingIndependently",
+    ]
+    if any(exclusions.get(k, False) for k in activity_flags):
+        return True
+    if _extract_allergy_terms(exclusions.get("foodAllergies", "")):
+        return True
+    if _extract_allergy_terms(exclusions.get("environmentalAllergies", "")):
+        return True
+    return False
+
+
 _ALLERGEN_BRAND_BLOCKLIST: Dict[str, List[str]] = {
     "peanut": [
         "reese", "snickers", "butterfinger", "payday", "pay day",
@@ -15376,9 +15394,15 @@ async def get_freestyle_word_options(
 
         context_str = " | ".join(context_parts) if context_parts else "General conversation"
 
-        # Load AI option overrides (allergies, exclusions) from user profile
+        # Load AI option overrides (allergies, exclusions) from user profile.
+        # Only inject the constraint block when the user has actual custom restrictions —
+        # injecting it unconditionally adds noise that causes the LLM to generate fewer items.
         ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
-        ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+        ai_override_prompt_block = (
+            build_ai_option_overrides_prompt_block(ai_option_overrides)
+            if _has_user_specific_overrides(ai_option_overrides)
+            else ""
+        )
 
         # Handle build space context for dynamic suggestions
         build_space_text = request.build_space_text or ""
@@ -20106,7 +20130,11 @@ async def generate_category_words(
         }
 
         ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
-        ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+        ai_override_prompt_block = (
+            build_ai_option_overrides_prompt_block(ai_option_overrides)
+            if _has_user_specific_overrides(ai_option_overrides)
+            else ""
+        )
 
         if request.prefer_generic_fast and not (request.custom_prompt and str(request.custom_prompt).strip()):
             generic_words = get_generic_category_words(request.category)
