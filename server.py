@@ -20314,7 +20314,7 @@ async def generate_category_words(
                 },
             )
 
-        estimated_max_output_tokens = min(768, max(220, freestyle_options * 28 + 120))
+        estimated_max_output_tokens = min(2048, max(512, freestyle_options * 50 + 256))
         temperature_value = 0.35 if is_noun_category else 0.5
         generation_config = {
             "response_mime_type": "application/json",
@@ -20464,15 +20464,7 @@ Return only JSON array of objects with text and keywords."""
 
         if len(normalized_words) < freestyle_options:
             logging.info(
-                f"DEBUG: Category '{request.category}' - Only got {len(normalized_words)} words from AI, padding with fallback words"
-            )
-            normalized_words.extend(
-                build_category_fallback_word_objects(
-                    request.category,
-                    freestyle_options - len(normalized_words),
-                    excluded_words=excluded_words,
-                    seen_words=seen_words,
-                )
+                f"Category '{request.category}' - LLM returned {len(normalized_words)} words (requested {freestyle_options}), returning as-is without fallback padding"
             )
 
         filtered_words = enforce_ai_option_overrides(normalized_words, ai_option_overrides, len(normalized_words))
