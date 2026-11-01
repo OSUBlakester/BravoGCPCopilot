@@ -6809,9 +6809,12 @@
             const hasCustomPrompt = !!(activeCategory?.llm_prompt || activeCategory?.words_prompt);
             const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom' && !hasCustomPrompt;
             const preConfiguredDynamic = configuredButtons.filter(btn => btn && Number(btn.row) >= splitRowIndex);
-            const isHomeBoard = activeCategory && isConfiguredHomeCategory(activeCategory);
-            if (isBravoBuildBoard && !hasPoolOverflow && !isHomeBoard) {
-                if (preConfiguredDynamic.length > 0 && extraExclusions.length === 0) {
+            if (isBravoBuildBoard && !hasPoolOverflow) {
+                // Only use pre-configured dynamic buttons when there are enough to fill
+                // all dynamic slots. A partial set (e.g. 4 buttons for a 10-slot row)
+                // is stale data — fall through to the API for a full fresh row.
+                const hasFullPreConfiguredDynamic = preConfiguredDynamic.length >= totalDynamicButtons;
+                if (hasFullPreConfiguredDynamic && extraExclusions.length === 0) {
                     return [...upperRowButtons, ...preConfiguredDynamic];
                 }
                 // Something Else: use bravo-suggest for context-aware regeneration
