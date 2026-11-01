@@ -20061,6 +20061,9 @@ async def generate_category_words(
             if str(word).strip()
         }
 
+        ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
+        ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+
         if request.prefer_generic_fast and not (request.custom_prompt and str(request.custom_prompt).strip()):
             generic_words = get_generic_category_words(request.category)
             final_words: List[Dict[str, Any]] = []
@@ -20214,6 +20217,9 @@ async def generate_category_words(
             for f in (chat_narrative.get("extracted_facts") or [])
             if f.get("fact")
         )) if chat_narrative else ""
+        _allergy_key = "|".join(sorted(_extract_allergy_terms(
+            ai_option_overrides.get("exclusions", {}).get("foodAllergies", "")
+        )))
         cache_payload = {
             "category": request.category,
             "build_space": build_space_text,
@@ -20230,6 +20236,7 @@ async def generate_category_words(
             "noun_only": is_noun_category,
             "adjective_only": is_adjective_category,
             "facts": _facts_fingerprint,
+            "allergies": _allergy_key,
         }
         quick_cache_key = (
             f"{account_id}|{aac_user_id}|cw|"
@@ -20287,6 +20294,7 @@ Exclude: {exclude_words_text}
 {adjective_constraint}
 {noun_constraint}
 {learned_facts_section}
+{ai_override_prompt_block}
 Rules:
 - Use common, useful, everyday AAC vocabulary
 - {follow_up_rule}
@@ -20303,6 +20311,7 @@ Exclude={exclude_words_text}
 {mood_context}
 {adjective_constraint}
 {noun_constraint}
+{ai_override_prompt_block}
 Return only JSON array of objects with text and keywords."""
 
         llm_generate_start_time = time.perf_counter()
@@ -20422,7 +20431,8 @@ Return only JSON array of objects with text and keywords."""
                 )
             )
 
-        final_words = normalized_words[:freestyle_options]
+        filtered_words = enforce_ai_option_overrides(normalized_words, ai_option_overrides, len(normalized_words))
+        final_words = filtered_words[:freestyle_options]
         category_words_quick_response_cache[quick_cache_key] = {
             "created_at": time.time(),
             "response": copy.deepcopy(final_words),
