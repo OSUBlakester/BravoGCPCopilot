@@ -6809,7 +6809,8 @@
             const hasCustomPrompt = !!(activeCategory?.llm_prompt || activeCategory?.words_prompt);
             const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom' && !hasCustomPrompt;
             const preConfiguredDynamic = configuredButtons.filter(btn => btn && Number(btn.row) >= splitRowIndex);
-            if (isBravoBuildBoard && !hasPoolOverflow) {
+            const isHomeBoard = activeCategory && isConfiguredHomeCategory(activeCategory);
+            if (isBravoBuildBoard && !hasPoolOverflow && !isHomeBoard) {
                 if (preConfiguredDynamic.length > 0 && extraExclusions.length === 0) {
                     return [...upperRowButtons, ...preConfiguredDynamic];
                 }
