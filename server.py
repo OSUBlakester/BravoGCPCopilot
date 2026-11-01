@@ -20111,6 +20111,15 @@ async def generate_category_words(
         configured_freestyle_options = settings.get("FreestyleOptions", 6)
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
         freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
+        # When the exclusion list is large (e.g. 40+ static pool words), the LLM generates
+        # options that overlap with excluded words and many get filtered out. Ask the LLM for
+        # more candidates so the requested count survives after filtering.
+        exclusion_count = len(excluded_words)
+        llm_request_options = freestyle_options
+        if exclusion_count >= 20:
+            llm_request_options = min(50, freestyle_options * 3)
+        elif exclusion_count >= 10:
+            llm_request_options = min(50, freestyle_options * 2)
         vocabulary_level = settings.get("vocabularyLevel", "functional")
         configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
@@ -20342,7 +20351,7 @@ async def generate_category_words(
                 },
             )
 
-        estimated_max_output_tokens = min(2048, max(512, freestyle_options * 50 + 256))
+        estimated_max_output_tokens = min(2048, max(512, llm_request_options * 50 + 256))
         temperature_value = 0.35 if is_noun_category else 0.5
         generation_config = {
             "response_mime_type": "application/json",
@@ -20352,7 +20361,7 @@ async def generate_category_words(
 
         full_prompt = f"""{vocab_instruction}
 Generate AAC word options.
-Return ONLY a valid JSON array with exactly {freestyle_options} objects.
+Return ONLY a valid JSON array with exactly {llm_request_options} objects.
 Each object must have:
 - text: a 1-3 word AAC-friendly option
 - keywords: an array of 0-3 short image-search hints
@@ -20376,7 +20385,7 @@ Example:
 [{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""
 
         user_query_only = f"""{task_framing}
-Count={freestyle_options}
+Count={llm_request_options}
 Live={live_context_summary}
 Navigation={navigation_context or 'none'}
 Exclude={exclude_words_text}
@@ -20487,12 +20496,12 @@ Return only JSON array of objects with text and keywords."""
                 "text": word_text,
                 "keywords": normalized_keywords,
             })
-            if len(normalized_words) >= freestyle_options:
+            if len(normalized_words) >= llm_request_options:
                 break
 
-        if len(normalized_words) < freestyle_options:
+        if len(normalized_words) < llm_request_options:
             logging.info(
-                f"Category '{request.category}' - LLM returned {len(normalized_words)} words (requested {freestyle_options}), returning as-is without fallback padding"
+                f"Category '{request.category}' - LLM returned {len(normalized_words)} words (requested {llm_request_options}), returning as-is without fallback padding"
             )
 
         filtered_words = enforce_ai_option_overrides(normalized_words, ai_option_overrides, len(normalized_words))
