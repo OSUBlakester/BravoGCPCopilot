@@ -6801,12 +6801,15 @@
                 ? String(activeCategory.prompt_exclusions).split(',').map(s => s.trim()).filter(Boolean)
                 : [];
             const excludedWords = getTapSpecialButtonExclusions([...staticWords, ...extraExclusions, ...boardExclusions]);
-            // LLM exclusion list: omit static pool words so the LLM isn't blocked from
-            // generating natural contextual options when the static pool covers the full
-            // category vocabulary. Static duplicates are filtered out client-side below.
-            const llmExcludedWords = getTapSpecialButtonExclusions([...extraExclusions, ...boardExclusions]);
             // Pre-build a lowercase set of static words for quick dedup after LLM returns.
             const staticWordSet = new Set(staticWords.map(w => String(w).trim().toLowerCase()));
+            // LLM exclusion list: omit static pool words so the LLM isn't blocked from
+            // generating natural contextual options when the static pool covers the full
+            // category vocabulary. Also strip any static pool words that leaked in via
+            // extraExclusions (caller passes currently-visible words including static ones).
+            // Static duplicates are filtered out client-side below.
+            const llmExtraExclusions = extraExclusions.filter(w => !staticWordSet.has(String(w).trim().toLowerCase()));
+            const llmExcludedWords = getTapSpecialButtonExclusions([...llmExtraExclusions, ...boardExclusions]);
             // When a static pool exists the LLM may generate words that match it; request
             // extra candidates so we still fill all dynamic slots after dedup.
             const llmRequestCount = staticWords.length > 0
