@@ -13530,18 +13530,21 @@ VARIETY RULES:
 
             try {
                 const currentMood = getCurrentMood ? getCurrentMood() : null;
+                // Request more options than needed so the LLM has headroom
+                // after the 40-word exclusion list filters core AAC words.
+                const fetchCount = Math.max(desiredCount * 3, 30);
                 const requestBody = {
                     category: 'Home',
                     build_space_content: '',
                     exclude_words: getTapSpecialButtonExclusions(excludeWords),
                     target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
-                    custom_prompt: getDefaultHomeStarterPrompt(desiredCount),
+                    custom_prompt: getDefaultHomeStarterPrompt(fetchCount),
                     context: 'home starters',
                     source_page: 'tap_home',
                     is_llm_generated: false,
                     originating_button_text: 'Home',
-                    max_options: desiredCount,
+                    max_options: fetchCount,
                 };
 
                 const response = await authenticatedFetch('/api/freestyle/category-words', {
