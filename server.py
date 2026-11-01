@@ -2287,7 +2287,16 @@ def build_ai_option_overrides_prompt_block(overrides: Dict[str, Any]) -> str:
 
     food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
     if food_allergy_terms:
-        lines.append(f"- EXCLUDE any food/drink options that contain or are made with these allergens (including compound foods, e.g. 'peanut butter cups' if 'peanuts' is listed): {', '.join(food_allergy_terms)}")
+        terms_str = ', '.join(food_allergy_terms)
+        lines.append(
+            f"- ⚠️ ALLERGY RESTRICTION (HARD RULE): The user is allergic to: {terms_str}. "
+            f"You MUST NOT suggest any food, candy, snack, meal, drink, or product that contains these allergens — "
+            f"even if the allergen name does not appear in the product name. "
+            f"Use your knowledge of ingredients and brand names to exclude ALL items that contain these allergens. "
+            f"For example: if 'peanuts' is listed, do NOT suggest Reese's Pieces, Reese's Peanut Butter Cups, "
+            f"Snickers, Nutter Butter, Pad Thai, satay sauce, or anything else containing peanuts or peanut derivatives. "
+            f"Treat this as a life-safety rule — when in doubt, exclude the option."
+        )
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     if env_allergy_terms:
