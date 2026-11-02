@@ -3978,10 +3978,12 @@ logging.info("Sentence Transformer initialization disabled (not currently used f
 #     sentence_transformer_model = None # Ensure model is None if setup fails
 
 logging.info("Initializing Gemini client...")
+_gemini_use_vertexai: bool = False
 try:
     _google_api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
     if _google_api_key:
         _gemini_client = genai.Client(api_key=_google_api_key)
+        _gemini_use_vertexai = False
         logging.info("Gemini AI Studio client initialized (GOOGLE_API_KEY present)")
     else:
         _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
@@ -3991,6 +3993,7 @@ try:
             project=_gcp_project,
             location=_gcp_location,
         )
+        _gemini_use_vertexai = True
         logging.info(
             f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location}"
         )
@@ -4828,9 +4831,10 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
 
-        # Disable thinking tokens — billed at output rate ($2.50/1M) but not needed for AAC suggestions
         _cfg = dict(generation_config) if isinstance(generation_config, dict) else {}
-        _cfg.setdefault("thinking_config", {"thinking_budget": 0})
+        # thinking_config is Vertex AI-specific; AI Studio returns 400 if passed for non-thinking models
+        if _gemini_use_vertexai:
+            _cfg.setdefault("thinking_config", {"thinking_budget": 0})
 
         response = await _execute_gemini_call_with_retry(
             lambda: _gemini_client.aio.models.generate_content(
@@ -4914,7 +4918,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
         "top_p": 0.8,
         "top_k": 20,
         "max_output_tokens": 220,
-        "thinking_config": {"thinking_budget": 0},
+        **({"thinking_config": {"thinking_budget": 0}} if _gemini_use_vertexai else {}),
     }
 
     start_time = time.perf_counter()
