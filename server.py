@@ -3977,26 +3977,15 @@ logging.info("Sentence Transformer initialization disabled (not currently used f
 #     logging.error(f"Error initializing Sentence Transformer: {e}", exc_info=True)
 #     sentence_transformer_model = None # Ensure model is None if setup fails
 
-logging.info("Initializing Gemini client...")
-_gemini_use_vertexai: bool = False
+logging.info("Initializing Gemini client (Vertex AI)...")
 try:
-    _google_api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
-    if _google_api_key:
-        _gemini_client = genai.Client(api_key=_google_api_key)
-        _gemini_use_vertexai = False
-        logging.info("Gemini AI Studio client initialized (GOOGLE_API_KEY present)")
-    else:
-        _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
-        _gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
-        _gemini_client = genai.Client(
-            vertexai=True,
-            project=_gcp_project,
-            location=_gcp_location,
-        )
-        _gemini_use_vertexai = True
-        logging.info(
-            f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location}"
-        )
+    _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
+    _gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
+    _gemini_client = genai.Client(
+        vertexai=True,
+        project=_gcp_project,
+        location=_gcp_location,
+    )
     _primary_model_name = DEFAULT_PRIMARY_LLM_MODEL_NAME
     _fallback_model_name = DEFAULT_FALLBACK_LLM_MODEL_NAME
     _fast_words_model_name = GEMINI_FAST_WORDS_MODEL
@@ -4007,7 +3996,8 @@ try:
         )
         _fast_words_model_name = GEMINI_PRIMARY_MODEL
     logging.info(
-        f"Gemini client models: primary={_primary_model_name} fallback={_fallback_model_name} fast={_fast_words_model_name}"
+        f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location} "
+        f"primary={_primary_model_name} fallback={_fallback_model_name} fast={_fast_words_model_name}"
     )
 except Exception as e_genai_config:
     logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
@@ -4831,11 +4821,9 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
 
+        # Disable thinking tokens — billed at output rate ($2.50/1M) but not needed for AAC suggestions
         _cfg = dict(generation_config) if isinstance(generation_config, dict) else {}
-        if _gemini_use_vertexai:
-            _cfg.setdefault("thinking_config", {"thinking_budget": 0})
-        else:
-            _cfg.setdefault("thinking_config", {"thinking_level": "MINIMAL"})
+        _cfg.setdefault("thinking_config", {"thinking_budget": 0})
 
         response = await _execute_gemini_call_with_retry(
             lambda: _gemini_client.aio.models.generate_content(
@@ -4919,7 +4907,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
         "top_p": 0.8,
         "top_k": 20,
         "max_output_tokens": 220,
-        "thinking_config": {"thinking_budget": 0} if _gemini_use_vertexai else {"thinking_level": "MINIMAL"},
+        "thinking_config": {"thinking_budget": 0},
     }
 
     start_time = time.perf_counter()
