@@ -4835,7 +4835,7 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         if _gemini_use_vertexai:
             _cfg.setdefault("thinking_config", {"thinking_budget": 0})
         else:
-            _cfg.setdefault("thinking_config", {"thinking_level": "LOW"})
+            _cfg.setdefault("thinking_config", {"thinking_level": "MINIMAL"})
 
         response = await _execute_gemini_call_with_retry(
             lambda: _gemini_client.aio.models.generate_content(
@@ -4919,7 +4919,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
         "top_p": 0.8,
         "top_k": 20,
         "max_output_tokens": 220,
-        "thinking_config": {"thinking_budget": 0} if _gemini_use_vertexai else {"thinking_level": "LOW"},
+        "thinking_config": {"thinking_budget": 0} if _gemini_use_vertexai else {"thinking_level": "MINIMAL"},
     }
 
     start_time = time.perf_counter()
