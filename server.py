@@ -2287,7 +2287,16 @@ def build_ai_option_overrides_prompt_block(overrides: Dict[str, Any]) -> str:
 
     food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
     if food_allergy_terms:
-        lines.append(f"- EXCLUDE any food/drink references containing allergies: {', '.join(food_allergy_terms)}")
+        terms_str = ', '.join(food_allergy_terms)
+        lines.append(
+            f"- ⚠️ ALLERGY RESTRICTION (HARD RULE): The user is allergic to: {terms_str}. "
+            f"You MUST NOT suggest any food, candy, snack, meal, drink, or product that contains these allergens — "
+            f"even if the allergen name does not appear in the product name. "
+            f"Use your knowledge of ingredients and brand names to exclude ALL items that contain these allergens. "
+            f"For example: if 'peanuts' is listed, do NOT suggest Reese's Pieces, Reese's Peanut Butter Cups, "
+            f"Snickers, Nutter Butter, Pad Thai, satay sauce, or anything else containing peanuts or peanut derivatives. "
+            f"Treat this as a life-safety rule — when in doubt, exclude the option."
+        )
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     if env_allergy_terms:
@@ -2772,6 +2781,61 @@ def apply_inclusion_preference_bias(
     return combined[:max(1, max_options)]
 
 
+# Maps allergen stems → brand names / food names that contain that allergen
+# but whose name does not include the allergen word itself.
+def _has_user_specific_overrides(overrides: Dict[str, Any]) -> bool:
+    """Return True only when the user has actual custom restrictions set (allergies, activity flags).
+    The default profanity/adult/politics guards are always enforced by the model and do not need
+    to be injected into every prompt."""
+    exclusions = overrides.get("exclusions", {})
+    activity_flags = [
+        "eatingByMouth", "eatingIndependently", "drinkingByMouth", "drinkingIndependently",
+        "walkingIndependently", "toiletingIndependently", "readingIndependently",
+    ]
+    if any(exclusions.get(k, False) for k in activity_flags):
+        return True
+    if _extract_allergy_terms(exclusions.get("foodAllergies", "")):
+        return True
+    if _extract_allergy_terms(exclusions.get("environmentalAllergies", "")):
+        return True
+    return False
+
+
+_ALLERGEN_BRAND_BLOCKLIST: Dict[str, List[str]] = {
+    "peanut": [
+        "reese", "snickers", "butterfinger", "payday", "pay day",
+        "nutter butter", "mr. goodbar", "mr goodbar", "oh henry",
+        "tagalong", "do-si-do", "dosido", "fifth avenue",
+        "satay", "pad thai", "gado gado", "kung pao",
+    ],
+    "tree nut": [
+        "ferrero rocher", "nutella", "toblerone", "almond joy",
+        "mounds", "pistachio", "praline", "marzipan", "gianduja",
+    ],
+    "milk": [
+        "butter", "cream", "cheese", "yogurt", "whey", "casein",
+        "half and half", "half & half", "lactose",
+    ],
+    "egg": [
+        "mayonnaise", "mayo", "hollandaise", "aioli", "meringue",
+        "custard", "quiche",
+    ],
+    "wheat": [
+        "seitan", "bulgur", "farro", "spelt", "kamut", "triticale",
+    ],
+    "soy": [
+        "edamame", "miso", "tempeh", "tamari", "tofu",
+    ],
+    "shellfish": [
+        "shrimp", "crab", "lobster", "crayfish", "crawfish",
+        "prawn", "barnacle", "krill",
+    ],
+    "fish": [
+        "worcestershire", "caesar dressing",
+    ],
+}
+
+
 def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -> Optional[str]:
     if not option_text:
         return None
@@ -2822,12 +2886,22 @@ def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -
 
     food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
     for term in food_allergy_terms:
-        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+        # Strip trailing 's'/'es' so "peanuts" matches "peanut butter cups" and vice versa
+        stem = re.escape(term.rstrip('s').rstrip('e') if len(term) > 3 else term)
+        if term and re.search(rf'\b{stem}', normalized_text):
             return f"food_allergy:{term}"
+        # Check brand-name blocklist for allergens whose name doesn't appear in the product name
+        term_stem = term.rstrip('s').rstrip('e') if len(term) > 3 else term
+        for allergen_key, brand_names in _ALLERGEN_BRAND_BLOCKLIST.items():
+            if term_stem in allergen_key or allergen_key in term_stem or allergen_key.startswith(term_stem):
+                for brand in brand_names:
+                    if brand in normalized_text:
+                        return f"food_allergy:{term}(brand:{brand})"
 
     env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
     for term in env_allergy_terms:
-        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+        stem = re.escape(term.rstrip('s').rstrip('e') if len(term) > 3 else term)
+        if term and re.search(rf'\b{stem}', normalized_text):
             return f"environmental_allergy:{term}"
 
     topic_patterns = {
@@ -15319,7 +15393,17 @@ async def get_freestyle_word_options(
                 live_context_parts.append(f"activity={activity_value}")
 
         context_str = " | ".join(context_parts) if context_parts else "General conversation"
-        
+
+        # Load AI option overrides (allergies, exclusions) from user profile.
+        # Only inject the constraint block when the user has actual custom restrictions —
+        # injecting it unconditionally adds noise that causes the LLM to generate fewer items.
+        ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
+        ai_override_prompt_block = (
+            build_ai_option_overrides_prompt_block(ai_option_overrides)
+            if _has_user_specific_overrides(ai_option_overrides)
+            else ""
+        )
+
         # Handle build space context for dynamic suggestions
         build_space_text = request.build_space_text or ""
 
@@ -15397,7 +15481,8 @@ CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-Context (use for relevance and ranking): {contextual_info}"""
+Context (use for relevance and ranking): {contextual_info}
+{ai_override_prompt_block}"""
         else:
             # If no build space text, provide words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
@@ -15444,8 +15529,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-User context: {contextual_info}"""
-            
+User context: {contextual_info}
+{ai_override_prompt_block}"""
+
             elif has_source_page:
                 # USER CAME FROM A STATIC (non-LLM) PAGE — use page name as topic hint
                 page_name = request.source_page.replace('_', ' ').replace('-', ' ')
@@ -15474,8 +15560,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-User context: {contextual_info}"""
-            
+User context: {contextual_info}
+{ai_override_prompt_block}"""
+
             else:
                 # NO CONTEXT — generic AAC words (home page or unknown source)
                 prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
@@ -15499,8 +15586,9 @@ Requirements:
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
-Context for word selection: {contextual_info}"""
-        
+Context for word selection: {contextual_info}
+{ai_override_prompt_block}"""
+
         logging.info(f"Generated prompt for LLM: {prompt}")
 
         # Use LLM to generate options with generation config for more randomness
@@ -15605,10 +15693,11 @@ Context for word selection: {contextual_info}"""
                     })
                     seen.add(unique_key)
         
-        # Take only the requested number
-        options = unique_options[:freestyle_options]
-        
-        logging.warning(f"DEBUG Freestyle API - Parsed {len(unique_options)} unique options, requested {freestyle_options}, returning {len(options)}")
+        # Apply allergy/exclusion overrides as a post-generation filter, then take requested count
+        filtered_options = enforce_ai_option_overrides(unique_options, ai_option_overrides, len(unique_options))
+        options = filtered_options[:freestyle_options]
+
+        logging.warning(f"DEBUG Freestyle API - Parsed {len(unique_options)} unique options, after overrides {len(filtered_options)}, requested {freestyle_options}, returning {len(options)}")
         logging.warning(f"DEBUG Freestyle API - All lines: {len(all_lines)}, Filtered lines: {len(word_lines)}")
         logging.warning(f"DEBUG Freestyle API - Filtered lines: {word_lines[:10] if len(word_lines) > 10 else word_lines}")
         logging.warning(f"DEBUG Freestyle API - Build space text: '{build_space_text}', has build space: {bool(build_space_text.strip())}")
@@ -20022,6 +20111,22 @@ async def generate_category_words(
         configured_freestyle_options = settings.get("FreestyleOptions", 6)
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
         freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
+
+        excluded_words = {
+            str(word).strip().lower()
+            for word in (request.exclude_words or [])
+            if str(word).strip()
+        }
+
+        # When the exclusion list is large (e.g. 40+ static pool words), the LLM generates
+        # options that overlap with excluded words and many get filtered out. Ask the LLM for
+        # more candidates so the requested count survives after filtering.
+        exclusion_count = len(excluded_words)
+        llm_request_options = freestyle_options
+        if exclusion_count >= 20:
+            llm_request_options = min(50, freestyle_options * 3)
+        elif exclusion_count >= 10:
+            llm_request_options = min(50, freestyle_options * 2)
         vocabulary_level = settings.get("vocabularyLevel", "functional")
         configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
@@ -20034,11 +20139,12 @@ async def generate_category_words(
         )
         prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
 
-        excluded_words = {
-            str(word).strip().lower()
-            for word in (request.exclude_words or [])
-            if str(word).strip()
-        }
+        ai_option_overrides = normalize_ai_option_overrides(user_info.get("aiOptionOverrides", {}))
+        ai_override_prompt_block = (
+            build_ai_option_overrides_prompt_block(ai_option_overrides)
+            if _has_user_specific_overrides(ai_option_overrides)
+            else ""
+        )
 
         if request.prefer_generic_fast and not (request.custom_prompt and str(request.custom_prompt).strip()):
             generic_words = get_generic_category_words(request.category)
@@ -20193,6 +20299,9 @@ async def generate_category_words(
             for f in (chat_narrative.get("extracted_facts") or [])
             if f.get("fact")
         )) if chat_narrative else ""
+        _allergy_key = "|".join(sorted(_extract_allergy_terms(
+            ai_option_overrides.get("exclusions", {}).get("foodAllergies", "")
+        )))
         cache_payload = {
             "category": request.category,
             "build_space": build_space_text,
@@ -20209,6 +20318,7 @@ async def generate_category_words(
             "noun_only": is_noun_category,
             "adjective_only": is_adjective_category,
             "facts": _facts_fingerprint,
+            "allergies": _allergy_key,
         }
         quick_cache_key = (
             f"{account_id}|{aac_user_id}|cw|"
@@ -20242,7 +20352,7 @@ async def generate_category_words(
                 },
             )
 
-        estimated_max_output_tokens = min(768, max(220, freestyle_options * 28 + 120))
+        estimated_max_output_tokens = min(2048, max(512, llm_request_options * 50 + 256))
         temperature_value = 0.35 if is_noun_category else 0.5
         generation_config = {
             "response_mime_type": "application/json",
@@ -20252,7 +20362,7 @@ async def generate_category_words(
 
         full_prompt = f"""{vocab_instruction}
 Generate AAC word options.
-Return ONLY a valid JSON array with exactly {freestyle_options} objects.
+Return ONLY a valid JSON array with exactly {llm_request_options} objects.
 Each object must have:
 - text: a 1-3 word AAC-friendly option
 - keywords: an array of 0-3 short image-search hints
@@ -20266,6 +20376,7 @@ Exclude: {exclude_words_text}
 {adjective_constraint}
 {noun_constraint}
 {learned_facts_section}
+{ai_override_prompt_block}
 Rules:
 - Use common, useful, everyday AAC vocabulary
 - {follow_up_rule}
@@ -20275,13 +20386,14 @@ Example:
 [{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""
 
         user_query_only = f"""{task_framing}
-Count={freestyle_options}
+Count={llm_request_options}
 Live={live_context_summary}
 Navigation={navigation_context or 'none'}
 Exclude={exclude_words_text}
 {mood_context}
 {adjective_constraint}
 {noun_constraint}
+{ai_override_prompt_block}
 Return only JSON array of objects with text and keywords."""
 
         llm_generate_start_time = time.perf_counter()
@@ -20385,23 +20497,16 @@ Return only JSON array of objects with text and keywords."""
                 "text": word_text,
                 "keywords": normalized_keywords,
             })
-            if len(normalized_words) >= freestyle_options:
+            if len(normalized_words) >= llm_request_options:
                 break
 
-        if len(normalized_words) < freestyle_options:
+        if len(normalized_words) < llm_request_options:
             logging.info(
-                f"DEBUG: Category '{request.category}' - Only got {len(normalized_words)} words from AI, padding with fallback words"
-            )
-            normalized_words.extend(
-                build_category_fallback_word_objects(
-                    request.category,
-                    freestyle_options - len(normalized_words),
-                    excluded_words=excluded_words,
-                    seen_words=seen_words,
-                )
+                f"Category '{request.category}' - LLM returned {len(normalized_words)} words (requested {llm_request_options}), returning as-is without fallback padding"
             )
 
-        final_words = normalized_words[:freestyle_options]
+        filtered_words = enforce_ai_option_overrides(normalized_words, ai_option_overrides, len(normalized_words))
+        final_words = filtered_words[:freestyle_options]
         category_words_quick_response_cache[quick_cache_key] = {
             "created_at": time.time(),
             "response": copy.deepcopy(final_words),
