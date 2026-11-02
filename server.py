@@ -3977,15 +3977,23 @@ logging.info("Sentence Transformer initialization disabled (not currently used f
 #     logging.error(f"Error initializing Sentence Transformer: {e}", exc_info=True)
 #     sentence_transformer_model = None # Ensure model is None if setup fails
 
-logging.info("Initializing Gemini client (Vertex AI)...")
+logging.info("Initializing Gemini client...")
 try:
-    _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
-    _gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
-    _gemini_client = genai.Client(
-        vertexai=True,
-        project=_gcp_project,
-        location=_gcp_location,
-    )
+    _google_api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
+    if _google_api_key:
+        _gemini_client = genai.Client(api_key=_google_api_key)
+        logging.info("Gemini AI Studio client initialized (GOOGLE_API_KEY present)")
+    else:
+        _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
+        _gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
+        _gemini_client = genai.Client(
+            vertexai=True,
+            project=_gcp_project,
+            location=_gcp_location,
+        )
+        logging.info(
+            f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location}"
+        )
     _primary_model_name = DEFAULT_PRIMARY_LLM_MODEL_NAME
     _fallback_model_name = DEFAULT_FALLBACK_LLM_MODEL_NAME
     _fast_words_model_name = GEMINI_FAST_WORDS_MODEL
@@ -3996,8 +4004,7 @@ try:
         )
         _fast_words_model_name = GEMINI_PRIMARY_MODEL
     logging.info(
-        f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location} "
-        f"primary={_primary_model_name} fallback={_fallback_model_name} fast={_fast_words_model_name}"
+        f"Gemini client models: primary={_primary_model_name} fallback={_fallback_model_name} fast={_fast_words_model_name}"
     )
 except Exception as e_genai_config:
     logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
