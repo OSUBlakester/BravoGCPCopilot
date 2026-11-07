@@ -12627,6 +12627,9 @@ def _a7_fact_redundant_with(value: str, reference: str) -> bool:
     Two signals (either suffices):
     1. Any 2-word phrase from value appears verbatim in reference.
     2. >=50% of value's significant words appear in reference.
+
+    Used for fact-to-fact deduplication within extracted_facts.
+    For narrative deduplication use _a7_fact_covered_by_narrative instead.
     """
     if not value or not reference:
         return False
@@ -12641,6 +12644,32 @@ def _a7_fact_redundant_with(value: str, reference: str) -> bool:
         hits = sum(1 for w in sig if w in ref_lower)
         if hits / len(sig) >= 0.5:
             return True
+    return False
+
+
+def _a7_fact_covered_by_narrative(value: str, narrative: str) -> bool:
+    """True if value's PRIMARY content is already captured in the narrative.
+
+    More conservative than _a7_fact_redundant_with: fires only when a
+    matched 2-word entity constitutes at least half of the value's tokens.
+    This prevents false positives where the narrative entity is merely
+    mentioned as context rather than being the subject of the new fact.
+
+    Example: "Denver Broncos games" (3 tokens, bigram = 67%) → blocked.
+    Example: "orange like the Denver Broncos" (5 tokens, bigram = 40%) → not blocked.
+    """
+    if not value or not narrative:
+        return False
+    ref_lower = narrative.lower()
+    val_tokens = re.sub(r"[^a-z ]", "", value.lower()).split()
+    n = len(val_tokens)
+    if n < 2:
+        return False
+    for i in range(n - 1):
+        w1, w2 = val_tokens[i], val_tokens[i + 1]
+        if len(w1) >= 3 and len(w2) >= 3 and f"{w1} {w2}" in ref_lower:
+            if 2 / n >= 0.5:
+                return True
     return False
 
 
@@ -12660,7 +12689,7 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
         if _a7_fact_redundant_with(value, fact.get("fact", "")):
             _a7_record_metric("queue.semantic_duplicate")
             return False
-    if _a7_fact_redundant_with(value, narrative.get("narrative_text", "")):
+    if _a7_fact_covered_by_narrative(value, narrative.get("narrative_text", "")):
         _a7_record_metric("queue.narrative_covered")
         return False
     proposals.append({**proposal, "proposed_at": timestamp})
@@ -12704,7 +12733,7 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     written_narrative = user_info_doc.get("narrative", "")
     extracted_narrative = narrative.get("narrative_text", "")
     combined_narrative = f"{written_narrative} {extracted_narrative}".strip()
-    if combined_narrative and _a7_fact_redundant_with(value, combined_narrative):
+    if combined_narrative and _a7_fact_covered_by_narrative(value, combined_narrative):
         _a7_record_metric("approve.narrative_covered", f'category="{category}"')
         return False
     for fact in facts:
