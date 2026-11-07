@@ -4675,122 +4675,68 @@ async def _execute_gemini_call_with_retry(
 
 # --- Helper function for Gemini LLM with Context Caching ---
 async def _generate_gemini_content_with_caching(
-    account_id: str, 
-    aac_user_id: str, 
-    prompt_text: str, 
+    account_id: str,
+    aac_user_id: str,
+    prompt_text: str,
     generation_config: Optional[Dict] = None,
     cache_manager: GeminiCacheManager = None,
     user_query_only: Optional[str] = None
 ) -> str:
-    """Generate content using Gemini with context caching and conversation sessions for token savings"""
-    
+    """Generate content using Gemini with context caching for token savings.
+
+    When a valid Gemini cache exists for the user (base context: narrative,
+    settings, etc.), sends only user_query_only (the dynamic per-request part)
+    with the cached_content reference — avoiding re-sending the full base
+    context every call. Falls back to full prompt generation if no cache exists
+    or the cached call fails.
+    """
     if not cache_manager:
-        # Fallback to non-cached generation
         return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
-    
+
     try:
-        # Try to get or create conversation session with cached context
-        chat_session = await cache_manager.get_or_create_conversation_session(account_id, aac_user_id)
-        
-        if chat_session and hasattr(chat_session, 'send_message'):
-            # Use conversation session for generation (maintains chat history)
-            logging.info(f"Using Gemini chat session for {account_id}/{aac_user_id}")
-            
-            # CRITICAL: Use user_query_only for token savings when chat session has cached content
-            if user_query_only:
-                # Add validation for empty user_query_only
-                if not user_query_only or not user_query_only.strip():
-                    logging.error(f"Empty user_query_only provided for {account_id}/{aac_user_id}")
-                    raise ValueError("Empty user query provided")
-                
-                # Calculate token savings
-                full_prompt_tokens = len(prompt_text.split())  # Rough estimate
-                user_query_tokens = len(user_query_only.split())  # Rough estimate
-                token_savings = full_prompt_tokens - user_query_tokens
-                token_savings_percent = (token_savings / full_prompt_tokens) * 100 if full_prompt_tokens > 0 else 0
-                
-                logging.info(f"TOKEN SAVINGS: Using chat session with cached content for {account_id}/{aac_user_id}")
-                logging.info(f"TOKEN SAVINGS: Full context would be ~{full_prompt_tokens} tokens, sending only ~{user_query_tokens} tokens")
-                logging.info(f"TOKEN SAVINGS: Estimated savings: ~{token_savings} tokens ({token_savings_percent:.1f}% reduction)")
-                logging.info(f"TOKEN SAVINGS: User query preview: {user_query_only[:200]}...")
-                
-                # Send only the user query - context is cached in the session
-                response = await _execute_gemini_call_with_retry(
-                    lambda: chat_session.send_message(user_query_only),
-                    operation_label="gemini_chat_session_send_message",
-                    account_id=account_id,
-                    aac_user_id=aac_user_id,
-                    model_name=_primary_model_name,
-                )
-            else:
-                # Fallback: send full prompt if no user_query_only provided
-                logging.info(f"No user_query_only provided, sending full prompt to chat session for {account_id}/{aac_user_id}")
-                logging.info(f"Full prompt preview: {prompt_text[:200]}...")
-                response = await _execute_gemini_call_with_retry(
-                    lambda: chat_session.send_message(prompt_text),
-                    operation_label="gemini_chat_session_send_message",
-                    account_id=account_id,
-                    aac_user_id=aac_user_id,
-                    model_name=_primary_model_name,
-                )
-            
-            # Update message count
-            user_key = cache_manager._get_user_key(account_id, aac_user_id)
-            if user_key in cache_manager.conversation_sessions:
-                cache_manager.conversation_sessions[user_key]["message_count"] += 1
-            
-            return response.text.strip()
-            
-        else:
-            # Fallback: Check for cached content references to use with direct model call
-            cached_refs = await cache_manager.build_cached_context_references(account_id, aac_user_id)
-            
-            if cached_refs and user_query_only:
-                # Use model with cached content - ONLY send user query for token savings
-                try:
-                    # Get the cached content reference
-                    cached_content_name = cached_refs[0]
+        cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
 
-                    # Calculate token savings
-                    full_prompt_tokens = len(prompt_text.split()) if prompt_text else 100
-                    user_query_tokens = len(user_query_only.split())
-                    token_savings = full_prompt_tokens - user_query_tokens
-                    token_savings_percent = (token_savings / full_prompt_tokens) * 100 if full_prompt_tokens > 0 else 0
-
-                    logging.info(f"TOKEN SAVINGS: Using cached content for {account_id}/{aac_user_id}")
-                    logging.info(f"TOKEN SAVINGS: Full context would be ~{full_prompt_tokens} tokens, sending only ~{user_query_tokens} tokens")
-                    logging.info(f"TOKEN SAVINGS: Estimated savings: ~{token_savings} tokens ({token_savings_percent:.1f}% reduction)")
-
-                    _cfg_with_cache = dict(generation_config or {})
-                    _cfg_with_cache['cached_content'] = cached_content_name
-
-                    response = await _execute_gemini_call_with_retry(
-                        lambda: _gemini_client.aio.models.generate_content(
-                            model=_primary_model_name,
-                            contents=user_query_only,
-                            config=_cfg_with_cache,
-                        ),
-                        operation_label="gemini_cached_content_generate",
-                        account_id=account_id,
-                        aac_user_id=aac_user_id,
-                        model_name=_primary_model_name,
-                    )
-                    return response.text.strip()
-                    
-                except Exception as cache_error:
-                    logging.warning(f"Failed to use cached content, falling back to regular generation: {cache_error}")
-                    return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
-            else:
-                # No cached content available or no user query provided, use regular generation
-                if not user_query_only:
-                    logging.info(f"No user_query_only provided, using full prompt for {account_id}/{aac_user_id}")
+        if cached_content_ref and user_query_only:
+            try:
+                _cfg = dict(generation_config or {})
+                if _gemini_use_vertexai:
+                    _cfg.setdefault("thinking_config", {"thinking_budget": 0})
                 else:
-                    logging.info(f"No cached content available, using full prompt for {account_id}/{aac_user_id}")
+                    _cfg.setdefault("thinking_config", {"thinking_level": "MINIMAL"})
+                _cfg['cached_content'] = cached_content_ref
+
+                full_prompt_tokens = len(prompt_text.split()) if prompt_text else 0
+                user_query_tokens = len(user_query_only.split())
+                logging.info(
+                    f"TOKEN SAVINGS: cached content hit for {account_id}/{aac_user_id} — "
+                    f"sending ~{user_query_tokens} tokens instead of ~{full_prompt_tokens}"
+                )
+
+                response = await _execute_gemini_call_with_retry(
+                    lambda: _gemini_client.aio.models.generate_content(
+                        model=_primary_model_name,
+                        contents=user_query_only,
+                        config=_cfg,
+                    ),
+                    operation_label="gemini_cached_content_generate",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                    model_name=_primary_model_name,
+                )
+                return response.text.strip()
+            except Exception as cache_error:
+                logging.warning(
+                    f"Cached content call failed for {account_id}/{aac_user_id}, "
+                    f"falling back to full prompt: {cache_error}"
+                )
                 return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
-                
+        else:
+            if not cached_content_ref:
+                logging.info(f"No valid cache for {account_id}/{aac_user_id}, using full prompt")
+            return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+
     except Exception as e:
         logging.error(f"Error in cached Gemini generation for {account_id}/{aac_user_id}: {e}")
-        # Fallback to non-cached generation
         return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
 
 # --- Helper function for Gemini LLM content generation with fallback ---
