@@ -12606,6 +12606,44 @@ async def _a7_save_pending_proposals(account_id: str, aac_user_id: str, data: Di
     )
 
 
+_A7_DEDUP_STOP_WORDS: frozenset = frozenset({
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'will',
+    'your', 'their', 'they', 'some', 'what', 'when', 'where', 'which',
+    'been', 'were', 'would', 'could', 'should', 'does', 'doing', 'more',
+    'also', 'just', 'into', 'than', 'then', 'over', 'only', 'very',
+    'want', 'wants', 'watch', 'likes', 'enjoy', 'enjoys',
+})
+
+
+def _a7_key_words(text: str) -> List[str]:
+    """Return significant non-stop words (4+ chars) from text in order."""
+    return [w.lower() for w in re.findall(r'\b[a-zA-Z]{4,}\b', text)
+            if w.lower() not in _A7_DEDUP_STOP_WORDS]
+
+
+def _a7_fact_redundant_with(value: str, reference: str) -> bool:
+    """True if value is semantically redundant with reference text.
+
+    Two signals (either suffices):
+    1. Any 2-word phrase from value appears verbatim in reference.
+    2. >=50% of value's significant words appear in reference.
+    """
+    if not value or not reference:
+        return False
+    ref_lower = reference.lower()
+    val_tokens = re.sub(r"[^a-z ]", "", value.lower()).split()
+    for i in range(len(val_tokens) - 1):
+        w1, w2 = val_tokens[i], val_tokens[i + 1]
+        if len(w1) >= 3 and len(w2) >= 3 and f"{w1} {w2}" in ref_lower:
+            return True
+    sig = _a7_key_words(value)
+    if len(sig) >= 2:
+        hits = sum(1 for w in sig if w in ref_lower)
+        if hits / len(sig) >= 0.5:
+            return True
+    return False
+
+
 async def _a7_queue_proposal(account_id: str, aac_user_id: str,
                               proposal: Dict[str, Any], timestamp: Any) -> bool:
     """A7 Layer 4 — pending queue. Nothing reaches the profile here."""
@@ -12615,6 +12653,16 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
         if (existing.get("category") == proposal["category"]
                 and existing.get("value", "").lower() == proposal["value"].lower()):
             return False
+    # Skip if already covered by an approved fact or by the AI-extracted narrative
+    narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+    value = proposal["value"]
+    for fact in narrative.get("extracted_facts", []):
+        if _a7_fact_redundant_with(value, fact.get("fact", "")):
+            _a7_record_metric("queue.semantic_duplicate")
+            return False
+    if _a7_fact_redundant_with(value, narrative.get("narrative_text", "")):
+        _a7_record_metric("queue.narrative_covered")
+        return False
     proposals.append({**proposal, "proposed_at": timestamp})
     pending["proposals"] = proposals[-_A7_MAX_PENDING_PROPOSALS:]
     pending["last_updated"] = timestamp
@@ -12645,6 +12693,24 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
             await cache_manager.invalidate_cache(account_id, aac_user_id)
             _a7_record_metric("approve.sentiment_updated", f'category="{category}"')
             return True
+    # Semantic deduplication: skip if covered by user narrative or semantically
+    # similar to an existing fact (beyond the exact-string check above).
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+    written_narrative = user_info_doc.get("narrative", "")
+    extracted_narrative = narrative.get("narrative_text", "")
+    combined_narrative = f"{written_narrative} {extracted_narrative}".strip()
+    if combined_narrative and _a7_fact_redundant_with(value, combined_narrative):
+        _a7_record_metric("approve.narrative_covered", f'category="{category}"')
+        return False
+    for fact in facts:
+        if _a7_fact_redundant_with(value, fact.get("fact", "")):
+            _a7_record_metric("approve.semantic_duplicate", f'category="{category}"')
+            return False
     new_fact: Dict[str, Any] = {
         "fact": value,
         "category": category,
