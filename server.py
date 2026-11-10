@@ -3701,6 +3701,37 @@ Undated Diary Entries (use cautiously, max 5):
                 chat_history_cached=False,
                 consent_fingerprint=_warmup_fingerprint,
             )
+
+            # Emit a GEMINI_COST_TRACK entry so cache-creation tokens are visible in the
+            # admin cost dashboard (they were previously invisible but still billed by GCP).
+            try:
+                import json as _json, sys as _sys
+                creation_tokens = (
+                    getattr(getattr(cached_content, 'usage_metadata', None), 'total_token_count', None)
+                    or (len(base_context) // 4)  # fallback: 4 chars ≈ 1 token
+                )
+                creation_cost = _gemini_cost_usd(_primary_model_name, creation_tokens, 0, 0)
+                print(_json.dumps({
+                    "severity":  "INFO",
+                    "message":   "GEMINI_COST_TRACK",
+                    "op":        "gemini_cache_create",
+                    "model":     _primary_model_name,
+                    "backend":   "vertex_ai",
+                    "account":   account_id,
+                    "user":      aac_user_id,
+                    "in_tok":    creation_tokens,
+                    "cache_tok": 0,
+                    "out_tok":   0,
+                    "total_tok": creation_tokens,
+                    "cost_usd":  round(creation_cost, 8),
+                }), file=_sys.stdout, flush=True)
+                logging.info(
+                    f"Cache creation [{account_id}/{aac_user_id}]: "
+                    f"{creation_tokens:,} tokens, est ${creation_cost:.6f}"
+                )
+            except Exception as _log_err:
+                logging.warning(f"Failed to log cache creation tokens: {_log_err}")
+
             logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
         except Exception as e:
