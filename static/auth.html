@@ -707,7 +707,7 @@
 </head>
 <body>
     <div class="auth-container">
-        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6" id="auth-title">Bravo Login</h2>
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6" id="auth-title"><img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;"></h2>
 
         <div id="login-section" class="auth-section active">
             <form id="login-form" class="space-y-4">
@@ -2052,7 +2052,7 @@
 
         // Event Listeners for switching forms
         showRegisterLink.addEventListener('click', () => showSection(registerSection, 'Register'));
-        showLoginLink.addEventListener('click', () => showSection(loginSection, 'Login'));
+        showLoginLink.addEventListener('click', () => { showSection(loginSection, ''); authTitle.innerHTML = '<img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;">'; });
 
         // Load saved credentials after page loads
         loadSavedCredentials();
@@ -2173,7 +2173,8 @@
             loginSection.classList.remove('active');
             registerSection.classList.remove('active');
             profileSection.classList.add('active');
-            authTitle.innerHTML = '<img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;">';
+            authTitle.innerHTML = '';
+            authTitle.textContent = 'Select Profile';
 
             // Store userProfiles and idToken globally for other functions
             window.currentUserProfiles = userProfiles;
@@ -3343,7 +3344,7 @@ registerForm.addEventListener('submit', async (e) => {
                 }
                 // If user is already null, show the login form
                 console.log('Showing login form after intentional logout');
-                showSection(loginSection, 'Login');
+                showSection(loginSection, ''); authTitle.innerHTML = '<img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;">';
                 loadingIndicator.style.display = 'none';
                 return;
             }
@@ -3490,7 +3491,7 @@ registerForm.addEventListener('submit', async (e) => {
                 loadingIndicator.style.display = 'none';
             }
         }                console.log("Displaying auth forms.");
-                showSection(loginSection, 'Login');
+                showSection(loginSection, ''); authTitle.innerHTML = '<img src="/static/images/bravo-logo.png" alt="Bravo" style="max-height:120px;width:auto;display:block;margin:0 auto;">';
                 loadingIndicator.style.display = 'none'; // Ensure loading is hidden initially
             }
         });

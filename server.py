@@ -3088,12 +3088,9 @@ class GeminiCacheManager:
             if local_cache_ref.get('expires_at', 0) <= now_ts:
                 self._validated_cache_refs.pop(user_key, None)
 
-        print(f"DEBUG: _is_cache_valid called for {user_key}", flush=True)
         cache_data = await self._load_cache_from_firestore(user_key)
-        print(f"DEBUG: cache_data from Firestore: {cache_data}", flush=True)
-        
+
         if not cache_data:
-            print(f"DEBUG: No cache_data, returning False", flush=True)
             return False
         
         created_at = cache_data.get('created_at', 0)
@@ -3643,16 +3640,12 @@ Undated Diary Entries (use cautiously, max 5):
         Checks if a valid cache exists for the user. If not, it builds the
         combined context and creates a new Gemini CachedContent object.
         """
-        print(f"DEBUG: warm_up_user_cache_if_needed ENTRY for {account_id}/{aac_user_id}", flush=True)
-        logging.warning(f"🔥 WARMUP FUNCTION CALLED for account_id={account_id}, aac_user_id={aac_user_id}")
         user_key = self._get_user_key(account_id, aac_user_id)
-        logging.warning(f"🔑 Generated user_key: {user_key}")
         if await self._is_cache_valid(user_key):
-            logging.warning(f"Cache for user '{user_key}' is already warm and valid.")
+            logging.debug(f"Cache for user '{user_key}' is already warm and valid.")
             return
 
-        logging.warning(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
-        print(f"DEBUG: About to build BASE context", flush=True)
+        logging.info(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
         try:
             # Load consent before building so we can stamp the fingerprint on the cache record.
             _warmup_consent = await load_consent(account_id, aac_user_id)
@@ -3668,14 +3661,14 @@ Undated Diary Entries (use cautiously, max 5):
             # Use a rough 4 chars/token estimate and skip cache creation when we are clearly under.
             estimated_tokens = len(base_context) // 4
             min_tokens_required = 2048
-            
-            logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
-            
+
+            logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
+
             if estimated_tokens < min_tokens_required:
-                logging.warning(f"BASE context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
+                logging.info(f"BASE context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
                 return
-            
-            logging.warning(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
+
+            logging.info(f"Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens")
 
             # Create the cache using the Gemini API (BASE context only)
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
@@ -3732,7 +3725,7 @@ Undated Diary Entries (use cautiously, max 5):
             except Exception as _log_err:
                 logging.warning(f"Failed to log cache creation tokens: {_log_err}")
 
-            logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
+            logging.info(f"Successfully warmed up cache for user '{user_key}': {cached_content.name}")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
@@ -4680,6 +4673,25 @@ async def _execute_gemini_call_with_retry(
             if model_name and hasattr(response, 'usage_metadata') and response.usage_metadata:
                 log_token_usage(response, operation_label, account_id, aac_user_id,
                                 model_name=model_name, backend=backend)
+            elif model_name:
+                # usage_metadata absent or None — log a zero-token sentinel so the call
+                # is at least visible in the cost dashboard (helps diagnose missing entries).
+                import json as _jmod, sys as _smod
+                print(_jmod.dumps({
+                    "severity": "WARNING",
+                    "message": "GEMINI_COST_TRACK",
+                    "op": operation_label,
+                    "model": model_name,
+                    "backend": backend,
+                    "account": account_id,
+                    "user": aac_user_id,
+                    "in_tok": 0, "cache_tok": 0, "out_tok": 0, "total_tok": 0,
+                    "cost_usd": 0.0,
+                    "no_usage_metadata": True,
+                }), file=_smod.stdout, flush=True)
+                logging.warning(
+                    f"No usage_metadata for [{operation_label}] {account_id}/{aac_user_id}"
+                )
             return response
         except Exception as exc:
             is_retryable = _is_retryable_gemini_exception(exc)
@@ -4760,15 +4772,15 @@ async def _generate_gemini_content_with_caching(
                     f"Cached content call failed for {account_id}/{aac_user_id}, "
                     f"falling back to full prompt: {cache_error}"
                 )
-                return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+                return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
         else:
             if not cached_content_ref:
                 logging.info(f"No valid cache for {account_id}/{aac_user_id}, using full prompt")
-            return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+            return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
 
     except Exception as e:
         logging.error(f"Error in cached Gemini generation for {account_id}/{aac_user_id}: {e}")
-        return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
 
 # --- Helper function for Gemini LLM content generation with fallback ---
 
@@ -12554,7 +12566,7 @@ def _a7_extraction_input_gate(utterance: str) -> Optional[str]:
     return None
 
 
-async def _a7_extract_preference(utterance: str, question: str = "") -> Optional[Dict[str, Any]]:
+async def _a7_extract_preference(utterance: str, question: str = "", account_id: str = "unknown", aac_user_id: str = "unknown") -> Optional[Dict[str, Any]]:
     """A7 Layer 2 — model call. Isolated: no profile, history, or cached context."""
     config = types.GenerateContentConfig(
         temperature=0,
@@ -12577,6 +12589,8 @@ async def _a7_extract_preference(utterance: str, question: str = "") -> Optional
                 config=config,
             ),
             operation_label="gemini_preference_extraction",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
             model_name=_a7_model,
             backend="vertex_ai",
         )
@@ -12813,7 +12827,7 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
         if blocked:
             _a7_record_metric("gate.blocked", f'domain="{blocked}"')
             return
-        raw = await _a7_extract_preference(utterance, question=question)
+        raw = await _a7_extract_preference(utterance, question=question, account_id=account_id, aac_user_id=aac_user_id)
         proposal, reason = _a7_validate_extraction(raw)
         if proposal is None:
             _a7_record_metric("validation.rejected", f'reason="{reason}"')
